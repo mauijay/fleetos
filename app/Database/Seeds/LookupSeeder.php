@@ -78,6 +78,7 @@ class LookupSeeder extends Seeder
         $drivetrains = [
             ['code' => 'awd', 'name' => 'All-Wheel Drive', 'motor_count' => 2, 'sort_order' => 10],
             ['code' => 'fwd', 'name' => 'Front-Wheel Drive', 'motor_count' => 1, 'sort_order' => 20],
+            ['code' => 'rwd', 'name' => 'Rear-Wheel Drive', 'motor_count' => 1, 'sort_order' => 30],
         ];
 
         foreach ($drivetrains as $drivetrain) {

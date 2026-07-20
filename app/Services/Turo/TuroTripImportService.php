@@ -4,6 +4,7 @@ namespace App\Services\Turo;
 
 use App\DTOs\Turo\ImportResult;
 use App\DTOs\Turo\RawTripRow;
+use App\DTOs\Turo\RowImportResult;
 use App\DTOs\Turo\ValidationIssue;
 use App\Repositories\LookupRepository;
 use App\Repositories\TripMonthAllocationRepository;
@@ -38,7 +39,7 @@ class TuroTripImportService
         $this->db = $db ?? Database::connect();
     }
 
-    public function import(string $filePath, ?int $actorUserId = null): ImportResult
+    public function import(string $filePath, ?int $actorUserId = null, ?string $sourceFilename = null): ImportResult
     {
         $sourceHash = hash_file('sha256', $filePath);
 
@@ -50,14 +51,16 @@ class TuroTripImportService
             throw new RuntimeException('This CSV source hash has already been imported.');
         }
 
+        $sourceFilename ??= basename($filePath);
+
         $batchId = $this->batches->create([
             'import_type_lookup_value_id' => $this->lookups->valueId('import_type', 'turo_trips'),
             'import_status_lookup_value_id' => $this->lookups->valueId('import_status', 'processing'),
-            'source_filename' => basename($filePath),
+            'source_filename' => $sourceFilename,
             'source_hash' => $sourceHash,
             'created_by' => $actorUserId,
         ]);
-        $this->audit->imported($actorUserId, 'turo_import_batches', $batchId, ['source_filename' => basename($filePath), 'source_hash' => $sourceHash]);
+        $this->audit->imported($actorUserId, 'turo_import_batches', $batchId, ['source_filename' => $sourceFilename, 'source_hash' => $sourceHash]);
 
         $rowsRead = 0;
         $rawRowsCreated = 0;
@@ -100,49 +103,24 @@ class TuroTripImportService
                     $seenTripIds[$rawTripRow->externalTripId] = $csvRow->rowNumber;
                 }
 
-                $this->db->transStart();
-                $rawTripId = $this->rawTrips->create([
-                    'turo_import_batch_id' => $batchId,
-                    'external_trip_id' => $rawTripRow->externalTripId,
-                    'external_vehicle_id' => $rawTripRow->externalVehicleId,
-                    'row_number' => $rawTripRow->rowNumber,
-                    'row_hash' => $rawTripRow->rowHash,
-                    'raw_payload' => $rawTripRow->payload,
-                ]);
+                $rawTripId = $this->createRawTrip($batchId, $rawTripRow);
                 $rawRowsCreated++;
 
-                $normalizedTrip = $this->normalizer->normalize($rawTripRow, $rawTripId);
-                $upsert = $this->normalizedTrips->upsert($normalizedTrip);
+                $rowResult = $this->persistNormalizedRow($rawTripRow, $rawTripId, $actorUserId);
                 $tripsNormalized++;
 
-                if ($normalizedTrip->fleetVehicleId === null) {
+                if (count($rowResult->issues) > 0) {
                     $errorCount++;
                     $this->recordIssue(
                         $batchId,
                         $csvRow->rowNumber,
-                        new ValidationIssue('vehicle_unmatched', 'Trip imported, but no fleet vehicle could be matched. Check the Vehicle ID, Turo Vehicle ID, or Fleet Code in this row against the fleet vehicle record.', 'external_vehicle_id', 'warning'),
+                        $rowResult->issues[0],
                         $csvRow->row,
                         'turo_trip_raw',
                         $rawTripId,
                     );
                 }
-
-                $tripAllocations = $this->allocationService->allocate($normalizedTrip);
-                $this->allocations->replaceForTrip($upsert['id'], $tripAllocations);
-                $allocationRowsCreated += count($tripAllocations);
-
-                if ($upsert['created']) {
-                    $this->audit->created($actorUserId, 'turo_trips_normalized', $upsert['id'], $upsert['new']);
-                } else {
-                    $this->audit->updated($actorUserId, 'turo_trips_normalized', $upsert['id'], $upsert['old'], $upsert['new']);
-                }
-
-                $this->audit->imported($actorUserId, 'trip_month_allocations', $upsert['id'], ['allocation_count' => count($tripAllocations)]);
-                $this->db->transComplete();
-
-                if ($this->db->transStatus() === false) {
-                    throw new RuntimeException("Database transaction failed for CSV row {$csvRow->rowNumber}.");
-                }
+                $allocationRowsCreated += $rowResult->allocationCount;
             }
 
             $this->batches->update($batchId, [
@@ -165,6 +143,25 @@ class TuroTripImportService
         return new ImportResult($batchId, $rowsRead, $rawRowsCreated, $tripsNormalized, $allocationRowsCreated, $errorCount);
     }
 
+    public function importStoredRow(int $batchId, int $rowNumber, array $row, ?int $rawTripId = null, ?int $actorUserId = null): RowImportResult
+    {
+        $issues = $this->validator->validate($row);
+        $hasErrors = false;
+
+        foreach ($issues as $issue) {
+            $hasErrors = $hasErrors || $issue->severity === 'error';
+        }
+
+        if ($hasErrors) {
+            return new RowImportResult(false, issues: $issues);
+        }
+
+        $rawTripRow = $this->rawTripRow($rowNumber, $row);
+        $rawTripId ??= $this->createRawTrip($batchId, $rawTripRow);
+
+        return $this->persistNormalizedRow($rawTripRow, $rawTripId, $actorUserId);
+    }
+
     private function rawTripRow(int $rowNumber, array $row): RawTripRow
     {
         return new RawTripRow(
@@ -174,6 +171,48 @@ class TuroTripImportService
             externalVehicleId: $this->normalizer->value($row, ['vehicle_id', 'turo_vehicle_id', 'car_id']),
             rowHash: hash('sha256', json_encode($row, JSON_THROW_ON_ERROR)),
         );
+    }
+
+    private function createRawTrip(int $batchId, RawTripRow $rawTripRow): int
+    {
+        return $this->rawTrips->create([
+            'turo_import_batch_id' => $batchId,
+            'external_trip_id' => $rawTripRow->externalTripId,
+            'external_vehicle_id' => $rawTripRow->externalVehicleId,
+            'row_number' => $rawTripRow->rowNumber,
+            'row_hash' => $rawTripRow->rowHash,
+            'raw_payload' => $rawTripRow->payload,
+        ]);
+    }
+
+    private function persistNormalizedRow(RawTripRow $rawTripRow, int $rawTripId, ?int $actorUserId = null): RowImportResult
+    {
+        $this->db->transStart();
+
+        $normalizedTrip = $this->normalizer->normalize($rawTripRow, $rawTripId);
+        $upsert = $this->normalizedTrips->upsert($normalizedTrip);
+        $tripAllocations = $this->allocationService->allocate($normalizedTrip);
+        $this->allocations->replaceForTrip($upsert['id'], $tripAllocations);
+
+        if ($upsert['created']) {
+            $this->audit->created($actorUserId, 'turo_trips_normalized', $upsert['id'], $upsert['new']);
+        } else {
+            $this->audit->updated($actorUserId, 'turo_trips_normalized', $upsert['id'], $upsert['old'], $upsert['new']);
+        }
+
+        $this->audit->imported($actorUserId, 'trip_month_allocations', $upsert['id'], ['allocation_count' => count($tripAllocations)]);
+        $this->db->transComplete();
+
+        if ($this->db->transStatus() === false) {
+            throw new RuntimeException("Database transaction failed for CSV row {$rawTripRow->rowNumber}.");
+        }
+
+        $issues = [];
+        if ($normalizedTrip->fleetVehicleId === null) {
+            $issues[] = new ValidationIssue('vehicle_unmatched', 'Trip imported, but no fleet vehicle could be matched. Check the Vehicle ID, Turo Vehicle ID, or Fleet Code in this row against the fleet vehicle record.', 'external_vehicle_id', 'warning');
+        }
+
+        return new RowImportResult(true, (int) $upsert['id'], (bool) $upsert['created'], count($tripAllocations), $issues);
     }
 
     private function recordIssue(int $batchId, int $rowNumber, ValidationIssue $issue, array $row, ?string $rawTable = null, ?int $rawRowId = null): void

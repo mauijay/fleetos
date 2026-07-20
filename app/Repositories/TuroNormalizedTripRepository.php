@@ -60,4 +60,16 @@ class TuroNormalizedTripRepository
 
         return ['id' => (int) $existing['id'], 'created' => false, 'old' => $existing, 'new' => $data];
     }
+
+    /** @return array<string, mixed>|null */
+    public function findByTuroTripId(string $turoTripId): ?array
+    {
+        $row = $this->db->table('turo_trips_normalized')
+            ->where('turo_trip_id', $turoTripId)
+            ->where('deleted_at', null)
+            ->get()
+            ->getRowArray();
+
+        return $row === null ? null : $row;
+    }
 }

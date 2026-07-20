@@ -2,6 +2,7 @@
 
 use App\Repositories\FleetIntelligenceRepository;
 use App\Services\Fleet\DecisionSupport\DecisionSupportDashboardService;
+use App\Services\Fleet\DailyOperationsDashboardService;
 use App\Services\Fleet\FleetCommandCenterViewModelService;
 use App\Services\Fleet\FleetCommandService;
 use App\Services\Fleet\FleetHealthService;
@@ -10,6 +11,9 @@ use App\Services\Fleet\RevenueService;
 use App\Services\Fleet\TaskService;
 use App\Services\Fleet\TripAnalyticsService;
 use App\Services\Fleet\VehicleAvailabilityService;
+use App\Services\Turo\TuroImportIssueService;
+use App\Services\Turo\TuroTripReconciliationService;
+use App\Services\Turo\TuroVehicleMappingService;
 use CodeIgniter\Test\CIUnitTestCase;
 use PHPUnit\Framework\MockObject\MockObject;
 
@@ -315,6 +319,10 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
         $availability = $this->getMockBuilder(VehicleAvailabilityService::class)->disableOriginalConstructor()->onlyMethods(['timeline'])->getMock();
         $analytics = $this->getMockBuilder(TripAnalyticsService::class)->disableOriginalConstructor()->onlyMethods(['summary'])->getMock();
         $decisionSupport = $this->getMockBuilder(DecisionSupportDashboardService::class)->disableOriginalConstructor()->onlyMethods(['recommendations'])->getMock();
+        $importIssues = $this->getMockBuilder(TuroImportIssueService::class)->disableOriginalConstructor()->onlyMethods(['attentionSummary'])->getMock();
+        $vehicleMappings = $this->getMockBuilder(TuroVehicleMappingService::class)->disableOriginalConstructor()->onlyMethods(['attentionSummary'])->getMock();
+        $tripReconciliation = $this->getMockBuilder(TuroTripReconciliationService::class)->disableOriginalConstructor()->onlyMethods(['attentionSummary'])->getMock();
+        $dailyOperations = $this->getMockBuilder(DailyOperationsDashboardService::class)->disableOriginalConstructor()->onlyMethods(['forToday'])->getMock();
 
         $command->method('snapshot')->willReturn([
             'as_of' => '2026-06-15 08:00:00',
@@ -356,8 +364,27 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
             'guest_risk' => [],
             'business_insights' => [],
         ]);
+        $importIssues->method('attentionSummary')->willReturn([
+            'unresolved_errors' => 0,
+            'unresolved_warnings' => 0,
+            'total_unresolved' => 0,
+            'has_unresolved' => false,
+            'href' => '/turo/import-issues',
+        ]);
+        $vehicleMappings->method('attentionSummary')->willReturn([
+            'unique_unmatched_vehicles' => 0,
+            'affected_issues' => 0,
+            'has_unmatched' => false,
+            'href' => '/turo/vehicle-matches',
+        ]);
+        $tripReconciliation->method('attentionSummary')->willReturn([
+            'awaiting_reconciliation' => 0,
+            'has_reconciliation_work' => false,
+            'href' => '/turo/vehicle-matches',
+        ]);
+        $dailyOperations->method('forToday')->willReturn($this->dailyOperations());
 
-        $viewModel = (new FleetCommandCenterViewModelService($command, $statistics, $health, $tasks, $availability, $analytics, $decisionSupport))
+        $viewModel = (new FleetCommandCenterViewModelService($command, $statistics, $health, $tasks, $availability, $analytics, $decisionSupport, $importIssues, $vehicleMappings, $tripReconciliation, $dailyOperations))
             ->forToday(new DateTimeImmutable('2026-06-15 08:00:00'));
 
         $this->assertSame('Fleet Command Center', $viewModel['page_title']);
@@ -371,8 +398,73 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
         $this->assertSame('Reserved', $viewModel['activity']['traffic_status']);
         $this->assertSame('Reserved', $viewModel['activity']['battery_status']);
         $this->assertSame('Pricing rec', $viewModel['decision_support']['todays_recommendations'][0]['title']);
+        $this->assertFalse($viewModel['import_issues']['has_unresolved']);
+        $this->assertFalse($viewModel['vehicle_mappings']['has_unmatched']);
+        $this->assertFalse($viewModel['trip_reconciliation']['has_reconciliation_work']);
+        $this->assertSame('Good Morning, Jay.', $viewModel['daily_operations']['briefing']['greeting']);
         $this->assertSame([], $viewModel['health_alerts']);
         $this->assertSame('Reserved', $viewModel['future_integrations'][0]['status']);
+    }
+
+    public function testFleetCommandCenterViewModelIncludesImportIssueAlertCounts(): void
+    {
+        $command = $this->getMockBuilder(FleetCommandService::class)->disableOriginalConstructor()->onlyMethods(['snapshot'])->getMock();
+        $statistics = $this->getMockBuilder(FleetStatisticsService::class)->disableOriginalConstructor()->onlyMethods(['summary', 'vehiclePerformance'])->getMock();
+        $health = $this->getMockBuilder(FleetHealthService::class)->disableOriginalConstructor()->onlyMethods(['summary'])->getMock();
+        $tasks = $this->getMockBuilder(TaskService::class)->disableOriginalConstructor()->onlyMethods(['today', 'tomorrow'])->getMock();
+        $availability = $this->getMockBuilder(VehicleAvailabilityService::class)->disableOriginalConstructor()->onlyMethods(['timeline'])->getMock();
+        $analytics = $this->getMockBuilder(TripAnalyticsService::class)->disableOriginalConstructor()->onlyMethods(['summary'])->getMock();
+        $decisionSupport = $this->getMockBuilder(DecisionSupportDashboardService::class)->disableOriginalConstructor()->onlyMethods(['recommendations'])->getMock();
+        $importIssues = $this->getMockBuilder(TuroImportIssueService::class)->disableOriginalConstructor()->onlyMethods(['attentionSummary'])->getMock();
+        $vehicleMappings = $this->getMockBuilder(TuroVehicleMappingService::class)->disableOriginalConstructor()->onlyMethods(['attentionSummary'])->getMock();
+        $tripReconciliation = $this->getMockBuilder(TuroTripReconciliationService::class)->disableOriginalConstructor()->onlyMethods(['attentionSummary'])->getMock();
+        $dailyOperations = $this->getMockBuilder(DailyOperationsDashboardService::class)->disableOriginalConstructor()->onlyMethods(['forToday'])->getMock();
+
+        $command->method('snapshot')->willReturn([
+            'fleet_status' => ['available' => 1, 'reserved' => 0, 'in_progress' => 0, 'cleaning' => 0, 'maintenance' => 0, 'out_of_service' => 0],
+            'vehicle_statuses' => [],
+            'todays_timeline' => [],
+            'urgent_items' => ['claims' => [], 'maintenance_tasks' => [], 'registration_renewals' => [], 'insurance_renewals' => [], 'battery_alerts' => []],
+            'weather_alerts' => [],
+            'traffic_alerts' => [],
+        ]);
+        $statistics->method('summary')->willReturn($this->statisticsSummary());
+        $statistics->method('vehiclePerformance')->willReturn([]);
+        $health->method('summary')->willReturn($this->healthSummary());
+        $tasks->method('today')->willReturn($this->emptyTasks());
+        $tasks->method('tomorrow')->willReturn($this->emptyTasks());
+        $availability->method('timeline')->willReturn([]);
+        $analytics->method('summary')->willReturn(['average_trip_length' => 0, 'utilization' => 0]);
+        $decisionSupport->method('recommendations')->willReturn(['todays_recommendations' => []]);
+        $importIssues->method('attentionSummary')->willReturn([
+            'unresolved_errors' => 2,
+            'unresolved_warnings' => 3,
+            'total_unresolved' => 5,
+            'has_unresolved' => true,
+            'href' => '/turo/import-issues',
+        ]);
+        $vehicleMappings->method('attentionSummary')->willReturn([
+            'unique_unmatched_vehicles' => 1,
+            'affected_issues' => 4,
+            'has_unmatched' => true,
+            'href' => '/turo/vehicle-matches',
+        ]);
+        $tripReconciliation->method('attentionSummary')->willReturn([
+            'awaiting_reconciliation' => 4,
+            'has_reconciliation_work' => true,
+            'href' => '/turo/vehicle-matches',
+        ]);
+        $dailyOperations->method('forToday')->willReturn($this->dailyOperations());
+
+        $viewModel = (new FleetCommandCenterViewModelService($command, $statistics, $health, $tasks, $availability, $analytics, $decisionSupport, $importIssues, $vehicleMappings, $tripReconciliation, $dailyOperations))
+            ->forToday(new DateTimeImmutable('2026-06-15 08:00:00'));
+
+        $this->assertTrue($viewModel['import_issues']['has_unresolved']);
+        $this->assertSame(2, $viewModel['import_issues']['unresolved_errors']);
+        $this->assertSame(3, $viewModel['import_issues']['unresolved_warnings']);
+        $this->assertTrue($viewModel['vehicle_mappings']['has_unmatched']);
+        $this->assertSame(1, $viewModel['vehicle_mappings']['unique_unmatched_vehicles']);
+        $this->assertTrue($viewModel['trip_reconciliation']['has_reconciliation_work']);
     }
 
     /** @param array<int, string> $methods */
@@ -382,6 +474,21 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
             ->disableOriginalConstructor()
             ->onlyMethods($methods)
             ->getMock();
+    }
+
+    /** @return array<string, mixed> */
+    private function dailyOperations(): array
+    {
+        return [
+            'briefing' => ['greeting' => 'Good Morning, Jay.', 'message' => 'No urgent issues.'],
+            'movement_board' => [],
+            'timeline' => [],
+            'attention' => [],
+            'fleet_status' => [],
+            'operational_queue' => [],
+            'financial' => [],
+            'data_honesty' => [],
+        ];
     }
 
     /** @return array<string, mixed> */

@@ -3,6 +3,14 @@
 namespace Config;
 
 use App\Repositories\FleetIntelligenceRepository;
+use App\Repositories\AirportMovementRepository;
+use App\Repositories\FileRepository;
+use App\Repositories\MovementChecklistRepository;
+use App\Repositories\TuroAccessReimbursementRepository;
+use App\Repositories\TuroImportErrorRepository;
+use App\Repositories\TuroNormalizedTripRepository;
+use App\Repositories\TuroVehicleMappingIssueRepository;
+use App\Repositories\VehicleTuroListingRepository;
 use App\Services\Fleet\DecisionSupport\BusinessInsightService;
 use App\Services\Fleet\DecisionSupport\DecisionSupportDashboardService;
 use App\Services\Fleet\DecisionSupport\FleetOptimizationService;
@@ -11,14 +19,23 @@ use App\Services\Fleet\DecisionSupport\MaintenancePredictionService;
 use App\Services\Fleet\DecisionSupport\PricingRecommendationService;
 use App\Services\Fleet\DecisionSupport\RecommendationFactory;
 use App\Services\Fleet\DecisionSupport\RevenueForecastService;
+use App\Services\Fleet\AirportMovementWorkflowService;
+use App\Services\Fleet\DailyOperationsDashboardService;
 use App\Services\Fleet\FleetCommandCenterViewModelService;
 use App\Services\Fleet\FleetCommandService;
 use App\Services\Fleet\FleetHealthService;
 use App\Services\Fleet\FleetStatisticsService;
+use App\Services\Fleet\TripMovementChecklistService;
+use App\Services\Fleet\TuroAccessReimbursementService;
 use App\Services\Fleet\RevenueService;
 use App\Services\Fleet\TaskService;
 use App\Services\Fleet\TripAnalyticsService;
 use App\Services\Fleet\VehicleAvailabilityService;
+use App\Services\Files\PrivateFileStorageService;
+use App\Services\Turo\TuroImportIssueService;
+use App\Services\Turo\TuroTripImportService;
+use App\Services\Turo\TuroTripReconciliationService;
+use App\Services\Turo\TuroVehicleMappingService;
 use App\Services\View\AssetManifestService;
 use CodeIgniter\Config\BaseService;
 use Config\DecisionSupport;
@@ -45,6 +62,155 @@ class Services extends BaseService
         }
 
         return new FleetIntelligenceRepository();
+    }
+
+    public static function turoImportErrorRepository(bool $getShared = true): TuroImportErrorRepository
+    {
+        if ($getShared) {
+            return static::getSharedInstance('turoImportErrorRepository');
+        }
+
+        return new TuroImportErrorRepository();
+    }
+
+    public static function movementChecklistRepository(bool $getShared = true): MovementChecklistRepository
+    {
+        if ($getShared) {
+            return static::getSharedInstance('movementChecklistRepository');
+        }
+
+        return new MovementChecklistRepository();
+    }
+
+    public static function fileRepository(bool $getShared = true): FileRepository
+    {
+        if ($getShared) {
+            return static::getSharedInstance('fileRepository');
+        }
+
+        return new FileRepository();
+    }
+
+    public static function privateFileStorageService(bool $getShared = true): PrivateFileStorageService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('privateFileStorageService');
+        }
+
+        return new PrivateFileStorageService(static::fileRepository());
+    }
+
+    public static function airportMovementRepository(bool $getShared = true): AirportMovementRepository
+    {
+        if ($getShared) {
+            return static::getSharedInstance('airportMovementRepository');
+        }
+
+        return new AirportMovementRepository();
+    }
+
+    public static function turoAccessReimbursementRepository(bool $getShared = true): TuroAccessReimbursementRepository
+    {
+        if ($getShared) {
+            return static::getSharedInstance('turoAccessReimbursementRepository');
+        }
+
+        return new TuroAccessReimbursementRepository();
+    }
+
+    public static function tripMovementChecklistService(bool $getShared = true): TripMovementChecklistService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('tripMovementChecklistService');
+        }
+
+        return new TripMovementChecklistService(static::movementChecklistRepository());
+    }
+
+    public static function airportMovementWorkflowService(bool $getShared = true): AirportMovementWorkflowService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('airportMovementWorkflowService');
+        }
+
+        return new AirportMovementWorkflowService(static::airportMovementRepository(), static::tripMovementChecklistService());
+    }
+
+    public static function turoAccessReimbursementService(bool $getShared = true): TuroAccessReimbursementService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('turoAccessReimbursementService');
+        }
+
+        return new TuroAccessReimbursementService(static::turoAccessReimbursementRepository(), static::privateFileStorageService());
+    }
+
+    public static function turoNormalizedTripRepository(bool $getShared = true): TuroNormalizedTripRepository
+    {
+        if ($getShared) {
+            return static::getSharedInstance('turoNormalizedTripRepository');
+        }
+
+        return new TuroNormalizedTripRepository();
+    }
+
+    public static function vehicleTuroListingRepository(bool $getShared = true): VehicleTuroListingRepository
+    {
+        if ($getShared) {
+            return static::getSharedInstance('vehicleTuroListingRepository');
+        }
+
+        return new VehicleTuroListingRepository();
+    }
+
+    public static function turoVehicleMappingIssueRepository(bool $getShared = true): TuroVehicleMappingIssueRepository
+    {
+        if ($getShared) {
+            return static::getSharedInstance('turoVehicleMappingIssueRepository');
+        }
+
+        return new TuroVehicleMappingIssueRepository();
+    }
+
+    public static function turoImportIssueService(bool $getShared = true): TuroImportIssueService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('turoImportIssueService');
+        }
+
+        return new TuroImportIssueService(static::turoImportErrorRepository(), static::vehicleTuroListingRepository());
+    }
+
+    public static function turoVehicleMappingService(bool $getShared = true): TuroVehicleMappingService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('turoVehicleMappingService');
+        }
+
+        return new TuroVehicleMappingService(static::vehicleTuroListingRepository(), static::turoVehicleMappingIssueRepository());
+    }
+
+    public static function turoTripImportService(bool $getShared = true): TuroTripImportService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('turoTripImportService');
+        }
+
+        return new TuroTripImportService();
+    }
+
+    public static function turoTripReconciliationService(bool $getShared = true): TuroTripReconciliationService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('turoTripReconciliationService');
+        }
+
+        return new TuroTripReconciliationService(
+            static::turoVehicleMappingIssueRepository(),
+            static::turoImportErrorRepository(),
+            static::turoNormalizedTripRepository(),
+            static::turoTripImportService(),
+        );
     }
 
     public static function revenueService(bool $getShared = true): RevenueService
@@ -129,6 +295,31 @@ class Services extends BaseService
             static::vehicleAvailabilityService(),
             static::tripAnalyticsService(),
             static::decisionSupportDashboardService(),
+            static::turoImportIssueService(),
+            static::turoVehicleMappingService(),
+            static::turoTripReconciliationService(),
+            static::dailyOperationsDashboardService(),
+        );
+    }
+
+    public static function dailyOperationsDashboardService(bool $getShared = true): DailyOperationsDashboardService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('dailyOperationsDashboardService');
+        }
+
+        return new DailyOperationsDashboardService(
+            static::taskService(),
+            static::vehicleAvailabilityService(),
+            static::fleetHealthService(),
+            static::fleetStatisticsService(),
+            static::revenueService(),
+            static::turoImportIssueService(),
+            static::turoVehicleMappingService(),
+            static::turoTripReconciliationService(),
+            static::tripMovementChecklistService(),
+            static::airportMovementWorkflowService(),
+            static::turoAccessReimbursementService(),
         );
     }
 

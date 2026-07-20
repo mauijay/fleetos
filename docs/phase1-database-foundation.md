@@ -23,6 +23,8 @@ Fleet core tables:
 - `fleet_vehicles`: individual fleet units linked to company, spec, trim, drivetrain, and status.
 - `fleet_vehicle_features`: vehicle-level feature assignments such as FSD and one-year free Supercharging.
 - `vehicle_turo_listings`: Turo listing metadata per fleet vehicle.
+- `vehicle_turo_listing_audits`: audit trail for explicit Turo vehicle mapping and remapping actions.
+- `turo_import_reprocess_attempts`: audit trail for historical import issue reconciliation attempts.
 - `lenders`, `loans`, `insurance_policies`, `registrations`: ownership, financing, insurance, and compliance records.
 - `startup_costs`, `maintenance_logs`, `damage_claims`, `charging_sessions`, `airports`, `airport_deliveries`: operations and cost tracking.
 - `turo_import_batches`, `turo_trip_raw`, `turo_transaction_raw`, `turo_trips_normalized`, `trip_month_allocations`: import, normalization, and reporting foundation.

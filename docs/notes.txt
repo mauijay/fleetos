@@ -1,0 +1,106 @@
+Repository
+fleetos
+
+Internal Project
+FleetOS
+
+Platform/Core
+FleetOS Core
+
+Public Product
+Orbit
+
+Company
+808biz, Inc.
+
+Marketing Site
+go808.com
+
+Application
+orbit.go808.com
+
+I especially like...
+orbit.go808.com
+
+That immediately tells me:
+
+go808.com
+
+is the company website.
+
+orbit.go808.com
+
+is the application.
+
+Later you could have
+
+admin.go808.com
+
+status.go808.com
+
+docs.go808.com
+
+api.go808.com
+
+demo.go808.com
+
+That's a very professional SaaS structure.
+
+Your public branding should stay incredibly simple.
+
+Orbit
+
+Even the logo...
+
+I'm already picturing it.
+
+Not a Tesla.
+
+Not a car.
+
+Not a spaceship.
+
+A very simple geometric orbit.
+
+Something like
+
+○
+ ╲
+  ●
+
+Minimal.
+
+Modern.
+
+Looks good at:
+
+16px
+
+32px
+
+64px
+
+Favicon
+
+Mobile App
+
+GitHub
+
+Dark Mode
+
+Light Mode
+
+Very recognizable.
+
+Then the public website
+go808.com
+
+Fleet Software
+
+Introducing
+
+Orbit
+
+The Fleet Operating Platform
+
+That feels like a product launch.

@@ -24,6 +24,7 @@ class FleetVehicleSeeder extends Seeder
         $blackColorId = $this->firstOrCreate('vehicle_colors', ['code' => 'black'], ['name' => 'Black', 'hex_color' => '#000000']);
         $whiteColorId = $this->firstOrCreate('vehicle_colors', ['code' => 'white'], ['name' => 'White', 'hex_color' => '#FFFFFF']);
         $grayColorId = $this->firstOrCreate('vehicle_colors', ['code' => 'gray'], ['name' => 'Gray', 'hex_color' => '#808080']);
+        $silverColorId = $this->firstOrCreate('vehicle_colors', ['code' => 'silver'], ['name' => 'Silver', 'hex_color' => '#C0C0C0']);
         $fsdFeatureId = $this->firstOrCreate('vehicle_features', ['code' => 'fsd'], ['name' => 'Full Self-Driving']);
         $freeSuperchargingFeatureId = $this->firstOrCreate('vehicle_features', ['code' => 'free_supercharging_1_year'], [
             'name' => '1-Year Free Supercharging',
@@ -31,8 +32,8 @@ class FleetVehicleSeeder extends Seeder
 
         $vehicles = [
             [
-                'fleet_code' => 'Spaceship-002',
-                'display_name' => 'Spaceship-002',
+                'fleet_code' => 'Spaceship02',
+                'display_name' => 'Spaceship02',
                 'model_year' => 2021,
                 'vehicle_model_id' => $model3Id,
                 'vehicle_body_style_id' => $sedanBodyStyleId,
@@ -44,8 +45,8 @@ class FleetVehicleSeeder extends Seeder
                 'features' => [],
             ],
             [
-                'fleet_code' => 'Spaceship-003',
-                'display_name' => 'Spaceship-003',
+                'fleet_code' => 'Spaceship03',
+                'display_name' => 'Spaceship03',
                 'model_year' => 2026,
                 'vehicle_model_id' => $modelYId,
                 'vehicle_body_style_id' => $suvBodyStyleId,
@@ -57,8 +58,8 @@ class FleetVehicleSeeder extends Seeder
                 'features' => [$fsdFeatureId],
             ],
             [
-                'fleet_code' => 'Spaceship-004',
-                'display_name' => 'Spaceship-004',
+                'fleet_code' => 'Spaceship04',
+                'display_name' => 'Spaceship04',
                 'model_year' => 2026,
                 'vehicle_model_id' => $modelYId,
                 'vehicle_body_style_id' => $suvBodyStyleId,
@@ -70,8 +71,8 @@ class FleetVehicleSeeder extends Seeder
                 'features' => [],
             ],
             [
-                'fleet_code' => 'Spaceship-005',
-                'display_name' => 'Spaceship-005',
+                'fleet_code' => 'Spaceship05',
+                'display_name' => 'Spaceship05',
                 'model_year' => 2026,
                 'vehicle_model_id' => $modelYId,
                 'vehicle_body_style_id' => $suvBodyStyleId,
@@ -83,8 +84,8 @@ class FleetVehicleSeeder extends Seeder
                 'features' => [$fsdFeatureId],
             ],
             [
-                'fleet_code' => 'Spaceship-006',
-                'display_name' => 'Spaceship-006',
+                'fleet_code' => 'Spaceship06',
+                'display_name' => 'Spaceship06',
                 'model_year' => 2026,
                 'vehicle_model_id' => $modelYId,
                 'vehicle_body_style_id' => $suvBodyStyleId,
@@ -96,8 +97,8 @@ class FleetVehicleSeeder extends Seeder
                 'features' => [],
             ],
             [
-                'fleet_code' => 'Spaceship-007',
-                'display_name' => 'Spaceship-007',
+                'fleet_code' => 'Spaceship07',
+                'display_name' => 'Spaceship07',
                 'model_year' => 2026,
                 'vehicle_model_id' => $model3Id,
                 'vehicle_body_style_id' => $sedanBodyStyleId,
@@ -109,8 +110,8 @@ class FleetVehicleSeeder extends Seeder
                 'features' => [$fsdFeatureId, $freeSuperchargingFeatureId],
             ],
             [
-                'fleet_code' => 'Spaceship-008',
-                'display_name' => 'Spaceship-008',
+                'fleet_code' => 'Spaceship08',
+                'display_name' => 'Spaceship08',
                 'model_year' => 2026,
                 'vehicle_model_id' => $modelYId,
                 'vehicle_body_style_id' => $suvBodyStyleId,
@@ -122,8 +123,8 @@ class FleetVehicleSeeder extends Seeder
                 'features' => [$fsdFeatureId],
             ],
             [
-                'fleet_code' => 'Spaceship-009',
-                'display_name' => 'Spaceship-009',
+                'fleet_code' => 'Spaceship09',
+                'display_name' => 'Spaceship09',
                 'model_year' => 2026,
                 'vehicle_model_id' => $modelYId,
                 'vehicle_body_style_id' => $suvBodyStyleId,
@@ -133,6 +134,19 @@ class FleetVehicleSeeder extends Seeder
                 'interior_vehicle_color_id' => $blackColorId,
                 'battery_description' => '',
                 'features' => [$fsdFeatureId],
+            ],
+            [
+                'fleet_code' => 'Spaceship10',
+                'display_name' => 'Spaceship10',
+                'model_year' => 2025,
+                'vehicle_model_id' => $model3Id,
+                'vehicle_body_style_id' => $sedanBodyStyleId,
+                'trim' => 'long_range',
+                'drivetrain' => 'rwd',
+                'exterior_vehicle_color_id' => $silverColorId,
+                'interior_vehicle_color_id' => $blackColorId,
+                'battery_description' => 'Long Range',
+                'features' => [],
             ],
         ];
 

@@ -45,6 +45,9 @@ a {
 
 a:focus-visible,
 button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
 summary:focus-visible,
 [tabindex]:focus-visible {
   outline: 2px solid var(--info);
@@ -72,6 +75,10 @@ summary:focus-visible,
   display: grid;
   grid-template-columns: 252px minmax(0, 1fr) 300px;
   min-height: 100vh;
+}
+
+.import-frame {
+  grid-template-columns: 252px minmax(0, 1fr);
 }
 
 .side-nav,
@@ -169,6 +176,13 @@ summary:focus-visible,
   box-shadow: var(--shadow);
 }
 
+.import-attention {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
 .top-status {
   display: flex;
   align-items: center;
@@ -263,7 +277,10 @@ h3 {
 .financial-grid,
 .timeline-layout,
 .recommendation-grid,
-.integration-grid {
+.integration-grid,
+.movement-board-grid,
+.operational-action-grid,
+.daily-timeline-list {
   display: grid;
   gap: 12px;
 }
@@ -289,6 +306,14 @@ h3 {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.movement-board-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.operational-action-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .timeline-layout {
   grid-template-columns: minmax(280px, 1.2fr) minmax(260px, 0.9fr) minmax(
       300px,
@@ -305,6 +330,8 @@ h3 {
 .metric-card,
 .task-card,
 .vehicle-card,
+.movement-card,
+.timeline-event,
 .timeline-card,
 .recommendation-card,
 .financial-card,
@@ -317,6 +344,8 @@ h3 {
 
 .metric-card,
 .task-card,
+.movement-card,
+.timeline-event,
 .timeline-card,
 .recommendation-card,
 .financial-card,
@@ -327,6 +356,47 @@ h3 {
 
 .metric-card {
   min-height: 116px;
+}
+
+.briefing-card {
+  border-color: rgba(56, 189, 248, 0.34);
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.12), var(--surface));
+}
+
+.briefing-copy {
+  max-width: 920px;
+  margin: 10px 0 0;
+  color: var(--text);
+  font-size: 20px;
+  line-height: 1.45;
+}
+
+.movement-card h3 {
+  font-size: 22px;
+}
+
+.movement-card .status-badge {
+  max-width: 190px;
+  text-align: right;
+}
+
+.timeline-event {
+  display: grid;
+  gap: 4px;
+}
+
+.timeline-event strong {
+  font-size: 15px;
+}
+
+.timeline-event p,
+.timeline-event small {
+  margin: 0;
+  color: var(--muted);
+}
+
+.compact-financial-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .metric-card strong,
@@ -535,10 +605,318 @@ h3 {
 }
 
 .text-link,
-.mission-clear {
+.mission-clear,
+.action-link {
   color: var(--success);
   font-size: 13px;
   font-weight: 750;
+}
+
+.import-main {
+  max-width: 1180px;
+}
+
+.import-message strong {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.import-message p {
+  margin-bottom: 0;
+  color: var(--muted);
+}
+
+.import-result-grid,
+.import-notes,
+.issue-review-list,
+.mapping-list,
+.issue-filters,
+.issue-facts,
+.issue-detail-grid,
+.raw-value-list,
+.resolution-form {
+  display: grid;
+  gap: 12px;
+}
+
+.import-result-grid {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin-top: 14px;
+}
+
+.import-result-grid div,
+.import-notes div,
+.file-drop {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.import-result-grid div {
+  padding: 12px;
+}
+
+.import-result-grid span,
+.import-notes p,
+.file-drop input {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.import-result-grid b {
+  display: block;
+  margin-top: 4px;
+  font-size: 24px;
+}
+
+.upload-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+}
+
+.file-drop {
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+}
+
+.file-drop span {
+  font-size: 15px;
+  font-weight: 750;
+}
+
+.primary-action {
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--success);
+  color: #04110d;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 850;
+  padding: 0 22px;
+}
+
+.secondary-action {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 750;
+  min-height: 42px;
+  padding: 0 16px;
+}
+
+.button-link {
+  display: inline-grid;
+  min-height: 42px;
+  place-items: center;
+  text-align: center;
+}
+
+.import-notes {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 16px;
+}
+
+.import-notes div {
+  padding: 14px;
+}
+
+.import-notes p {
+  margin: 8px 0 0;
+}
+
+.issue-filters {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.issue-filters label,
+.resolution-form label {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.issue-filters input,
+.issue-filters select,
+.issue-filters textarea,
+.resolution-form textarea {
+  width: 100%;
+  margin-top: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  min-height: 42px;
+  padding: 9px 10px;
+}
+
+.issue-review-card,
+.mapping-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  padding: 14px;
+}
+
+.receipt-match-layout {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.9fr) minmax(420px, 1.4fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.receipt-panel,
+.candidate-panel {
+  min-width: 0;
+}
+
+.receipt-preview {
+  margin: 14px 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  overflow: hidden;
+  aspect-ratio: 4 / 5;
+}
+
+.receipt-preview iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.classification-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.issue-review-main,
+.mapping-card-main {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.2fr);
+  gap: 16px;
+}
+
+.issue-review-card h3,
+.mapping-card h3 {
+  margin-top: 12px;
+}
+
+.issue-review-card p,
+.issue-details p,
+.mapping-card p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.issue-facts {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.issue-facts div,
+.raw-value-list div {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 8px;
+}
+
+.issue-facts dt,
+.raw-value-list dt {
+  color: var(--subtle);
+  font-size: 11px;
+}
+
+.issue-facts dd,
+.raw-value-list dd {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.issue-details {
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.issue-details summary {
+  cursor: pointer;
+  color: var(--success);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.issue-detail-grid {
+  grid-template-columns: 1fr 1fr;
+  margin-top: 12px;
+}
+
+.raw-value-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 10px 0 0;
+}
+
+.resolution-form {
+  margin-top: 10px;
+}
+
+.resolution-form .primary-action,
+.issue-filters .primary-action {
+  min-height: 42px;
+}
+
+.checkbox-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+}
+
+.checkbox-row input {
+  margin-top: 3px;
+}
+
+.pagination-row {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 16px;
+}
+
+.movement-checklist-list {
+  display: grid;
+  gap: 12px;
+}
+
+.movement-checklist-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  padding: 14px;
+}
+
+.movement-checklist-item p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.checklist-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .tone-success {
@@ -586,6 +964,9 @@ h3 {
   .status-grid,
   .mission-grid,
   .recommendation-grid,
+  .movement-board-grid,
+  .operational-action-grid,
+  .import-result-grid,
   .financial-grid,
   .kpi-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -593,6 +974,10 @@ h3 {
 
   .vehicle-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .receipt-match-layout {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -656,7 +1041,8 @@ h3 {
   }
 
   .top-status,
-  .split-heading {
+  .split-heading,
+  .import-attention {
     align-items: flex-start;
     flex-direction: column;
   }
@@ -664,11 +1050,36 @@ h3 {
   .status-grid,
   .mission-grid,
   .recommendation-grid,
+  .movement-board-grid,
+  .operational-action-grid,
+  .compact-financial-grid,
+  .import-result-grid,
+  .issue-filters,
+  .issue-facts,
+  .issue-detail-grid,
   .financial-grid,
   .kpi-grid,
   .vehicle-grid,
-  .integration-grid {
+  .integration-grid,
+  .import-notes {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .upload-form {
+    grid-template-columns: 1fr;
+  }
+
+  .primary-action {
+    min-height: 48px;
+  }
+
+  .movement-checklist-item {
+    grid-template-columns: 1fr;
+  }
+
+  .issue-review-main,
+  .mapping-card-main {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -677,15 +1088,28 @@ h3 {
   .status-grid,
   .mission-grid,
   .recommendation-grid,
+  .movement-board-grid,
+  .operational-action-grid,
+  .compact-financial-grid,
+  .import-result-grid,
+  .issue-filters,
+  .issue-facts,
+  .issue-detail-grid,
+  .raw-value-list,
   .financial-grid,
   .kpi-grid,
   .vehicle-grid,
-  .integration-grid {
+  .integration-grid,
+  .import-notes {
     grid-template-columns: 1fr;
   }
 
   .vehicle-card {
     grid-template-columns: 1fr;
+  }
+
+  .receipt-preview {
+    aspect-ratio: 3 / 4;
   }
 
   .vehicle-photo {

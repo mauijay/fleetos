@@ -20,11 +20,13 @@ Implemented in this phase:
 - Row issue tracking through `turo_import_errors`.
 - Audit logging for import, create, update, and allocation activity.
 - Focused unit tests for validation, normalization, and allocation behavior.
+- Browser review workflow for import issues, including filters, source-row details, resolution notes, resolution timestamps, and reopen support.
+- Browser vehicle matching cleanup workflow for unresolved `vehicle_unmatched` warnings.
+- Safe reprocessing workflow for historical `vehicle_unmatched` rows after a Turo vehicle mapping is saved.
 
 Deferred to later Phase 2 increments:
 
 - Turo transaction CSV import.
-- UI review screens for batches and row issues.
 - Operator-driven import retry tools.
 - Full database integration fixtures for mixed valid and invalid files.
 
@@ -149,6 +151,48 @@ Vehicle matching is deterministic and ordered:
 
 The warning tells the operator to check Vehicle ID, Turo Vehicle ID, or Fleet Code against the fleet vehicle record.
 
+The authoritative external identifier for Turo vehicle matching is `turo_vehicle_id`. The cleanup queue groups unresolved `vehicle_unmatched` warnings by that value so the operator maps each Turo vehicle once instead of reviewing repeated row-level warnings.
+
+Saved mappings are stored in `vehicle_turo_listings` with `source_system = turo`. Future imports automatically use these mappings because `TuroVehicleMatcher` already checks active `vehicle_turo_listings.turo_vehicle_id` before falling back to fleet code.
+
+Conflict behavior:
+
+- A Turo vehicle already mapped to another FleetOS vehicle is blocked unless the operator explicitly confirms a remap.
+- A FleetOS vehicle with another active Turo mapping is blocked unless the operator explicitly confirms replacement.
+- Confirmed replacements preserve mapping history in `vehicle_turo_listing_audits`.
+- Invalid or deleted FleetOS vehicles are rejected.
+
+Suggestion behavior is deterministic and never automatic. Exact matches can come from license plate or VIN fragment. Strong matches can come from internal Spaceship number or exact display-name matches. Possible matches can come from a single year/make/model/trim match. Ambiguous spec matches are not treated as exact.
+
+Mapping and reconciliation are separate. A saved mapping fixes future imports, but it does not automatically close historical `vehicle_unmatched` issues. Historical rows must be previewed and reconciled through the reprocessing workflow.
+
+Reprocessing behavior:
+
+- Rows are scoped to one Turo vehicle ID at a time.
+- The stored `turo_import_errors.raw_payload` is treated as the source row.
+- `TuroTripImportService::importStoredRow()` is shared by normal CSV import and historical row reprocessing.
+- Validation, vehicle matching, normalization, normalized trip upsert, allocation replacement, and audit events remain in the importer path.
+- `turo_trips_normalized.turo_trip_id` remains the stable duplicate-protection key.
+- `trip_month_allocations` are replaced for the normalized trip, preventing duplicate revenue allocations.
+
+Eligibility classifications:
+
+- `ready`: row has enough source data, now maps to a FleetOS vehicle, and can be reprocessed.
+- `already_imported_equivalent`: the Turo trip already exists with matching important values and can be reconciled without rewriting it.
+- `already_imported_conflict`: the Turo trip exists, but important values differ; the issue remains open.
+- `missing_source_payload`: the original row payload is absent or unreadable.
+- `mapping_missing`: no active mapping exists for the row's Turo vehicle ID.
+- `invalid_source_data`: the stored row still fails import validation.
+- `unsupported_issue`: the issue is not a `vehicle_unmatched` issue.
+- `reprocessing_failed`: the importer raised an unexpected error.
+
+Issue lifecycle:
+
+- Reprocessing attempts are written to `turo_import_reprocess_attempts`.
+- Successful imports and safe equivalents set `reconciliation_status = reconciled`, `reconciled_at`, `reconciled_trip_id`, and `resolved_at`.
+- Conflicts, invalid rows, missing payloads, and failed attempts preserve the original issue and keep it visible for operator review.
+- Failed rows can be retried after correcting the mapping or source data condition.
+
 ## Month Allocation Rules
 
 Every normalized trip regenerates its month allocation rows.
@@ -173,6 +217,15 @@ Examples:
 - Invalid date: shows the received value and an expected date/time example.
 - Unmatched vehicle: explains which vehicle fields to check.
 - Duplicate trip in file: shows the earlier row number that was imported.
+
+The browser issue review screen reads `turo_import_errors` with its associated import batch and severity lookup data. Unresolved issues are shown by default, can be filtered by severity, batch, vehicle text, category, and date range, and can be resolved or reopened without deleting the original issue record.
+
+Resolution behavior:
+
+- `resolved_at` records when the operator closed the issue.
+- `resolution_note` stores optional operator context.
+- Reopening clears `resolved_at` but preserves the latest note.
+- Import issue review does not alter imported trips or raw source rows.
 
 ## Audit Logging
 

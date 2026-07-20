@@ -606,3 +606,26 @@ Build for Jay first.
 Design so FleetOS can grow beyond Jay later.
 
 Keep the product useful today and expandable tomorrow.
+
+## architecture
+
+Repository
+fleetos
+
+Internal Project
+FleetOS
+
+Platform/Core
+FleetOS Core
+
+Public Product
+Orbit
+
+Company
+808biz, Inc.
+
+Marketing Site
+go808.com
+
+Application
+orbit.go808.com

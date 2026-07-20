@@ -8,6 +8,10 @@ class CreateSharedFoundationTables extends Migration
 {
     public function up(): void
     {
+        if ($this->db->getPlatform() === 'MySQLi') {
+            $this->db->simpleQuery('SET default_storage_engine=InnoDB');
+        }
+
         $this->createLookupTables();
         $this->createLocationTables();
         $this->createSharedAssetTables();
@@ -139,7 +143,6 @@ class CreateSharedFoundationTables extends Migration
         $this->forge->addKey('id', true);
         $this->forge->addKey('checksum');
         $this->forge->addKey('uploaded_by');
-        $this->forge->addForeignKey('uploaded_by', 'users', 'id', 'CASCADE', 'SET NULL');
         $this->forge->createTable('images');
 
         $this->forge->addField([
@@ -159,7 +162,6 @@ class CreateSharedFoundationTables extends Migration
         $this->forge->addKey('id', true);
         $this->forge->addKey('checksum');
         $this->forge->addKey('uploaded_by');
-        $this->forge->addForeignKey('uploaded_by', 'users', 'id', 'CASCADE', 'SET NULL');
         $this->forge->createTable('files');
 
         $this->forge->addField([
@@ -176,7 +178,6 @@ class CreateSharedFoundationTables extends Migration
         $this->forge->addKey('visibility_lookup_value_id');
         $this->forge->addKey('created_by');
         $this->forge->addForeignKey('visibility_lookup_value_id', 'lookup_values', 'id', 'CASCADE', 'SET NULL');
-        $this->forge->addForeignKey('created_by', 'users', 'id', 'CASCADE', 'SET NULL');
         $this->forge->createTable('notes');
     }
 
@@ -198,7 +199,6 @@ class CreateSharedFoundationTables extends Migration
         $this->forge->addKey(['table_name', 'record_id']);
         $this->forge->addKey('actor_user_id');
         $this->forge->addKey('action_lookup_value_id');
-        $this->forge->addForeignKey('actor_user_id', 'users', 'id', 'CASCADE', 'SET NULL');
         $this->forge->addForeignKey('action_lookup_value_id', 'lookup_values', 'id', 'CASCADE', 'SET NULL');
         $this->forge->createTable('audit_logs');
     }

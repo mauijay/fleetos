@@ -3,6 +3,9 @@
 namespace App\Services\Fleet;
 
 use App\Services\Fleet\DecisionSupport\DecisionSupportDashboardService;
+use App\Services\Turo\TuroImportIssueService;
+use App\Services\Turo\TuroTripReconciliationService;
+use App\Services\Turo\TuroVehicleMappingService;
 use DateTimeImmutable;
 
 class FleetCommandCenterViewModelService
@@ -15,6 +18,10 @@ class FleetCommandCenterViewModelService
         private readonly ?VehicleAvailabilityService $availabilityService = null,
         private readonly ?TripAnalyticsService $tripAnalyticsService = null,
         private readonly ?DecisionSupportDashboardService $decisionSupportService = null,
+        private readonly ?TuroImportIssueService $importIssueService = null,
+        private readonly ?TuroVehicleMappingService $vehicleMappingService = null,
+        private readonly ?TuroTripReconciliationService $tripReconciliationService = null,
+        private readonly ?DailyOperationsDashboardService $dailyOperationsService = null,
     ) {
     }
 
@@ -33,6 +40,10 @@ class FleetCommandCenterViewModelService
         $tripAnalytics = $this->tripAnalytics()->summary(new DateTimeImmutable($asOf->format('Y-01-01 00:00:00')), $timelineEnd);
         $vehiclePerformance = $this->statistics()->vehiclePerformance($asOf);
         $decisionSupport = $this->decisionSupport()->recommendations($asOf);
+        $importIssues = $this->importIssues()->attentionSummary();
+        $vehicleMappings = $this->vehicleMappings()->attentionSummary();
+        $tripReconciliation = $this->tripReconciliation()->attentionSummary();
+        $dailyOperations = $this->dailyOperations()->forToday($asOf);
 
         return [
             'page_title' => 'Fleet Command Center',
@@ -41,6 +52,10 @@ class FleetCommandCenterViewModelService
             'fleet_status' => $this->fleetStatusCards($statistics, $command),
             'mission' => $this->missionCards($today),
             'mission_clear' => $this->missionClear($today),
+            'import_issues' => $importIssues,
+            'vehicle_mappings' => $vehicleMappings,
+            'trip_reconciliation' => $tripReconciliation,
+            'daily_operations' => $dailyOperations,
             'decision_support' => $decisionSupport,
             'vehicles' => $this->vehicleCards($command['vehicle_statuses'], $health),
             'timeline' => $this->timelineCards($command['todays_timeline'], $timelineStart, $timelineEnd),
@@ -57,6 +72,9 @@ class FleetCommandCenterViewModelService
     {
         return [
             ['label' => 'Fleet Command Center', 'href' => '/', 'active' => 'true'],
+            ['label' => 'Turo Import', 'href' => '/turo/imports', 'active' => 'false'],
+            ['label' => 'Import Issues', 'href' => '/turo/import-issues', 'active' => 'false'],
+            ['label' => 'Vehicle Matching', 'href' => '/turo/vehicle-matches', 'active' => 'false'],
             ['label' => 'Decision Support', 'href' => '#decision-support', 'active' => 'false'],
             ['label' => 'Fleet', 'href' => '#fleet-activity', 'active' => 'false'],
             ['label' => 'Reservations', 'href' => '#fleet-timeline', 'active' => 'false'],
@@ -403,5 +421,25 @@ class FleetCommandCenterViewModelService
     private function decisionSupport(): DecisionSupportDashboardService
     {
         return $this->decisionSupportService ?? service('decisionSupportDashboardService');
+    }
+
+    private function importIssues(): TuroImportIssueService
+    {
+        return $this->importIssueService ?? service('turoImportIssueService');
+    }
+
+    private function vehicleMappings(): TuroVehicleMappingService
+    {
+        return $this->vehicleMappingService ?? service('turoVehicleMappingService');
+    }
+
+    private function tripReconciliation(): TuroTripReconciliationService
+    {
+        return $this->tripReconciliationService ?? service('turoTripReconciliationService');
+    }
+
+    private function dailyOperations(): DailyOperationsDashboardService
+    {
+        return $this->dailyOperationsService ?? service('dailyOperationsDashboardService');
     }
 }
