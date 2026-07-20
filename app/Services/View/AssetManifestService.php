@@ -8,10 +8,12 @@ class AssetManifestService
     public function appAssets(): array
     {
         $manifest = $this->manifest();
+        $cssEntry = $manifest['resources/css/app.css'] ?? [];
+        $jsEntry = $manifest['resources/js/app.js'] ?? [];
 
         return [
-            'css' => $manifest['resources/css/app.css']['css'][0] ?? null,
-            'js' => $manifest['resources/js/app.js']['file'] ?? null,
+            'css' => $cssEntry['file'] ?? $jsEntry['css'][0] ?? null,
+            'js' => $jsEntry['file'] ?? null,
         ];
     }
 
