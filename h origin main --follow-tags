@@ -1,0 +1,90 @@
+[33mtag v0.6.0[m
+Tagger: Jay <jaycadla@gmail.com>
+Date:   Sun Jul 19 22:36:04 2026 -1000
+
+Airport Operations & Reimbursement Workflow
+
+[33mcommit 5f1cb85e580eee0ebbf89aca224e8f92211343fe[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;33mtag: [m[1;33mv0.6.0[m[33m, [m[1;31morigin/main[m[33m)[m
+Author: Jay <jaycadla@gmail.com>
+Date:   Sun Jul 19 22:32:25 2026 -1000
+
+    Airport Operations & Reimbursement Workflow
+
+ ARCHITECTURE.md                                    |  23 [32m+[m
+ BRAND.md                                           |  65 [32m+++[m
+ VISION.md                                          |  15 [32m+[m
+ app/Config/AirportReceipts.php                     |  15 [32m+[m
+ app/Config/Routes.php                              |  41 [32m++[m
+ app/Config/Services.php                            | 191 [32m+++++++[m
+ app/Config/TuroAccess.php                          |  11 [32m+[m
+ app/Controllers/AirportOperations.php              |  89 [32m+++[m
+ app/Controllers/AirportReimbursements.php          | 109 [32m++++[m
+ app/Controllers/SecureFiles.php                    |  22 [32m+[m
+ app/Controllers/TripMovementChecklists.php         |  54 [32m++[m
+ app/Controllers/TuroImportIssues.php               |  71 [32m+++[m
+ app/Controllers/TuroImports.php                    |  92 [32m++++[m
+ app/Controllers/TuroVehicleMatches.php             |  94 [32m++++[m
+ app/DTOs/Turo/RowImportResult.php                  |  16 [32m+[m
+ ...6-06-25-000001_CreateSharedFoundationTables.php |   8 [32m+[m[31m-[m
+ ...7-19-000001_AddResolutionToTuroImportErrors.php |  22 [32m+[m
+ ...026-07-19-000002_AddTuroVehicleMappingAudit.php |  39 [32m++[m
+ ...-19-000003_AddTuroImportIssueReconciliation.php |  50 [32m++[m
+ ...6-07-19-000004_CreateTripMovementChecklists.php |  71 [32m+++[m
+ ...07-19-000005_CreateAirportMovementWorkflows.php |  94 [32m++++[m
+ ...19-000006_CreateTuroAccessOverrideIncidents.php |  88 [32m+++[m
+ ...26-07-19-000007_CreateAirportOperationsRuns.php | 124 [32m+++++[m
+ app/Database/Seeds/FleetVehicleSeeder.php          |  46 [32m+[m[31m-[m
+ app/Database/Seeds/LookupSeeder.php                |   1 [32m+[m
+ app/Repositories/AirportMovementRepository.php     | 140 [32m+++++[m
+ app/Repositories/FileRepository.php                |  48 [32m++[m
+ app/Repositories/MovementChecklistRepository.php   | 124 [32m+++++[m
+ .../TuroAccessReimbursementRepository.php          | 401 [32m++++++++++++++[m
+ app/Repositories/TuroImportErrorRepository.php     | 211 [32m++++++[m[31m-[m
+ app/Repositories/TuroNormalizedTripRepository.php  |  12 [32m+[m
+ .../TuroVehicleMappingIssueRepository.php          |  86 [32m+++[m
+ app/Repositories/VehicleTuroListingRepository.php  | 155 [32m++++++[m
+ app/Services/Files/PrivateFileStorageService.php   | 101 [32m++++[m
+ app/Services/Fleet/AirportInstructionService.php   |  52 [32m++[m
+ .../Fleet/AirportMovementWorkflowService.php       | 246 [32m+++++++++[m
+ .../Fleet/DailyOperationsDashboardService.php      | 159 [32m++++++[m
+ .../Fleet/FleetCommandCenterViewModelService.php   |  38 [32m++[m
+ app/Services/Fleet/MorningBriefingService.php      |  36 [32m++[m
+ .../Fleet/MovementChecklistDefinitionService.php   |  60 [32m++[m
+ app/Services/Fleet/MovementReadinessService.php    |  43 [32m++[m
+ .../Fleet/TripMovementChecklistService.php         | 156 [32m++++++[m
+ .../Fleet/TuroAccessReimbursementService.php       | 608 [32m+++++++++++++++++++++[m
+ app/Services/Fleet/VehicleDailyStateService.php    | 322 [32m+++++++++++[m
+ app/Services/Turo/TuroImportIssueService.php       | 199 [32m+++++++[m
+ app/Services/Turo/TuroTripImportService.php        | 105 [32m++[m[31m--[m
+ .../Turo/TuroTripReconciliationService.php         | 264 [32m+++++++++[m
+ app/Services/Turo/TuroVehicleMappingService.php    | 314 [32m+++++++++++[m
+ app/Views/airport_operations/index.php             |  26 [32m+[m
+ app/Views/airport_operations/show.php              |  27 [32m+[m
+ app/Views/airport_reimbursements/index.php         |  16 [32m+[m
+ app/Views/airport_reimbursements/match.php         |  23 [32m+[m
+ .../components/recommendations_panel.php           |   2 [32m+[m[31m-[m
+ app/Views/fleet_command_center/index.php           | 176 [32m++++++[m
+ app/Views/trip_movement_checklists/show.php        |  91 [32m+++[m
+ app/Views/turo_import_issues/index.php             | 190 [32m+++++++[m
+ app/Views/turo_imports/index.php                   |  97 [32m++++[m
+ app/Views/turo_vehicle_matches/index.php           | 168 [32m++++++[m
+ app/Views/turo_vehicle_matches/reprocess.php       | 114 [32m++++[m
+ docs/airport-operations.md                         |  67 [32m+++[m
+ docs/file-storage-security.md                      |  11 [32m+[m
+ docs/notes.txt                                     | 106 [32m++++[m
+ docs/owner-operator-backlog.md                     |  77 [32m+++[m
+ docs/phase1-database-foundation.md                 |   2 [32m+[m
+ docs/phase2-turo-import-engine.md                  |  55 [32m+[m[31m-[m
+ docs/phase4-fleet-command-center.md                |  55 [32m+[m[31m-[m
+ docs/trip-movement-checklists.md                   |  37 [32m++[m
+ resources/css/app.css                              | 434 [32m++++++++++++++[m[31m-[m
+ .../DecisionSupportRepositoryIntegrationTest.php   |   2 [32m+[m[31m-[m
+ tests/unit/AirportMovementWorkflowServiceTest.php  | 173 [32m++++++[m
+ tests/unit/DailyOperationsDashboardServiceTest.php | 155 [32m++++++[m
+ tests/unit/FleetIntelligenceServicesTest.php       | 109 [32m+++[m[31m-[m
+ tests/unit/TripMovementChecklistServiceTest.php    | 169 [32m++++++[m
+ tests/unit/TuroAccessReimbursementServiceTest.php  | 339 [32m++++++++++++[m
+ tests/unit/TuroImportIssueServiceTest.php          | 165 [32m++++++[m
+ tests/unit/TuroTripReconciliationServiceTest.php   | 248 [32m+++++++++[m
+ tests/unit/TuroVehicleMappingServiceTest.php       | 197 [32m+++++++[m
+ 77 files changed, 8598 insertions(+), 64 deletions(-)
