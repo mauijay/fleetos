@@ -4,10 +4,14 @@ namespace App\Repositories;
 
 use CodeIgniter\Database\BaseConnection;
 use Config\Database;
+use Throwable;
 
 class FleetIntelligenceRepository
 {
     private BaseConnection $db;
+    /** @var string[]|null */
+    private ?array $canceledTripStatusCodes = null;
+    private ?bool $tripStatusLookupsAvailable = null;
 
     public function __construct(?BaseConnection $db = null)
     {
@@ -36,14 +40,30 @@ class FleetIntelligenceRepository
     /** @return array<string, int> */
     public function activeReservationCounts(string $asOf): array
     {
-        $rows = $this->db->table('turo_trips_normalized trips')
+        if (! $this->hasTripStatusLookups()) {
+            $reserved = (int) $this->db->table('turo_trips_normalized trips')
+                ->select('COUNT(DISTINCT trips.fleet_vehicle_id) AS vehicle_count', false)
+                ->where('trips.deleted_at', null)
+                ->where('trips.fleet_vehicle_id IS NOT NULL')
+                ->where('trips.starts_at <=', $asOf)
+                ->where('trips.ends_at >=', $asOf)
+                ->get()
+                ->getRow('vehicle_count');
+
+            return ['reserved' => $reserved, 'in_progress' => 0];
+        }
+
+        $builder = $this->db->table('turo_trips_normalized trips')
             ->select('lookup_values.code AS status_code, COUNT(DISTINCT trips.fleet_vehicle_id) AS vehicle_count')
             ->join('lookup_values', 'lookup_values.id = trips.trip_status_lookup_value_id', 'left')
             ->where('trips.deleted_at', null)
             ->where('trips.fleet_vehicle_id IS NOT NULL')
             ->where('trips.starts_at <=', $asOf)
-            ->where('trips.ends_at >=', $asOf)
-            ->whereNotIn('lookup_values.code', ['canceled_zero_payout', 'canceled_host_payout'])
+            ->where('trips.ends_at >=', $asOf);
+
+        $this->applyOperationalTripStatusFilter($builder, 'lookup_values.code');
+
+        $rows = $builder
             ->groupBy('lookup_values.code')
             ->get()
             ->getResultArray();
@@ -68,16 +88,51 @@ class FleetIntelligenceRepository
     /** @return array<int, array<string, mixed>> */
     public function reservationsBetween(string $startsAt, string $endsAt): array
     {
-        return $this->db->table('turo_trips_normalized trips')
+        $builder = $this->db->table('turo_trips_normalized trips')
             ->select('trips.id, trips.fleet_vehicle_id, trips.turo_trip_id AS source_reservation_id')
             ->select('trips.guest_name, trips.starts_at, trips.ends_at, trips.trip_days, trips.billable_days')
             ->select('trips.gross_revenue_amount, trips.host_payout_amount, trips.delivery_fee_amount')
-            ->select('trips.reimbursement_amount, trips.is_forecast, lookup_values.code AS status_code')
+            ->select('trips.reimbursement_amount, trips.is_forecast')
             ->select("'turo' AS source", false)
-            ->join('lookup_values', 'lookup_values.id = trips.trip_status_lookup_value_id', 'left')
             ->where('trips.deleted_at', null)
             ->where('trips.starts_at <', $endsAt)
-            ->where('trips.ends_at >', $startsAt)
+            ->where('trips.ends_at >', $startsAt);
+
+        if ($this->hasTripStatusLookups()) {
+            $builder->select('lookup_values.code AS status_code')
+                ->join('lookup_values', 'lookup_values.id = trips.trip_status_lookup_value_id', 'left');
+        } else {
+            $builder->select('NULL AS status_code', false);
+        }
+
+        return $builder
+            ->orderBy('trips.starts_at', 'ASC')
+            ->get()
+            ->getResultArray();
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    public function operationalReservationsBetween(string $startsAt, string $endsAt): array
+    {
+        $builder = $this->db->table('turo_trips_normalized trips')
+            ->select('trips.id, trips.fleet_vehicle_id, trips.turo_trip_id AS source_reservation_id')
+            ->select('trips.guest_name, trips.starts_at, trips.ends_at, trips.trip_days, trips.billable_days')
+            ->select('trips.gross_revenue_amount, trips.host_payout_amount, trips.delivery_fee_amount')
+            ->select('trips.reimbursement_amount, trips.is_forecast')
+            ->select("'turo' AS source", false)
+            ->where('trips.deleted_at', null)
+            ->where('trips.starts_at <', $endsAt)
+            ->where('trips.ends_at >', $startsAt);
+
+        if ($this->hasTripStatusLookups()) {
+            $builder->select('lookup_values.code AS status_code')
+                ->join('lookup_values', 'lookup_values.id = trips.trip_status_lookup_value_id', 'left');
+            $this->applyOperationalTripStatusFilter($builder, 'lookup_values.code');
+        } else {
+            $builder->select('NULL AS status_code', false);
+        }
+
+        return $builder
             ->orderBy('trips.starts_at', 'ASC')
             ->get()
             ->getResultArray();
@@ -86,7 +141,7 @@ class FleetIntelligenceRepository
     /** @return array<int, array<string, mixed>> */
     public function revenueMonthly(string $fromMonth, string $toMonth): array
     {
-        return $this->db->table('trip_month_allocations allocations')
+        $builder = $this->db->table('trip_month_allocations allocations')
             ->select('allocations.allocation_month')
             ->select('SUM(allocations.allocated_trip_days) AS trip_days', false)
             ->select('SUM(allocations.allocated_billable_days) AS billable_days', false)
@@ -100,7 +155,14 @@ class FleetIntelligenceRepository
             ->join('turo_trips_normalized trips', 'trips.id = allocations.turo_trip_normalized_id')
             ->where('trips.deleted_at', null)
             ->where('allocations.allocation_month >=', $fromMonth)
-            ->where('allocations.allocation_month <=', $toMonth)
+            ->where('allocations.allocation_month <=', $toMonth);
+
+        if ($this->hasTripStatusLookups()) {
+            $builder->join('lookup_values', 'lookup_values.id = trips.trip_status_lookup_value_id', 'left');
+            $this->applyOperationalTripStatusFilter($builder, 'lookup_values.code');
+        }
+
+        return $builder
             ->groupBy('allocations.allocation_month')
             ->orderBy('allocations.allocation_month', 'ASC')
             ->get()
@@ -110,7 +172,7 @@ class FleetIntelligenceRepository
     /** @return array<int, array<string, mixed>> */
     public function revenueByVehicle(string $fromMonth, string $toMonth): array
     {
-        return $this->db->table('trip_month_allocations allocations')
+        $builder = $this->db->table('trip_month_allocations allocations')
             ->select('fv.id AS fleet_vehicle_id, fv.fleet_code, fv.display_name')
             ->select('vtl.is_premium, vtl.code AS trim_code, vm.name AS vehicle_type')
             ->select('SUM(allocations.allocated_trip_days) AS trip_days', false)
@@ -126,7 +188,14 @@ class FleetIntelligenceRepository
             ->join('turo_trips_normalized trips', 'trips.id = allocations.turo_trip_normalized_id')
             ->where('trips.deleted_at', null)
             ->where('allocations.allocation_month >=', $fromMonth)
-            ->where('allocations.allocation_month <=', $toMonth)
+            ->where('allocations.allocation_month <=', $toMonth);
+
+        if ($this->hasTripStatusLookups()) {
+            $builder->join('lookup_values', 'lookup_values.id = trips.trip_status_lookup_value_id', 'left');
+            $this->applyOperationalTripStatusFilter($builder, 'lookup_values.code');
+        }
+
+        return $builder
             ->groupBy('fv.id, fv.fleet_code, fv.display_name, vtl.is_premium, vtl.code, vm.name')
             ->orderBy('host_payout', 'DESC')
             ->get()
@@ -143,6 +212,22 @@ class FleetIntelligenceRepository
             'loan_payments' => $this->activeLoanPaymentTotal(),
             'insurance_premiums' => $this->activeInsurancePremiumTotal(),
         ];
+    }
+
+    /** @return array<string, mixed> */
+    public function operatingCostSignals(string $fromDate, string $toDate): array
+    {
+        $signals = [
+            'maintenance_rows' => $this->countTableRowsInRange('maintenance_logs', 'service_on', $fromDate, $toDate),
+            'charging_rows' => $this->countTableRowsInRange('charging_sessions', 'started_at', $fromDate, $toDate),
+            'airport_delivery_rows' => $this->countTableRowsInRange('airport_deliveries', 'scheduled_at', $fromDate, $toDate),
+            'active_loan_rows' => $this->countActiveRows('loans', 'paid_off_on'),
+            'active_insurance_rows' => $this->countActiveInsuranceRows(),
+        ];
+
+        $signals['has_operating_cost_data'] = array_sum($signals) > 0;
+
+        return $signals;
     }
 
     /** @return array<string, float> */
@@ -186,7 +271,7 @@ class FleetIntelligenceRepository
     /** @return array<int, array<string, mixed>> */
     public function tripAnalytics(string $fromDate, string $toDate): array
     {
-        return $this->db->table('turo_trips_normalized trips')
+        $builder = $this->db->table('turo_trips_normalized trips')
             ->select('trips.fleet_vehicle_id, fv.fleet_code, fv.display_name')
             ->select('COUNT(*) AS trip_count', false)
             ->select('SUM(trips.trip_days) AS trip_days', false)
@@ -194,20 +279,55 @@ class FleetIntelligenceRepository
             ->select('AVG(trips.trip_days) AS average_trip_length', false)
             ->select('MAX(trips.trip_days) AS longest_trip', false)
             ->select('MIN(trips.trip_days) AS shortest_trip', false)
-            ->select('SUM(CASE WHEN lookup_values.code IN (\'canceled_zero_payout\', \'canceled_host_payout\') THEN 1 ELSE 0 END) AS cancelled_trips', false)
+            ->select('0 AS cancelled_trips', false)
             ->select('SUM(CASE WHEN airport_deliveries.id IS NOT NULL THEN 1 ELSE 0 END) AS airport_deliveries', false)
             ->select('SUM(CASE WHEN airport_deliveries.id IS NULL THEN 1 ELSE 0 END) AS home_deliveries', false)
             ->select('COUNT(DISTINCT charging_sessions.id) AS charging_events', false)
-            ->join('lookup_values', 'lookup_values.id = trips.trip_status_lookup_value_id', 'left')
             ->join('fleet_vehicles fv', 'fv.id = trips.fleet_vehicle_id', 'left')
             ->join('airport_deliveries', 'airport_deliveries.turo_trip_normalized_id = trips.id', 'left')
             ->join('charging_sessions', 'charging_sessions.turo_trip_normalized_id = trips.id', 'left')
             ->where('trips.deleted_at', null)
             ->where('trips.starts_at >=', $fromDate)
-            ->where('trips.starts_at <', $toDate)
+            ->where('trips.starts_at <', $toDate);
+
+        if ($this->hasTripStatusLookups()) {
+            $builder->join('lookup_values', 'lookup_values.id = trips.trip_status_lookup_value_id', 'left');
+            $this->applyOperationalTripStatusFilter($builder, 'lookup_values.code');
+        }
+
+        return $builder
             ->groupBy('trips.fleet_vehicle_id, fv.fleet_code, fv.display_name')
             ->get()
             ->getResultArray();
+    }
+
+    /** @return string[] */
+    public function canceledTripStatusCodes(): array
+    {
+        if ($this->canceledTripStatusCodes !== null) {
+            return $this->canceledTripStatusCodes;
+        }
+
+        try {
+            $rows = $this->db->table('lookup_values lv')
+                ->select('lv.code')
+                ->join('lookup_types lt', 'lt.id = lv.lookup_type_id')
+                ->where('lt.code', 'trip_status')
+                ->like('lv.code', 'canceled', 'after')
+                ->get()
+                ->getResultArray();
+
+            $this->canceledTripStatusCodes = array_values(array_filter(array_map(static fn (array $row): string => (string) ($row['code'] ?? ''), $rows)));
+        } catch (Throwable) {
+            // Some test fixtures do not include lookup tables; use conservative defaults.
+            $this->canceledTripStatusCodes = ['canceled', 'canceled_zero_payout', 'canceled_host_payout'];
+        }
+
+        if ($this->canceledTripStatusCodes === []) {
+            $this->canceledTripStatusCodes = ['canceled', 'canceled_zero_payout', 'canceled_host_payout'];
+        }
+
+        return $this->canceledTripStatusCodes;
     }
 
     /** @return array<int, array<string, mixed>> */
@@ -330,6 +450,56 @@ class FleetIntelligenceRepository
             ->getRowArray();
 
         return (float) ($row['total'] ?? 0);
+    }
+
+    private function countTableRowsInRange(string $table, string $dateField, string $fromDate, string $toDate): int
+    {
+        return $this->db->table($table)
+            ->where('deleted_at', null)
+            ->where($dateField . ' >=', $fromDate)
+            ->where($dateField . ' <', $toDate)
+            ->countAllResults();
+    }
+
+    private function hasTripStatusLookups(): bool
+    {
+        if ($this->tripStatusLookupsAvailable !== null) {
+            return $this->tripStatusLookupsAvailable;
+        }
+
+        try {
+            $this->tripStatusLookupsAvailable = $this->db->tableExists('lookup_values')
+                && $this->db->tableExists('lookup_types');
+        } catch (Throwable) {
+            $this->tripStatusLookupsAvailable = false;
+        }
+
+        return $this->tripStatusLookupsAvailable;
+    }
+
+    private function countActiveRows(string $table, string $closedField): int
+    {
+        return $this->db->table($table)
+            ->where('deleted_at', null)
+            ->where($closedField, null)
+            ->countAllResults();
+    }
+
+    private function countActiveInsuranceRows(): int
+    {
+        return $this->db->table('insurance_policies')
+            ->where('deleted_at', null)
+            ->where('expires_on >=', date('Y-m-d'))
+            ->countAllResults();
+    }
+
+    private function applyOperationalTripStatusFilter(object $builder, string $statusColumn): void
+    {
+        $canceled = $this->canceledTripStatusCodes();
+
+        if ($canceled !== []) {
+            $builder->whereNotIn($statusColumn, $canceled);
+        }
     }
 
     private function activeLoanPaymentTotal(): float

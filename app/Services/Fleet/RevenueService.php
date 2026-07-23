@@ -3,12 +3,15 @@
 namespace App\Services\Fleet;
 
 use App\Repositories\FleetIntelligenceRepository;
+use App\Repositories\TuroNormalizedTransactionRepository;
 use DateTimeImmutable;
 
 class RevenueService
 {
-    public function __construct(private readonly ?FleetIntelligenceRepository $repository = null)
-    {
+    public function __construct(
+        private readonly ?FleetIntelligenceRepository $repository = null,
+        private readonly ?TuroNormalizedTransactionRepository $transactionRepository = null,
+    ) {
     }
 
     /** Returns current-month revenue, forecast, cost, and profit metrics. */
@@ -43,14 +46,23 @@ class RevenueService
         $fromDate = $fromMonth;
         $toDate = (new DateTimeImmutable($toMonth))->modify('first day of next month')->format('Y-m-d');
         $costs = $this->repo()->operatingCosts($fromDate, $toDate);
+        $costSignals = $this->repo()->operatingCostSignals($fromDate, $toDate);
         $totals = $this->sumRevenueRows($monthlyRows);
+        $totals['completed_revenue'] = round($this->transactions()->operatingRevenueInPeriod($fromDate, $toDate), 2);
+        $totals['total_revenue'] = $totals['completed_revenue'] + $totals['forecast_revenue'];
         $operatingCosts = array_sum($costs);
+        $hasCostData = (bool) ($costSignals['has_operating_cost_data'] ?? false);
+        $cashFlow = $hasCostData ? $totals['completed_revenue'] + $totals['forecast_revenue'] - $operatingCosts : null;
+        $operatingProfit = $hasCostData ? $totals['completed_revenue'] - $operatingCosts : null;
 
         return array_merge($totals, [
             'months' => $monthlyRows,
-            'cash_flow' => $totals['completed_revenue'] + $totals['forecast_revenue'] - $operatingCosts,
+            'cash_flow' => $cashFlow,
+            'cash_flow_state' => $hasCostData ? 'calculated' : 'pending',
             'operating_costs' => $costs,
-            'operating_profit' => $totals['completed_revenue'] - $operatingCosts,
+            'operating_profit' => $operatingProfit,
+            'operating_profit_state' => $hasCostData ? 'calculated' : 'pending',
+            'cost_signals' => $costSignals,
             'startup_cost_amortization' => $this->startupCostAmortization($fromMonth, $toMonth),
         ]);
     }
@@ -103,7 +115,10 @@ class RevenueService
     /** Returns revenue grouped by premium and base fleet segments. */
     public function byPremiumBase(string $fromMonth, string $toMonth): array
     {
-        return $this->groupRevenueRows($this->byVehicle($fromMonth, $toMonth), 'is_premium');
+        $fromDate = $fromMonth;
+        $toDate = (new DateTimeImmutable($toMonth))->modify('first day of next month')->format('Y-m-d');
+
+        return $this->transactions()->operatingRevenueByPremiumBaseInPeriod($fromDate, $toDate);
     }
 
     /** Returns monthly revenue trends for the requested inclusive month range. */
@@ -128,7 +143,12 @@ class RevenueService
     /** Returns operating profit for the requested inclusive month range. */
     public function operatingProfit(string $fromMonth, string $toMonth): float
     {
-        return $this->period($fromMonth, $toMonth)['operating_profit'];
+        return (float) ($this->period($fromMonth, $toMonth)['operating_profit'] ?? 0.0);
+    }
+
+    public function lifetimeOperatingRevenue(): float
+    {
+        return round($this->transactions()->lifetimeOperatingRevenue(), 2);
     }
 
     /** Returns estimated startup-cost amortization for the requested month range. */
@@ -143,6 +163,11 @@ class RevenueService
     private function repo(): FleetIntelligenceRepository
     {
         return $this->repository ?? service('fleetIntelligenceRepository');
+    }
+
+    private function transactions(): TuroNormalizedTransactionRepository
+    {
+        return $this->transactionRepository ?? new TuroNormalizedTransactionRepository();
     }
 
     /** @param array<int, array<string, mixed>> $rows */

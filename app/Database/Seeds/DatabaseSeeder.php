@@ -10,5 +10,6 @@ class DatabaseSeeder extends Seeder
     {
         $this->call(LookupSeeder::class);
         $this->call(FleetVehicleSeeder::class);
+        $this->call(AdminUserSeeder::class);
     }
 }

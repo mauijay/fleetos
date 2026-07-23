@@ -7,15 +7,17 @@ use DateTimeImmutable;
 
 class TripAnalyticsService
 {
-    public function __construct(private readonly ?FleetIntelligenceRepository $repository = null)
-    {
+    public function __construct(
+        private readonly ?FleetIntelligenceRepository $repository = null,
+        private readonly ?FleetCapacityService $capacityService = null,
+    ) {
     }
 
     /** Returns trip analytics for the requested date range. */
     public function summary(DateTimeImmutable $startsAt, DateTimeImmutable $endsAt): array
     {
         $rows = $this->repo()->tripAnalytics($startsAt->format('Y-m-d H:i:s'), $endsAt->format('Y-m-d H:i:s'));
-        $totals = $this->totals($rows);
+        $totals = $this->totals($rows, $startsAt, $endsAt);
 
         return array_merge($totals, [
             'by_vehicle' => $rows,
@@ -115,8 +117,13 @@ class TripAnalyticsService
         return $this->repository ?? service('fleetIntelligenceRepository');
     }
 
+    private function capacity(): FleetCapacityService
+    {
+        return $this->capacityService ?? new FleetCapacityService($this->repo());
+    }
+
     /** @param array<int, array<string, mixed>> $rows */
-    private function totals(array $rows): array
+    private function totals(array $rows, DateTimeImmutable $startsAt, DateTimeImmutable $endsAt): array
     {
         $totals = [
             'trip_count' => 0,
@@ -143,9 +150,14 @@ class TripAnalyticsService
             $totals['shortest_trip'] = $totals['shortest_trip'] === 0.0 ? $shortest : min($totals['shortest_trip'], $shortest);
         }
 
+        $capacity = $this->capacity()->utilizationForRange($startsAt, $endsAt);
+        $occupiedVehicleDays = (float) $capacity['occupied_vehicle_days'];
+
         $totals['average_trip_length'] = $totals['trip_count'] === 0 ? 0.0 : round($totals['trip_days'] / $totals['trip_count'], 3);
         $totals['cancellation_rate'] = $totals['trip_count'] === 0 ? 0.0 : round($totals['cancelled_trips'] / $totals['trip_count'], 4);
-        $totals['utilization'] = $totals['trip_days'] === 0.0 ? 0.0 : round($totals['billable_days'] / $totals['trip_days'], 4);
+        $totals['utilization'] = (float) $capacity['utilization'];
+        $totals['occupied_vehicle_days'] = $occupiedVehicleDays;
+        $totals['available_vehicle_days'] = (float) $capacity['available_vehicle_days'];
 
         return $totals;
     }

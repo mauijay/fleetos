@@ -57,7 +57,7 @@ class TaskService
     {
         $start = $day->setTime(0, 0)->format('Y-m-d H:i:s');
         $end = $day->modify('+1 day')->setTime(0, 0)->format('Y-m-d H:i:s');
-        $reservations = $this->repo()->reservationsBetween($start, $end);
+        $reservations = $this->repo()->operationalReservationsBetween($start, $end);
 
         return [
             'todays_pickups' => $this->startingReservations($reservations, $start, $end),
@@ -76,13 +76,17 @@ class TaskService
     /** @param array<int, array<string, mixed>> $reservations */
     private function startingReservations(array $reservations, string $start, string $end): array
     {
-        return array_values(array_filter($reservations, static fn (array $reservation): bool => ($reservation['starts_at'] ?? '') >= $start && ($reservation['starts_at'] ?? '') < $end));
+        return array_values(array_filter($reservations, static fn (array $reservation): bool => ($reservation['starts_at'] ?? '') >= $start
+            && ($reservation['starts_at'] ?? '') < $end
+            && ! str_starts_with((string) ($reservation['status_code'] ?? ''), 'canceled')));
     }
 
     /** @param array<int, array<string, mixed>> $reservations */
     private function endingReservations(array $reservations, string $start, string $end): array
     {
-        return array_values(array_filter($reservations, static fn (array $reservation): bool => ($reservation['ends_at'] ?? '') >= $start && ($reservation['ends_at'] ?? '') < $end));
+        return array_values(array_filter($reservations, static fn (array $reservation): bool => ($reservation['ends_at'] ?? '') >= $start
+            && ($reservation['ends_at'] ?? '') < $end
+            && ! str_starts_with((string) ($reservation['status_code'] ?? ''), 'canceled')));
     }
 
     private function repo(): FleetIntelligenceRepository

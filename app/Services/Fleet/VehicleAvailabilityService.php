@@ -40,7 +40,10 @@ class VehicleAvailabilityService
                 'status' => $reservation['status_code'],
                 'reservation' => $reservation,
             ];
-        }, $this->repo()->reservationsBetween($startsAt->format('Y-m-d H:i:s'), $endsAt->format('Y-m-d H:i:s')));
+        }, array_values(array_filter(
+            $this->repo()->operationalReservationsBetween($startsAt->format('Y-m-d H:i:s'), $endsAt->format('Y-m-d H:i:s')),
+            static fn (array $reservation): bool => ! str_starts_with((string) ($reservation['status_code'] ?? ''), 'canceled'),
+        )));
 
         $deliveries = array_map(static function (array $delivery): array {
             return [
@@ -65,7 +68,7 @@ class VehicleAvailabilityService
         $asOf ??= new DateTimeImmutable();
         $now = $asOf->format('Y-m-d H:i:s');
         $futureWindow = $asOf->modify('+180 days')->format('Y-m-d H:i:s');
-        $reservations = $this->repo()->reservationsBetween($asOf->modify('-30 days')->format('Y-m-d H:i:s'), $futureWindow);
+        $reservations = $this->repo()->operationalReservationsBetween($asOf->modify('-30 days')->format('Y-m-d H:i:s'), $futureWindow);
         $deliveries = $this->repo()->airportDeliveriesBetween($now, $asOf->modify('+14 days')->format('Y-m-d H:i:s'));
 
         return array_map(function (array $vehicle) use ($asOf, $reservations, $deliveries): array {
@@ -105,6 +108,10 @@ class VehicleAvailabilityService
         $now = $asOf->format('Y-m-d H:i:s');
 
         foreach ($reservations as $reservation) {
+            if (str_starts_with((string) ($reservation['status_code'] ?? ''), 'canceled')) {
+                continue;
+            }
+
             if (($reservation['starts_at'] ?? '') <= $now && ($reservation['ends_at'] ?? '') >= $now) {
                 return $reservation;
             }

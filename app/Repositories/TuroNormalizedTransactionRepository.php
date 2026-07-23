@@ -100,6 +100,87 @@ class TuroNormalizedTransactionRepository
         return $totals;
     }
 
+    /** @return array<string, array{count:int, amount:string}> */
+    public function totalsByEventClassInPeriod(string $fromDate, string $toDateExclusive): array
+    {
+        $rows = $this->db->table('turo_transactions_normalized')
+            ->select('event_class, COUNT(*) AS row_count, COALESCE(SUM(amount), 0) AS amount_total', false)
+            ->where('transaction_date >=', $fromDate)
+            ->where('transaction_date <', $toDateExclusive)
+            ->groupBy('event_class')
+            ->get()
+            ->getResultArray();
+
+        $totals = [];
+        foreach ($rows as $row) {
+            $eventClass = (string) ($row['event_class'] ?? 'other');
+            $totals[$eventClass] = [
+                'count' => (int) ($row['row_count'] ?? 0),
+                'amount' => number_format((float) ($row['amount_total'] ?? 0), 2, '.', ''),
+            ];
+        }
+
+        return $totals;
+    }
+
+    public function operatingRevenueInPeriod(string $fromDate, string $toDateExclusive): float
+    {
+        $row = $this->db->table('turo_transactions_normalized')
+            ->select('COALESCE(SUM(amount), 0) AS total', false)
+            ->where('event_class', 'operating_revenue')
+            ->where('transaction_date >=', $fromDate)
+            ->where('transaction_date <', $toDateExclusive)
+            ->get()
+            ->getRowArray();
+
+        return (float) ($row['total'] ?? 0);
+    }
+
+    public function lifetimeOperatingRevenue(): float
+    {
+        $row = $this->db->table('turo_transactions_normalized')
+            ->select('COALESCE(SUM(amount), 0) AS total', false)
+            ->where('event_class', 'operating_revenue')
+            ->get()
+            ->getRowArray();
+
+        return (float) ($row['total'] ?? 0);
+    }
+
+    /** @return array<int, array{group:string,completed_revenue:float,row_count:int}> */
+    public function operatingRevenueByPremiumBaseInPeriod(string $fromDate, string $toDateExclusive): array
+    {
+        $rows = $this->db->table('turo_transactions_normalized tn')
+            ->select("CASE WHEN COALESCE(vtl.is_premium, 0) = 1 THEN 'premium' ELSE 'base' END AS segment", false)
+            ->select('COUNT(*) AS row_count', false)
+            ->select('COALESCE(SUM(tn.amount), 0) AS amount_total', false)
+            ->join('fleet_vehicles fv', 'fv.id = tn.fleet_vehicle_id', 'left')
+            ->join('vehicle_trim_levels vtl', 'vtl.id = fv.vehicle_trim_level_id', 'left')
+            ->where('tn.event_class', 'operating_revenue')
+            ->where('tn.transaction_date >=', $fromDate)
+            ->where('tn.transaction_date <', $toDateExclusive)
+            ->groupBy('segment')
+            ->get()
+            ->getResultArray();
+
+        $segments = [
+            'premium' => ['group' => 'premium', 'completed_revenue' => 0.0, 'row_count' => 0],
+            'base' => ['group' => 'base', 'completed_revenue' => 0.0, 'row_count' => 0],
+        ];
+
+        foreach ($rows as $row) {
+            $segment = (string) ($row['segment'] ?? 'base');
+            if (! isset($segments[$segment])) {
+                continue;
+            }
+
+            $segments[$segment]['completed_revenue'] = round((float) ($row['amount_total'] ?? 0), 2);
+            $segments[$segment]['row_count'] = (int) ($row['row_count'] ?? 0);
+        }
+
+        return array_values($segments);
+    }
+
     /**
      * Revenue safeguard: by default, revenue totals exclude cash movement rows.
      *

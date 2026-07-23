@@ -185,11 +185,11 @@ class FleetCommandCenterViewModelService
         $premiumBase = $statistics['premium_vs_base'];
 
         return [
-            $this->financialCard('Current Month Revenue', $this->money((float) $currentMonth['completed_revenue']), 'Actual host payout'),
+            $this->financialCard('Current Month Revenue', $this->money(isset($currentMonth['completed_revenue']) ? (float) $currentMonth['completed_revenue'] : null), 'Recognized operating revenue'),
             $this->financialCard('Forecast Revenue', $this->money((float) $currentMonth['forecast_revenue']), 'Booked future payout'),
-            $this->financialCard('Cash Flow', $this->money((float) $currentMonth['cash_flow']), 'Revenue less known costs'),
-            $this->financialCard('Operating Profit', $this->money((float) $currentMonth['operating_profit']), 'Completed revenue less costs'),
-            $this->financialCard('Fleet Utilization', $this->percent((float) $currentMonth['fleet_utilization']), 'Current month'),
+            $this->financialCard('Cash Flow', $this->money(isset($currentMonth['cash_flow']) ? (float) $currentMonth['cash_flow'] : null), 'Operating revenue plus forecast minus known costs'),
+            $this->financialCard('Operating Profit', $this->money(isset($currentMonth['operating_profit']) ? (float) $currentMonth['operating_profit'] : null), 'Recognized operating revenue minus known costs'),
+            $this->financialCard('Month-to-Date Utilization', $this->percent((float) $currentMonth['fleet_utilization']), 'Occupied vehicle-days this month'),
             $this->financialCard('ADR', $this->money((float) $currentMonth['average_daily_rate']), 'Average daily rate'),
             $this->financialCard('RevPAD', $this->money((float) $currentMonth['revenue_per_available_day']), 'Revenue per available day'),
             $this->financialCard('Premium Revenue', $this->money($this->segmentRevenue($premiumBase, 'premium')), 'Premium fleet segment'),
@@ -223,7 +223,7 @@ class FleetCommandCenterViewModelService
             $this->metricCard('Lifetime Revenue', $this->money((float) $statistics['lifetime_revenue']), 'All completed history', '#financial-snapshot', 'success'),
             $this->metricCard('Lifetime Profit', $this->money((float) $statistics['lifetime_profit']), 'Revenue less startup capital', '#financial-snapshot', 'success'),
             $this->metricCard('Average Trip Length', number_format((float) $tripAnalytics['average_trip_length'], 1) . ' days', 'Year to date', '#fleet-timeline', 'neutral'),
-            $this->metricCard('Average Occupancy', $this->percent((float) $tripAnalytics['utilization']), 'Billable trip utilization', '#fleet-timeline', 'neutral'),
+            $this->metricCard('Year-to-Date + 7-Day Utilization', $this->percent((float) $tripAnalytics['utilization']), 'Occupied vehicle-days through the operational horizon', '#fleet-timeline', 'neutral'),
             $this->metricCard('Revenue per Vehicle', $this->money((float) $statistics['current_month']['revenue_per_vehicle']), 'Current month', '#financial-snapshot', 'success'),
             $this->metricCard('Revenue per Available Day', $this->money((float) $statistics['current_month']['revenue_per_available_day']), 'Current month', '#financial-snapshot', 'success'),
             $this->metricCard('Highest Performing Vehicle', $this->vehicleLabel($vehiclePerformance[0] ?? null), 'By revenue', '#fleet-activity', 'success'),
@@ -378,9 +378,13 @@ class FleetCommandCenterViewModelService
         return (string) ($vehicle['fleet_code'] ?? $vehicle['display_name'] ?? 'Pending');
     }
 
-    private function money(float $amount): string
+    private function money(?float $amount): string
     {
-        return '$' . number_format($amount, 0);
+        if ($amount === null) {
+            return 'Pending';
+        }
+
+        return '$' . number_format($amount, 2);
     }
 
     private function percent(float $value): string

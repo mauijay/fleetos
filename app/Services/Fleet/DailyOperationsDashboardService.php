@@ -56,12 +56,12 @@ class DailyOperationsDashboardService
             'fleet_status' => $this->stateService->statusCounts($board, (float) $currentMonth['fleet_utilization']),
             'operational_queue' => $this->operationalQueue($today, $attention, $importIssues, $vehicleMappings, $reconciliation, $airport, $reimbursements),
             'financial' => [
-                'current_month_revenue' => '$' . number_format((float) $currentMonth['completed_revenue'], 0),
+                'current_month_revenue' => '$' . number_format((float) $currentMonth['completed_revenue'], 2),
                 'forecast_revenue' => '$' . number_format((float) $currentMonth['forecast_revenue'], 0),
                 'average_daily_rate' => '$' . number_format((float) $currentMonth['average_daily_rate'], 0),
                 'fleet_utilization' => number_format((float) $currentMonth['fleet_utilization'] * 100, 1) . '%',
-                'revenue_today' => 'Not captured reliably',
-                'revenue_this_week' => 'Not captured reliably',
+                'revenue_today' => 'Pending capture',
+                'revenue_this_week' => 'Pending capture',
             ],
             'data_honesty' => [
                 'Battery telemetry is not connected, so charge levels require confirmation.',

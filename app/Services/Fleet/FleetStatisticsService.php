@@ -11,6 +11,7 @@ class FleetStatisticsService
     public function __construct(
         private readonly ?FleetIntelligenceRepository $repository = null,
         private readonly ?RevenueService $revenueService = null,
+        private readonly ?FleetCapacityService $capacityService = null,
     ) {
     }
 
@@ -37,13 +38,21 @@ class FleetStatisticsService
         $asOf ??= new DateTimeImmutable();
         $month = $asOf->format('Y-m-01');
         $revenue = $this->revenue()->currentMonth($asOf);
-        $vehicleCount = max(1, count($this->repo()->fleetVehicles()));
-        $daysElapsed = max(1, (int) $asOf->format('j'));
-        $availableDays = $vehicleCount * $daysElapsed;
+        $periodStart = new DateTimeImmutable($month . ' 00:00:00');
+        $periodEndExclusive = $asOf->modify('+1 day')->setTime(0, 0);
+        $capacity = $this->capacity()->utilizationForRange($periodStart, $periodEndExclusive);
+        $vehicleCount = max(1, count(array_filter(
+            $this->repo()->fleetVehicles(),
+            static fn (array $vehicle): bool => (bool) ($vehicle['is_available_for_booking'] ?? false),
+        )));
+        $availableDays = max(1, $capacity['available_vehicle_days']);
+        $occupiedDays = max(0, $capacity['occupied_vehicle_days']);
 
         return array_merge($revenue, [
-            'fleet_utilization' => $this->utilization((float) $revenue['billable_days'], $availableDays),
-            'average_daily_rate' => $this->averageDailyRate((float) $revenue['completed_revenue'], (float) $revenue['billable_days']),
+            'fleet_utilization' => $capacity['utilization'],
+            'occupied_vehicle_days' => $occupiedDays,
+            'available_vehicle_days' => $availableDays,
+            'average_daily_rate' => $this->averageDailyRate((float) $revenue['completed_revenue'], (float) $occupiedDays),
             'revenue_per_available_day' => $this->revenuePerAvailableDay((float) $revenue['completed_revenue'], $availableDays),
             'revenue_per_vehicle' => $this->revenuePerAvailableDay((float) $revenue['completed_revenue'], $vehicleCount),
             'month' => $month,
@@ -79,16 +88,15 @@ class FleetStatisticsService
     public function premiumVsBase(?DateTimeImmutable $asOf = null): array
     {
         $asOf ??= new DateTimeImmutable();
+        $month = $asOf->format('Y-m-01');
 
-        return $this->revenue()->byPremiumBase($asOf->format('Y-01-01'), $asOf->format('Y-m-01'));
+        return $this->revenue()->byPremiumBase($month, $month);
     }
 
     /** Returns tracked lifetime revenue across all reservation sources. */
     public function lifetimeRevenue(): float
     {
-        return array_reduce($this->repo()->lifetimeRevenueByVehicle(), static function (float $total, array $row): float {
-            return $total + (float) ($row['host_payout'] ?? 0);
-        }, 0.0);
+        return $this->revenue()->lifetimeOperatingRevenue();
     }
 
     /** Returns tracked lifetime profit after startup capital and known operating costs. */
@@ -145,6 +153,11 @@ class FleetStatisticsService
     private function revenue(): RevenueService
     {
         return $this->revenueService ?? service('revenueService');
+    }
+
+    private function capacity(): FleetCapacityService
+    {
+        return $this->capacityService ?? new FleetCapacityService($this->repo());
     }
 
     private static function utilization(float $billableDays, int $availableDays): float

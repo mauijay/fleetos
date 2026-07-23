@@ -1,6 +1,7 @@
 <?php
 
 use App\Repositories\FleetIntelligenceRepository;
+use App\Repositories\TuroNormalizedTransactionRepository;
 use App\Services\Fleet\DecisionSupport\DecisionSupportDashboardService;
 use App\Services\Fleet\DailyOperationsDashboardService;
 use App\Services\Fleet\FleetCommandCenterViewModelService;
@@ -24,7 +25,7 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
 {
     public function testRevenueServiceSeparatesCompletedForecastAndCancelledRevenue(): void
     {
-        $repository = $this->repositoryMock(['revenueMonthly', 'operatingCosts', 'fleetCapital', 'reservationsBetween']);
+        $repository = $this->repositoryMock(['revenueMonthly', 'operatingCosts', 'operatingCostSignals', 'fleetCapital', 'reservationsBetween']);
         $repository->method('revenueMonthly')->willReturn([
             [
                 'allocation_month' => '2026-06-01',
@@ -44,6 +45,14 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
             'loan_payments' => 300.0,
             'insurance_premiums' => 60.0,
         ]);
+        $repository->method('operatingCostSignals')->willReturn([
+            'maintenance_rows' => 1,
+            'charging_rows' => 1,
+            'airport_delivery_rows' => 1,
+            'active_loan_rows' => 1,
+            'active_insurance_rows' => 1,
+            'has_operating_cost_data' => true,
+        ]);
         $repository->method('fleetCapital')->willReturn(['startup_costs' => 36000.0]);
         $repository->method('reservationsBetween')->willReturn([
             ['status_code' => 'completed', 'host_payout_amount' => '400.00'],
@@ -51,7 +60,10 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
             ['status_code' => 'canceled_zero_payout', 'host_payout_amount' => '0.00'],
         ]);
 
-        $service = new RevenueService($repository);
+        $transactions = $this->transactionRepositoryMock(['operatingRevenueInPeriod']);
+        $transactions->method('operatingRevenueInPeriod')->willReturn(800.0);
+
+        $service = new RevenueService($repository, $transactions);
         $currentMonth = $service->currentMonth(new DateTimeImmutable('2026-06-15 12:00:00'));
 
         $this->assertSame(800.0, $currentMonth['completed_revenue']);
@@ -70,7 +82,13 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
             ['vehicle_type' => 'Model 3', 'is_premium' => false, 'trip_days' => '3.000', 'billable_days' => '3.000', 'gross_revenue' => '450.00', 'completed_revenue' => '360.00', 'forecast_revenue' => '120.00', 'host_payout' => '480.00'],
         ]);
 
-        $service = new RevenueService($repository);
+        $transactions = $this->transactionRepositoryMock(['operatingRevenueByPremiumBaseInPeriod']);
+        $transactions->method('operatingRevenueByPremiumBaseInPeriod')->willReturn([
+            ['group' => 'premium', 'completed_revenue' => 800.0, 'row_count' => 1],
+            ['group' => 'base', 'completed_revenue' => 360.0, 'row_count' => 1],
+        ]);
+
+        $service = new RevenueService($repository, $transactions);
 
         $this->assertSame('premium', $service->byPremiumBase('2026-01-01', '2026-06-01')[0]['group']);
         $this->assertSame('Model Y', $service->byVehicleType('2026-01-01', '2026-06-01')[0]['group']);
@@ -80,30 +98,52 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
     {
         $repository = $this->repositoryMock([
             'fleetVehicles',
+            'operationalReservationsBetween',
             'activeReservationCounts',
             'openClaims',
             'revenueMonthly',
             'operatingCosts',
+            'operatingCostSignals',
             'fleetCapital',
             'fleetCapitalByVehicle',
             'revenueByVehicle',
             'lifetimeRevenueByVehicle',
         ]);
         $repository->method('fleetVehicles')->willReturn([
-            ['id' => 1, 'status_code' => 'active', 'is_available_for_booking' => true],
-            ['id' => 2, 'status_code' => 'maintenance', 'is_available_for_booking' => false],
-            ['id' => 3, 'status_code' => 'active', 'is_available_for_booking' => true],
+            ['id' => 1, 'status_code' => 'active', 'is_available_for_booking' => true, 'in_service_date' => null, 'out_of_service_date' => null],
+            ['id' => 2, 'status_code' => 'maintenance', 'is_available_for_booking' => false, 'in_service_date' => null, 'out_of_service_date' => null],
+            ['id' => 3, 'status_code' => 'active', 'is_available_for_booking' => true, 'in_service_date' => null, 'out_of_service_date' => null],
         ]);
         $repository->method('activeReservationCounts')->willReturn(['reserved' => 1, 'in_progress' => 1]);
+        $repository->method('operationalReservationsBetween')->willReturn([
+            ['fleet_vehicle_id' => 1, 'starts_at' => '2026-06-01 08:00:00', 'ends_at' => '2026-06-03 08:00:00', 'status_code' => 'completed'],
+            ['fleet_vehicle_id' => 1, 'starts_at' => '2026-06-02 08:00:00', 'ends_at' => '2026-06-04 08:00:00', 'status_code' => 'booked'],
+        ]);
         $repository->method('openClaims')->willReturn([['id' => 10]]);
         $repository->method('revenueMonthly')->willReturn([['billable_days' => '10.000', 'completed_revenue' => '1000.00', 'forecast_revenue' => '500.00']]);
         $repository->method('operatingCosts')->willReturn(['maintenance' => 0.0, 'charging' => 0.0, 'airport_parking' => 0.0, 'loan_payments' => 0.0, 'insurance_premiums' => 0.0]);
+        $repository->method('operatingCostSignals')->willReturn([
+            'maintenance_rows' => 1,
+            'charging_rows' => 1,
+            'airport_delivery_rows' => 0,
+            'active_loan_rows' => 0,
+            'active_insurance_rows' => 0,
+            'has_operating_cost_data' => true,
+        ]);
         $repository->method('fleetCapital')->willReturn(['fleet_value' => 90000.0, 'loan_balance' => 50000.0, 'fleet_equity' => 40000.0, 'startup_costs' => 90000.0]);
         $repository->method('fleetCapitalByVehicle')->willReturn([8 => ['startup_costs' => 5000.0, 'loan_balance' => 1000.0]]);
         $repository->method('revenueByVehicle')->willReturn([['fleet_vehicle_id' => 8, 'is_premium' => true, 'host_payout' => '1000.00']]);
         $repository->method('lifetimeRevenueByVehicle')->willReturn([['fleet_vehicle_id' => 8, 'host_payout' => '10000.00']]);
 
-        $summary = (new FleetStatisticsService($repository, new RevenueService($repository)))->summary(new DateTimeImmutable('2026-06-10'));
+        $transactions = $this->transactionRepositoryMock(['operatingRevenueInPeriod', 'lifetimeOperatingRevenue', 'operatingRevenueByPremiumBaseInPeriod']);
+        $transactions->method('operatingRevenueInPeriod')->willReturn(1000.0);
+        $transactions->method('lifetimeOperatingRevenue')->willReturn(10000.0);
+        $transactions->method('operatingRevenueByPremiumBaseInPeriod')->willReturn([
+            ['group' => 'premium', 'completed_revenue' => 1000.0, 'row_count' => 1],
+            ['group' => 'base', 'completed_revenue' => 0.0, 'row_count' => 0],
+        ]);
+
+        $summary = (new FleetStatisticsService($repository, new RevenueService($repository, $transactions)))->summary(new DateTimeImmutable('2026-06-10'));
 
         $this->assertSame(3, $summary['fleet_size']);
         $this->assertSame(0, $summary['available_vehicles']);
@@ -160,12 +200,12 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
 
     public function testVehicleAvailabilityServiceReturnsOperationalStatus(): void
     {
-        $repository = $this->repositoryMock(['fleetVehicles', 'reservationsBetween', 'airportDeliveriesBetween']);
+        $repository = $this->repositoryMock(['fleetVehicles', 'operationalReservationsBetween', 'airportDeliveriesBetween']);
         $repository->method('fleetVehicles')->willReturn([
             ['id' => 1, 'fleet_code' => 'Spaceship-001', 'display_name' => 'Spaceship-001', 'is_available_for_booking' => true, 'odometer_miles' => 1200],
             ['id' => 2, 'fleet_code' => 'Spaceship-002', 'display_name' => 'Spaceship-002', 'is_available_for_booking' => true, 'odometer_miles' => 2200],
         ]);
-        $repository->method('reservationsBetween')->willReturn([
+        $repository->method('operationalReservationsBetween')->willReturn([
             ['fleet_vehicle_id' => 1, 'starts_at' => '2026-06-15 08:00:00', 'ends_at' => '2026-06-16 10:00:00', 'status_code' => 'in_progress'],
             ['fleet_vehicle_id' => 2, 'starts_at' => '2026-06-20 08:00:00', 'ends_at' => '2026-06-22 10:00:00', 'status_code' => 'booked'],
         ]);
@@ -182,12 +222,21 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
 
     public function testTripAnalyticsServiceAggregatesTripMetrics(): void
     {
-        $repository = $this->repositoryMock(['tripAnalytics', 'repeatedGuests']);
+        $repository = $this->repositoryMock(['tripAnalytics', 'repeatedGuests', 'operationalReservationsBetween', 'fleetVehicles']);
         $repository->method('tripAnalytics')->willReturn([
             ['trip_count' => 2, 'trip_days' => '5.000', 'billable_days' => '4.000', 'cancelled_trips' => 1, 'airport_deliveries' => 1, 'home_deliveries' => 1, 'charging_events' => 2, 'longest_trip' => '3.000', 'shortest_trip' => '2.000'],
             ['trip_count' => 1, 'trip_days' => '10.000', 'billable_days' => '10.000', 'cancelled_trips' => 0, 'airport_deliveries' => 0, 'home_deliveries' => 1, 'charging_events' => 1, 'longest_trip' => '10.000', 'shortest_trip' => '10.000'],
         ]);
         $repository->method('repeatedGuests')->willReturn([['guest_name' => 'Repeat Guest', 'trip_count' => 2]]);
+        $repository->method('operationalReservationsBetween')->willReturn([
+            ['fleet_vehicle_id' => 1, 'starts_at' => '2026-06-01 08:00:00', 'ends_at' => '2026-06-03 08:00:00', 'status_code' => 'completed'],
+            ['fleet_vehicle_id' => 1, 'starts_at' => '2026-06-02 08:00:00', 'ends_at' => '2026-06-04 08:00:00', 'status_code' => 'booked'],
+            ['fleet_vehicle_id' => 2, 'starts_at' => '2026-06-10 08:00:00', 'ends_at' => '2026-06-11 08:00:00', 'status_code' => 'completed'],
+        ]);
+        $repository->method('fleetVehicles')->willReturn([
+            ['id' => 1, 'is_available_for_booking' => true, 'in_service_date' => null, 'out_of_service_date' => null],
+            ['id' => 2, 'is_available_for_booking' => true, 'in_service_date' => null, 'out_of_service_date' => null],
+        ]);
 
         $summary = (new TripAnalyticsService($repository))->summary(new DateTimeImmutable('2026-06-01'), new DateTimeImmutable('2026-07-01'));
 
@@ -203,9 +252,12 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
         $repository = $this->repositoryMock([
             'revenueMonthly',
             'operatingCosts',
+            'operatingCostSignals',
             'fleetCapital',
             'tripAnalytics',
             'repeatedGuests',
+            'operationalReservationsBetween',
+            'fleetVehicles',
         ]);
         $repository->method('revenueMonthly')->willReturn([]);
         $repository->method('operatingCosts')->willReturn([
@@ -215,11 +267,26 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
             'loan_payments' => 0.0,
             'insurance_premiums' => 0.0,
         ]);
+        $repository->method('operatingCostSignals')->willReturn([
+            'maintenance_rows' => 0,
+            'charging_rows' => 0,
+            'airport_delivery_rows' => 0,
+            'active_loan_rows' => 0,
+            'active_insurance_rows' => 0,
+            'has_operating_cost_data' => false,
+        ]);
         $repository->method('fleetCapital')->willReturn(['startup_costs' => 0.0]);
         $repository->method('tripAnalytics')->willReturn([]);
         $repository->method('repeatedGuests')->willReturn([]);
+        $repository->method('operationalReservationsBetween')->willReturn([]);
+        $repository->method('fleetVehicles')->willReturn([
+            ['id' => 1, 'is_available_for_booking' => true, 'in_service_date' => null, 'out_of_service_date' => null],
+        ]);
 
-        $revenue = (new RevenueService($repository))->period('2026-06-01', '2026-06-01');
+        $transactions = $this->transactionRepositoryMock(['operatingRevenueInPeriod']);
+        $transactions->method('operatingRevenueInPeriod')->willReturn(0.0);
+
+        $revenue = (new RevenueService($repository, $transactions))->period('2026-06-01', '2026-06-01');
         $analytics = (new TripAnalyticsService($repository))->summary(new DateTimeImmutable('2026-06-01'), new DateTimeImmutable('2026-07-01'));
 
         $this->assertSame(0.0, $revenue['completed_revenue']);
@@ -234,8 +301,8 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
 
     public function testTaskServiceReturnsTodayAndHighPriorityWork(): void
     {
-        $repository = $this->repositoryMock(['reservationsBetween', 'airportDeliveriesBetween']);
-        $repository->method('reservationsBetween')->willReturn([
+        $repository = $this->repositoryMock(['operationalReservationsBetween', 'airportDeliveriesBetween']);
+        $repository->method('operationalReservationsBetween')->willReturn([
             ['starts_at' => '2026-06-15 08:00:00', 'ends_at' => '2026-06-17 08:00:00'],
             ['starts_at' => '2026-06-14 08:00:00', 'ends_at' => '2026-06-15 10:00:00'],
         ]);
@@ -401,6 +468,18 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
         $this->assertFalse($viewModel['import_issues']['has_unresolved']);
         $this->assertFalse($viewModel['vehicle_mappings']['has_unmatched']);
         $this->assertFalse($viewModel['trip_reconciliation']['has_reconciliation_work']);
+
+        $financialCards = array_values(array_filter($viewModel['financial'], static fn (array $card): bool => ($card['label'] ?? '') === 'Month-to-Date Utilization'));
+        $this->assertCount(1, $financialCards);
+        $this->assertSame('Occupied vehicle-days this month', $financialCards[0]['detail']);
+
+        $kpiCards = array_values(array_filter($viewModel['executive_kpis'], static fn (array $card): bool => ($card['label'] ?? '') === 'Year-to-Date + 7-Day Utilization'));
+        $this->assertCount(1, $kpiCards);
+        $this->assertSame('Occupied vehicle-days through the operational horizon', $kpiCards[0]['detail']);
+
+        $this->assertNotContains('Fleet Utilization', array_column($viewModel['financial'], 'label'));
+        $this->assertNotContains('Average Occupancy', array_column($viewModel['executive_kpis'], 'label'));
+
         $this->assertSame('Good Morning, Jay.', $viewModel['daily_operations']['briefing']['greeting']);
         $this->assertSame([], $viewModel['health_alerts']);
         $this->assertSame('Reserved', $viewModel['future_integrations'][0]['status']);
@@ -471,6 +550,15 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
     private function repositoryMock(array $methods): FleetIntelligenceRepository&MockObject
     {
         return $this->getMockBuilder(FleetIntelligenceRepository::class)
+            ->disableOriginalConstructor()
+            ->onlyMethods($methods)
+            ->getMock();
+    }
+
+    /** @param array<int, string> $methods */
+    private function transactionRepositoryMock(array $methods): TuroNormalizedTransactionRepository&MockObject
+    {
+        return $this->getMockBuilder(TuroNormalizedTransactionRepository::class)
             ->disableOriginalConstructor()
             ->onlyMethods($methods)
             ->getMock();
