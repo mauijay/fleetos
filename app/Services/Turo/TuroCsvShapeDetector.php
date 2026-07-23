@@ -21,9 +21,27 @@ class TuroCsvShapeDetector
     {
         $headers = $this->normalize($headers);
 
-        $hasTransactionMarker = $this->containsAny($headers, ['transaction_id', 'earnings_id', 'payout_id', 'transaction_date']);
-        $hasTypeMarker = $this->containsAny($headers, ['transaction_type', 'type', 'category', 'details', 'description']);
-        $hasAmountMarker = $this->containsAny($headers, ['amount', 'total', 'net_amount', 'host_earnings']);
+        // Turo earnings exports vary by account/report version.
+        $hasTransactionMarker = $this->containsAny($headers, [
+            'transaction_id',
+            'earnings_id',
+            'payout_id',
+            'transaction_date',
+            'date',
+            'created_at',
+            'processed_at',
+        ]);
+        $hasTypeMarker = $this->containsAny($headers, [
+            'transaction_type',
+            'earnings_type',
+            'type',
+            'category',
+            'details',
+            'description',
+        ]);
+        $hasAmountMarker = $this->containsAny($headers, [
+            ...TuroEarningsAmountResolver::aliases(),
+        ]);
 
         return $hasTransactionMarker && $hasTypeMarker && $hasAmountMarker;
     }

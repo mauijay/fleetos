@@ -3,20 +3,26 @@
 namespace App\Validation\Turo;
 
 use App\DTOs\Turo\ValidationIssue;
+use App\Services\Turo\TuroEarningsAmountResolver;
 use DateTimeImmutable;
 
 class TuroEarningsCsvValidator
 {
+    public function __construct(
+        private readonly TuroEarningsAmountResolver $amountResolver = new TuroEarningsAmountResolver(),
+    ) {
+    }
+
     /** @return ValidationIssue[] */
     public function validate(array $row): array
     {
         $issues = [];
 
-        $amount = $this->value($row, ['amount', 'total', 'net_amount', 'host_earnings']);
-        if ($amount === null) {
+        $resolvedAmount = $this->amountResolver->resolve($row);
+        if ($resolvedAmount === null) {
             $issues[] = new ValidationIssue('missing_amount', 'Earnings row is missing an amount value.', 'amount');
-        } elseif ($this->money($amount) === null) {
-            $issues[] = new ValidationIssue('invalid_money', "Money value in amount could not be read. Use a format like 100.00 or $100.00; received '{$this->preview($amount)}'.", 'amount');
+        } elseif ($resolvedAmount->parsedValue === null) {
+            $issues[] = new ValidationIssue('invalid_money', "Money value in amount could not be read. Use a format like 100.00 or $100.00; received '{$this->preview($resolvedAmount->rawValue)}'.", 'amount');
         }
 
         $transactionDate = $this->value($row, ['transaction_date', 'date', 'created_at', 'processed_at']);
@@ -42,6 +48,11 @@ class TuroEarningsCsvValidator
         return null;
     }
 
+    public function resolveAmount(array $row): ?\App\DTOs\Turo\ResolvedEarningsAmount
+    {
+        return $this->amountResolver->resolve($row);
+    }
+
     private function date(string $value): ?DateTimeImmutable
     {
         try {
@@ -49,17 +60,6 @@ class TuroEarningsCsvValidator
         } catch (\Throwable) {
             return null;
         }
-    }
-
-    private function money(string $value): ?string
-    {
-        $normalized = preg_replace('/[^0-9.\-]/', '', $value);
-
-        if ($normalized === null || $normalized === '' || ! is_numeric($normalized)) {
-            return null;
-        }
-
-        return number_format((float) $normalized, 2, '.', '');
     }
 
     private function preview(string $value): string

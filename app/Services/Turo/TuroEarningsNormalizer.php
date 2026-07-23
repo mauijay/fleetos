@@ -10,6 +10,9 @@ class TuroEarningsNormalizer
 {
     public function __construct(
         private readonly TuroNormalizedTripRepository $trips = new TuroNormalizedTripRepository(),
+        private readonly TuroEarningsAmountResolver $amountResolver = new TuroEarningsAmountResolver(),
+        private readonly TuroReservationUrlTripIdExtractor $reservationUrlTripIdExtractor = new TuroReservationUrlTripIdExtractor(),
+        private readonly TuroTransactionEventClassMapper $eventClassMapper = new TuroTransactionEventClassMapper(),
     ) {
     }
 
@@ -23,6 +26,9 @@ class TuroEarningsNormalizer
             $fleetVehicleId = null;
         }
 
+        $resolvedAmount = $this->amountResolver->resolve($row->payload);
+        $normalizedType = $this->normalizedType($row->payload, $transactionType, $description);
+
         return new NormalizedTransactionData(
             turoTransactionRawId: $rawTransactionId,
             turoTripNormalizedId: $trip === null ? null : (int) $trip['id'],
@@ -30,9 +36,10 @@ class TuroEarningsNormalizer
             externalTransactionId: $row->externalTransactionId,
             externalTripId: $row->externalTripId,
             transactionType: $transactionType,
-            normalizedType: $this->normalizedType($transactionType, $description),
+            normalizedType: $normalizedType,
+            eventClass: $this->eventClassMapper->eventClassForType($normalizedType),
             description: $description,
-            amount: $this->money($this->value($row->payload, ['amount', 'total', 'net_amount', 'host_earnings']) ?? '0') ?? '0.00',
+            amount: $resolvedAmount?->parsedValue ?? '0.00',
             currencyCode: strtoupper($this->value($row->payload, ['currency', 'currency_code']) ?? 'USD'),
             transactionDate: $this->date($row->transactionDate),
             rowFingerprint: $this->fingerprint($row),
@@ -50,8 +57,16 @@ class TuroEarningsNormalizer
         return null;
     }
 
-    private function normalizedType(string $transactionType, ?string $description): string
+    private function normalizedType(array $payload, string $transactionType, ?string $description): string
     {
+        if ($this->isTripEarningType($payload, $transactionType, $description)) {
+            return 'trip_earning';
+        }
+
+        if ($this->isPaymentType($transactionType)) {
+            return 'payment';
+        }
+
         $haystack = strtolower(trim($transactionType . ' ' . ($description ?? '')));
 
         if (str_contains($haystack, 'reimbursement')) {
@@ -70,22 +85,24 @@ class TuroEarningsNormalizer
             return 'fee';
         }
 
-        if (str_contains($haystack, 'payment') || str_contains($haystack, 'earning') || str_contains($haystack, 'payout')) {
-            return 'payment';
-        }
-
         return 'other';
     }
 
-    private function money(string $value): ?string
+    private function isTripEarningType(array $payload, string $transactionType, ?string $description): bool
     {
-        $normalized = preg_replace('/[^0-9.\-]/', '', $value);
-
-        if ($normalized === null || $normalized === '' || ! is_numeric($normalized)) {
-            return null;
+        $reservationUrl = $this->value($payload, ['reservation_url']);
+        if ($this->reservationUrlTripIdExtractor->extract($reservationUrl) === null) {
+            return false;
         }
 
-        return number_format((float) $normalized, 2, '.', '');
+        $combined = trim($transactionType . ' ' . ($description ?? ''));
+
+        return preg_match('/\btrip\s+with\b/i', $combined) === 1;
+    }
+
+    private function isPaymentType(string $transactionType): bool
+    {
+        return preg_match('/^payment\s*\(.+\)$/i', trim($transactionType)) === 1;
     }
 
     private function date(?string $value): ?string
@@ -103,15 +120,23 @@ class TuroEarningsNormalizer
 
     private function fingerprint(RawTransactionRow $row): string
     {
+        $resolvedAmount = $this->amountResolver->resolve($row->payload);
+
         $components = [
             strtolower($row->externalTransactionId ?? ''),
             strtolower($row->externalTripId ?? ''),
             strtolower($this->value($row->payload, ['transaction_type', 'type', 'category', 'details']) ?? ''),
-            strtolower($this->money($this->value($row->payload, ['amount', 'total', 'net_amount', 'host_earnings']) ?? '0') ?? '0.00'),
+            strtolower($resolvedAmount?->parsedValue ?? '0.00'),
+            strtolower($resolvedAmount?->column ?? ''),
             strtolower($this->date($row->transactionDate) ?? ''),
             $row->rowHash,
         ];
 
         return hash('sha256', implode('|', $components));
+    }
+
+    public function resolveAmount(array $payload): ?\App\DTOs\Turo\ResolvedEarningsAmount
+    {
+        return $this->amountResolver->resolve($payload);
     }
 }

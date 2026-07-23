@@ -43,4 +43,66 @@ final class TuroEarningsCsvValidatorTest extends CIUnitTestCase
         $this->assertStringContainsString('Use a format like 100.00 or $100.00', $issues[0]->message);
         $this->assertStringContainsString('not money', $issues[0]->message);
     }
+
+    public function testEarningsExportAliasesAreAcceptedForAmount(): void
+    {
+        $issues = (new TuroEarningsCsvValidator())->validate([
+            'type' => 'Trip payment',
+            'date' => '2026-01-01',
+            'earnings' => '$120.00',
+        ]);
+
+        $this->assertSame([], $issues);
+
+        $paymentOnlyIssues = (new TuroEarningsCsvValidator())->validate([
+            'type' => 'Payment',
+            'date' => '2026-01-01',
+            'payment' => '$500.00',
+        ]);
+
+        $this->assertSame([], $paymentOnlyIssues);
+    }
+
+    public function testBlankMonetaryFieldsStillProduceMissingAmount(): void
+    {
+        $issues = (new TuroEarningsCsvValidator())->validate([
+            'type' => 'Trip payment',
+            'date' => '2026-01-01',
+            'earnings' => '   ',
+            'payment' => '',
+            'failed_payment' => null,
+        ]);
+
+        $this->assertSame('missing_amount', $issues[0]->code);
+    }
+
+    public function testExplicitZeroAmountIsValid(): void
+    {
+        $issues = (new TuroEarningsCsvValidator())->validate([
+            'type' => 'Trip payment',
+            'date' => '2026-01-01',
+            'earnings' => '$0.00',
+        ]);
+
+        $this->assertSame([], $issues);
+    }
+
+    public function testMonetaryFormattingParsesUsingExistingMoneyParserRules(): void
+    {
+        $validator = new TuroEarningsCsvValidator();
+
+        $negativeIssues = $validator->validate([
+            'type' => 'Adjustment',
+            'date' => '2026-01-01',
+            'earnings' => '-$1,234.56',
+        ]);
+        $this->assertSame([], $negativeIssues);
+
+        $parenthesesIssues = $validator->validate([
+            'type' => 'Adjustment',
+            'date' => '2026-01-01',
+            'earnings' => '($12.34)',
+        ]);
+        $this->assertSame([], $parenthesesIssues);
+    }
 }

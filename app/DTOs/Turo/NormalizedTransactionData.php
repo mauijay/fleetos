@@ -12,6 +12,7 @@ class NormalizedTransactionData
         public readonly ?string $externalTripId,
         public readonly string $transactionType,
         public readonly string $normalizedType,
+        public readonly string $eventClass,
         public readonly ?string $description,
         public readonly string $amount,
         public readonly string $currencyCode,

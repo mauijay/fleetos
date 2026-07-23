@@ -1,0 +1,7 @@
+type,reservation_url,vehicle,vehicle_id,date,earnings,payment,failed_payment
+Wice trip With Tesla Model Y 2026,https://turo.com/reservation/59419470,Tesla Model Y 2026,3752185,2026-07-21,$63.18,,
+Payment(......0811),N/A,,,2026-07-21,,$4.14,
+Ria trip With Tesla Model Y 2026,https://turo.com/reservation/59133253,Tesla Model Y 2026,3775859,2026-07-21,-$71.28,,
+Failed Payment(......0811),N/A,,,2026-07-20,,,$15.00
+Adjustment fee,N/A,,,2026-07-19,($12.34),,
+Zero payout,N/A,,,2026-07-18,$0.00,,

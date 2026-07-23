@@ -135,7 +135,7 @@
                 <div class="import-notes" aria-label="Earnings import behavior">
                     <div>
                         <strong>Keeps ledgers separate</strong>
-                        <p>Earnings rows are normalized into transaction categories (payment, fee, reimbursement, adjustment, tax, other) without mutating trip operational records.</p>
+                        <p>Earnings rows are normalized into transaction categories (trip_earning, payment, other) without mutating trip operational records.</p>
                     </div>
                     <div>
                         <strong>Prevents wrong-file mistakes</strong>
