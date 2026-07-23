@@ -11,6 +11,9 @@ class ImportResult
         public readonly int $tripsNormalized,
         public readonly int $allocationRowsCreated,
         public readonly int $errorCount,
+        public readonly int $skippedRows = 0,
+        public readonly int $duplicateRows = 0,
+        public readonly int $unmatchedRows = 0,
     ) {
     }
 }

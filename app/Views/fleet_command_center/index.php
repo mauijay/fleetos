@@ -325,6 +325,8 @@
                     <?php endforeach; ?>
                 </div>
             </section>
+
+            <?= view('fleet_command_center/components/footer') ?>
         </main>
 
         <?= view('fleet_command_center/components/activity_panel', ['activity' => $commandCenter['activity']]) ?>

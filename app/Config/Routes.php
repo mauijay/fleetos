@@ -7,6 +7,7 @@ $routes->group('', ['filter' => 'session'], static function (RouteCollection $ro
 	$routes->get('/', 'Home::index');
 	$routes->get('turo/imports', 'TuroImports::index');
 	$routes->post('turo/imports', 'TuroImports::store');
+	$routes->post('turo/earnings-imports', 'TuroImports::storeEarnings');
 	$routes->get('turo/import-issues', 'TuroImportIssues::index');
 	$routes->post('turo/import-issues/(:num)/resolve', 'TuroImportIssues::resolve/$1');
 	$routes->post('turo/import-issues/(:num)/reopen', 'TuroImportIssues::reopen/$1');

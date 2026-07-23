@@ -3,7 +3,6 @@
 namespace App\Controllers;
 
 use App\DTOs\Turo\ImportResult;
-use App\Services\Turo\TuroTripImportService;
 use CodeIgniter\HTTP\RedirectResponse;
 use Throwable;
 
@@ -14,8 +13,10 @@ class TuroImports extends BaseController
         return view('turo_imports/index', [
             'assets' => service('assetManifestService')->appAssets(),
             'navigation' => $this->navigation(),
-            'result' => session()->getFlashdata('turo_import_result'),
-            'error' => session()->getFlashdata('turo_import_error'),
+            'trip_result' => session()->getFlashdata('turo_trip_import_result'),
+            'trip_error' => session()->getFlashdata('turo_trip_import_error'),
+            'earnings_result' => session()->getFlashdata('turo_earnings_import_result'),
+            'earnings_error' => session()->getFlashdata('turo_earnings_import_error'),
         ]);
     }
 
@@ -24,11 +25,11 @@ class TuroImports extends BaseController
         $file = $this->request->getFile('trips_csv');
 
         if ($file === null || ! $file->isValid()) {
-            return redirect()->back()->with('turo_import_error', 'Choose a Turo trips CSV file to import.');
+            return redirect()->back()->with('turo_trip_import_error', 'Choose a Turo trips CSV file to import.');
         }
 
         if (! in_array(strtolower($file->getClientExtension()), ['csv', 'txt'], true)) {
-            return redirect()->back()->with('turo_import_error', 'Upload a CSV file exported from Turo.');
+            return redirect()->back()->with('turo_trip_import_error', 'Upload a CSV file exported from Turo.');
         }
 
         $uploadPath = WRITEPATH . 'uploads/turo-imports';
@@ -41,16 +42,50 @@ class TuroImports extends BaseController
         $filePath = $uploadPath . DIRECTORY_SEPARATOR . $storedName;
 
         try {
-            $result = (new TuroTripImportService())->import($filePath, null, $file->getClientName());
+            $result = service('turoTripImportService')->import($filePath, null, $file->getClientName());
         } catch (Throwable $exception) {
             $this->removeUploadedFile($filePath);
 
-            return redirect()->back()->with('turo_import_error', $exception->getMessage());
+            return redirect()->back()->with('turo_trip_import_error', $exception->getMessage());
         }
 
         $this->removeUploadedFile($filePath);
 
-        return redirect()->to('/turo/imports')->with('turo_import_result', $this->resultSummary($result));
+        return redirect()->to('/turo/imports')->with('turo_trip_import_result', $this->resultSummary($result));
+    }
+
+    public function storeEarnings(): RedirectResponse
+    {
+        $file = $this->request->getFile('earnings_csv');
+
+        if ($file === null || ! $file->isValid()) {
+            return redirect()->back()->with('turo_earnings_import_error', 'Choose a Turo earnings CSV file to import.');
+        }
+
+        if (! in_array(strtolower($file->getClientExtension()), ['csv', 'txt'], true)) {
+            return redirect()->back()->with('turo_earnings_import_error', 'Upload a CSV file exported from Turo.');
+        }
+
+        $uploadPath = WRITEPATH . 'uploads/turo-imports';
+        if (! is_dir($uploadPath)) {
+            mkdir($uploadPath, 0775, true);
+        }
+
+        $storedName = $file->getRandomName();
+        $file->move($uploadPath, $storedName);
+        $filePath = $uploadPath . DIRECTORY_SEPARATOR . $storedName;
+
+        try {
+            $result = service('turoEarningsImportService')->import($filePath, null, $file->getClientName());
+        } catch (Throwable $exception) {
+            $this->removeUploadedFile($filePath);
+
+            return redirect()->back()->with('turo_earnings_import_error', $exception->getMessage());
+        }
+
+        $this->removeUploadedFile($filePath);
+
+        return redirect()->to('/turo/imports')->with('turo_earnings_import_result', $this->resultSummary($result));
     }
 
     /** @return array<int, array<string, string>> */
@@ -80,6 +115,9 @@ class TuroImports extends BaseController
             'trips_normalized' => $result->tripsNormalized,
             'allocation_rows_created' => $result->allocationRowsCreated,
             'row_issues' => $result->errorCount,
+            'rows_skipped' => $result->skippedRows,
+            'rows_duplicate' => $result->duplicateRows,
+            'rows_unmatched' => $result->unmatchedRows,
         ];
     }
 

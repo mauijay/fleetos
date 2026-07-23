@@ -8,6 +8,21 @@ use CodeIgniter\Test\CIUnitTestCase;
  */
 final class TuroTripCsvValidatorTest extends CIUnitTestCase
 {
+    public function testMissingStatusIsWarningInsteadOfError(): void
+    {
+        $issues = (new TuroTripCsvValidator())->validate([
+            'trip_id' => 'abc123',
+            'starts_at' => '2026-01-01 10:00:00',
+            'ends_at' => '2026-01-03 10:00:00',
+            'host_payout' => '$240.00',
+        ]);
+
+        $warning = array_values(array_filter($issues, static fn ($issue): bool => $issue->code === 'missing_status'));
+
+        $this->assertCount(1, $warning);
+        $this->assertSame('warning', $warning[0]->severity);
+    }
+
     public function testValidTripRowHasNoErrors(): void
     {
         $issues = (new TuroTripCsvValidator())->validate([
@@ -18,7 +33,8 @@ final class TuroTripCsvValidatorTest extends CIUnitTestCase
             'host_payout' => '$240.00',
         ]);
 
-        $this->assertSame([], $issues);
+        $errors = array_values(array_filter($issues, static fn ($issue): bool => $issue->severity === 'error'));
+        $this->assertSame([], $errors);
     }
 
     public function testMissingTripIdIsError(): void

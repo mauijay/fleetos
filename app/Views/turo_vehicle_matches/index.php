@@ -158,6 +158,8 @@ $summary = $queue['summary'];
                     <?php endforeach; ?>
                 </div>
             </section>
+
+            <?= view('fleet_command_center/components/footer') ?>
         </main>
     </div>
 

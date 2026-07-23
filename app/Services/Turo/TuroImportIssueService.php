@@ -96,7 +96,7 @@ class TuroImportIssueService
             'source_label' => '#' . (string) $row['turo_import_batch_id'] . ' ' . ((string) ($row['source_filename'] ?? 'Turo import')),
             'plain_message' => $this->plainMessage((string) ($row['error_code'] ?? ''), (string) ($row['message'] ?? ''), $payload),
             'raw_payload_array' => $payload,
-            'vehicle_label' => $this->firstValue($payload, ['vehicle_name', 'car_name', 'fleet_code', 'vehicle_id', 'turo_vehicle_id', 'car_id']) ?? 'Not provided',
+            'vehicle_label' => $this->firstValue($payload, ['vehicle', 'vehicle_name', 'car_name', 'fleet_code', 'vehicle_id', 'turo_vehicle_id', 'car_id']) ?? 'Not provided',
             'external_vehicle_id' => $externalVehicleId,
             'vehicle_mapping_status' => $mapping === null ? 'Not mapped' : 'Mapped to ' . (string) ($mapping['fleet_code'] ?? $mapping['display_name'] ?? 'FleetOS vehicle'),
             'vehicle_mapping_href' => $externalVehicleId === null ? null : '/turo/vehicle-matches?status=all&vehicle=' . rawurlencode($externalVehicleId),

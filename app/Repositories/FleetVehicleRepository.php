@@ -36,12 +36,51 @@ class FleetVehicleRepository
             return null;
         }
 
+        $fleetCode = trim($fleetCode);
         $row = $this->db->table('fleet_vehicles')
             ->select('id')
-            ->where('fleet_code', trim($fleetCode))
+            ->where('fleet_code', $fleetCode)
             ->get()
             ->getRowArray();
 
-        return $row === null ? null : (int) $row['id'];
+        if ($row !== null) {
+            return (int) $row['id'];
+        }
+
+        $normalizedFleetCode = $this->normalizedFleetCode($fleetCode);
+        if ($normalizedFleetCode === null) {
+            return null;
+        }
+
+        $vehicles = $this->db->table('fleet_vehicles')
+            ->select('id, fleet_code, display_name')
+            ->get()
+            ->getResultArray();
+
+        foreach ($vehicles as $vehicle) {
+            if (
+                $this->normalizedFleetCode((string) ($vehicle['fleet_code'] ?? '')) === $normalizedFleetCode
+                || $this->normalizedFleetCode((string) ($vehicle['display_name'] ?? '')) === $normalizedFleetCode
+            ) {
+                return (int) $vehicle['id'];
+            }
+        }
+
+        return null;
+    }
+
+    private function normalizedFleetCode(?string $fleetCode): ?string
+    {
+        if ($fleetCode === null || trim($fleetCode) === '') {
+            return null;
+        }
+
+        if (preg_match('/spaceship\D*0*(\d+)/i', $fleetCode, $matches) === 1) {
+            return 'spaceship' . str_pad((string) ((int) $matches[1]), 2, '0', STR_PAD_LEFT);
+        }
+
+        $normalized = preg_replace('/[^a-z0-9]/i', '', strtolower($fleetCode));
+
+        return $normalized === null || $normalized === '' ? null : $normalized;
     }
 }

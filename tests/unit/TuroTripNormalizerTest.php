@@ -73,7 +73,28 @@ final class TuroTripNormalizerTest extends CIUnitTestCase
         $this->assertSame(101, $trip->tripStatusLookupValueId);
     }
 
-    private function normalizer(?int $matchedVehicleId = 9): TuroTripNormalizer
+    public function testVehicleColumnIsUsedForFleetMatching(): void
+    {
+        $trip = $this->normalizer(matcherCallback: function (?string $turoVehicleId, ?string $fleetCode): int {
+            $this->assertSame('3775859', $turoVehicleId);
+            $this->assertSame('Spaceship-008 (HI #651359)', $fleetCode);
+
+            return 8;
+        })->normalize($this->rawRow([
+            'trip_id' => 'trip-spaceship-label',
+            'vehicle_id' => '3775859',
+            'vehicle' => 'Spaceship-008 (HI #651359)',
+            'vehicle_name' => 'Tesla Model Y 2026',
+            'status' => 'Completed',
+            'starts_at' => '2026-05-01 10:00:00',
+            'ends_at' => '2026-05-03 10:00:00',
+            'host_payout' => '$220.00',
+        ]), 44);
+
+        $this->assertSame(8, $trip->fleetVehicleId);
+    }
+
+    private function normalizer(?int $matchedVehicleId = 9, ?callable $matcherCallback = null): TuroTripNormalizer
     {
         $lookups = $this->getMockBuilder(LookupRepository::class)
             ->disableOriginalConstructor()
@@ -95,7 +116,11 @@ final class TuroTripNormalizerTest extends CIUnitTestCase
             ->disableOriginalConstructor()
             ->onlyMethods(['match'])
             ->getMock();
-        $matcher->method('match')->willReturn($matchedVehicleId);
+        if ($matcherCallback !== null) {
+            $matcher->method('match')->willReturnCallback($matcherCallback);
+        } else {
+            $matcher->method('match')->willReturn($matchedVehicleId);
+        }
 
         return new TuroTripNormalizer($lookups, $matcher);
     }

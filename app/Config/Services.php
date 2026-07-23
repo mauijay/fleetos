@@ -33,6 +33,7 @@ use App\Services\Fleet\TripAnalyticsService;
 use App\Services\Fleet\VehicleAvailabilityService;
 use App\Services\Files\PrivateFileStorageService;
 use App\Services\Turo\TuroImportIssueService;
+use App\Services\Turo\TuroEarningsImportService;
 use App\Services\Turo\TuroTripImportService;
 use App\Services\Turo\TuroTripReconciliationService;
 use App\Services\Turo\TuroVehicleMappingService;
@@ -197,6 +198,15 @@ class Services extends BaseService
         }
 
         return new TuroTripImportService();
+    }
+
+    public static function turoEarningsImportService(bool $getShared = true): TuroEarningsImportService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('turoEarningsImportService');
+        }
+
+        return new TuroEarningsImportService();
     }
 
     public static function turoTripReconciliationService(bool $getShared = true): TuroTripReconciliationService

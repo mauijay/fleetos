@@ -25,6 +25,7 @@ class TuroTripImportService
     public function __construct(
         ?BaseConnection $db = null,
         private readonly TuroCsvReader $csvReader = new TuroCsvReader(),
+        private readonly TuroCsvShapeDetector $shapeDetector = new TuroCsvShapeDetector(),
         private readonly TuroTripCsvValidator $validator = new TuroTripCsvValidator(),
         private readonly TuroTripNormalizer $normalizer = new TuroTripNormalizer(),
         private readonly TripMonthAllocationService $allocationService = new TripMonthAllocationService(),
@@ -41,6 +42,16 @@ class TuroTripImportService
 
     public function import(string $filePath, ?int $actorUserId = null, ?string $sourceFilename = null): ImportResult
     {
+        $headers = $this->csvReader->headers($filePath);
+
+        if ($this->shapeDetector->isEarningsExport($headers)) {
+            throw new RuntimeException('This file matches earnings_export. Use the Earnings importer instead of the Trips importer.');
+        }
+
+        if (! $this->shapeDetector->isTripExport($headers)) {
+            throw new RuntimeException('This CSV does not match trip_earnings_export. Upload a Turo trip earnings export with trip id and trip start/end columns.');
+        }
+
         $sourceHash = hash_file('sha256', $filePath);
 
         if ($sourceHash === false) {

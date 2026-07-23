@@ -86,6 +86,8 @@
                 <?php endif; ?>
             </section>
         <?php endif; ?>
+
+        <?= view('fleet_command_center/components/footer') ?>
     </main>
 </body>
 </html>

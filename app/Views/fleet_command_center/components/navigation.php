@@ -12,6 +12,7 @@
             </a>
         <?php endforeach; ?>
     </nav>
+    <?= view('fleet_command_center/components/auth_links') ?>
 </details>
 
 <aside class="side-nav" aria-label="Primary navigation">
@@ -29,4 +30,5 @@
             </a>
         <?php endforeach; ?>
     </nav>
+    <?= view('fleet_command_center/components/auth_links') ?>
 </aside>

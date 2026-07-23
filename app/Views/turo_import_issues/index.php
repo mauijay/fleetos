@@ -180,6 +180,8 @@ $summary = $review['summary'];
                     </nav>
                 <?php endif; ?>
             </section>
+
+            <?= view('fleet_command_center/components/footer') ?>
         </main>
     </div>
 

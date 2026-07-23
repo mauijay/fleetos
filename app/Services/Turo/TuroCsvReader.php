@@ -9,6 +9,27 @@ use SplFileObject;
 
 class TuroCsvReader
 {
+    /** @return array<int, string> */
+    public function headers(string $filePath): array
+    {
+        if (! is_file($filePath) || ! is_readable($filePath)) {
+            throw new RuntimeException("CSV file is not readable: {$filePath}");
+        }
+
+        $file = new SplFileObject($filePath, 'r');
+        $file->setFlags(SplFileObject::READ_CSV | SplFileObject::SKIP_EMPTY | SplFileObject::DROP_NEW_LINE);
+
+        foreach ($file as $row) {
+            if ($row === [null] || $row === false) {
+                continue;
+            }
+
+            return $this->normalizeHeaders($row);
+        }
+
+        return [];
+    }
+
     /** @return Generator<int, CsvRowResult> */
     public function read(string $filePath): Generator
     {

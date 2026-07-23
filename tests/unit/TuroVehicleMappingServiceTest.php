@@ -50,6 +50,24 @@ final class TuroVehicleMappingServiceTest extends CIUnitTestCase
         $this->assertSame(9, $matcher->match('turo-009'));
     }
 
+    public function testMatcherHandlesOldAndNewSpaceshipNamingConventions(): void
+    {
+        $matcher = new TuroVehicleMatcher(new FleetVehicleRepository($this->connection));
+
+        $this->assertSame(8, $matcher->match(null, 'Spaceship-008 (HI #651359)'));
+        $this->assertSame(8, $matcher->match(null, 'Spaceship_008'));
+        $this->assertSame(9, $matcher->match(null, 'Spaceship09'));
+    }
+
+    public function testMatcherPersistsInferredTuroVehicleIdMapping(): void
+    {
+        $matcher = new TuroVehicleMatcher(new FleetVehicleRepository($this->connection), new VehicleTuroListingRepository($this->connection));
+
+        $this->assertSame(8, $matcher->match('3775859', 'Spaceship-008 (HI #651359)'));
+        $this->assertSame(8, (int) $this->connection->table('vehicle_turo_listings')->where('turo_vehicle_id', '3775859')->get()->getRowArray()['fleet_vehicle_id']);
+        $this->assertSame(8, $matcher->match('3775859', 'Jay\'s Tesla'));
+    }
+
     public function testDuplicateExternalMappingIsPreventedWithoutConfirmation(): void
     {
         $this->service->map('turo-009', 9);
@@ -89,9 +107,21 @@ final class TuroVehicleMappingServiceTest extends CIUnitTestCase
         $this->assertSame(8, $byExternalId['turo-plate']['suggestion']['fleet_vehicle_id']);
     }
 
+    public function testVehicleColumnCanDriveStrongMatchSuggestion(): void
+    {
+        $this->insertIssue(4, 'turo-spaceship-008', 'Tesla Model Y 2026', ['vehicle' => 'Spaceship-008 (HI #651359)']);
+
+        $queue = $this->service->queue();
+        $byExternalId = array_column($queue['items'], null, 'turo_vehicle_id');
+
+        $this->assertSame('Spaceship-008 (HI #651359)', $byExternalId['turo-spaceship-008']['vehicle_name']);
+        $this->assertSame('Strong', $byExternalId['turo-spaceship-008']['suggestion']['confidence']);
+        $this->assertSame(8, $byExternalId['turo-spaceship-008']['suggestion']['fleet_vehicle_id']);
+    }
+
     public function testAmbiguousSpecMatchIsNotTreatedAsExact(): void
     {
-        $this->insertIssue(4, 'turo-ambiguous', '2026 Tesla Model Y', ['year' => '2026', 'make' => 'Tesla', 'model' => 'Model Y', 'trim' => 'Long Range']);
+        $this->insertIssue(5, 'turo-ambiguous', '2026 Tesla Model Y', ['year' => '2026', 'make' => 'Tesla', 'model' => 'Model Y', 'trim' => 'Long Range']);
 
         $queue = $this->service->queue();
         $byExternalId = array_column($queue['items'], null, 'turo_vehicle_id');
@@ -163,8 +193,8 @@ final class TuroVehicleMappingServiceTest extends CIUnitTestCase
         $this->connection->table('vehicle_specs')->insert(['id' => 1, 'vehicle_model_id' => 1, 'model_year' => 2026]);
         $this->connection->table('vehicle_trim_levels')->insert(['id' => 1, 'name' => 'Long Range']);
         $this->connection->table('fleet_vehicles')->insertBatch([
-            ['id' => 8, 'fleet_code' => 'Spaceship-008', 'display_name' => 'Spaceship-008', 'vehicle_spec_id' => 1, 'vehicle_trim_level_id' => 1, 'vin' => 'VIN000008', 'license_plate' => 'ABC008', 'sort_order' => 8, 'deleted_at' => null],
-            ['id' => 9, 'fleet_code' => 'Spaceship-009', 'display_name' => 'Spaceship-009', 'vehicle_spec_id' => 1, 'vehicle_trim_level_id' => 1, 'vin' => 'VIN000009', 'license_plate' => 'ABC009', 'sort_order' => 9, 'deleted_at' => null],
+            ['id' => 8, 'fleet_code' => 'Spaceship08', 'display_name' => 'Spaceship08', 'vehicle_spec_id' => 1, 'vehicle_trim_level_id' => 1, 'vin' => 'VIN000008', 'license_plate' => 'ABC008', 'sort_order' => 8, 'deleted_at' => null],
+            ['id' => 9, 'fleet_code' => 'Spaceship09', 'display_name' => 'Spaceship09', 'vehicle_spec_id' => 1, 'vehicle_trim_level_id' => 1, 'vin' => 'VIN000009', 'license_plate' => 'ABC009', 'sort_order' => 9, 'deleted_at' => null],
         ]);
         $this->connection->table('turo_import_batches')->insertBatch([
             ['id' => 1, 'source_filename' => 'july-a.csv', 'started_at' => '2026-07-18 08:00:00'],

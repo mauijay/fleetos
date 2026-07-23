@@ -28,7 +28,7 @@ class TuroTripNormalizer
             : $this->decimal($this->value($row, ['billable_days', 'charged_days', 'trip_days']), $tripDays, 3);
 
         return new NormalizedTripData(
-            fleetVehicleId: $this->vehicleMatcher->match($rawTripRow->externalVehicleId, $this->value($row, ['fleet_code', 'vehicle_name', 'car_name'])),
+            fleetVehicleId: $this->vehicleMatcher->match($rawTripRow->externalVehicleId, $this->value($row, ['fleet_code', 'vehicle', 'vehicle_name', 'car_name'])),
             turoTripRawId: $rawTripId,
             tripStatusLookupValueId: $this->lookups->valueId('trip_status', $statusCode),
             turoTripId: $rawTripRow->externalTripId ?? $this->requiredValue($row, ['trip_id', 'reservation_id', 'booking_id']),

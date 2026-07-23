@@ -43,6 +43,7 @@ class FleetVehicleSeeder extends Seeder
                 'interior_vehicle_color_id' => $blackColorId,
                 'battery_description' => 'Long Range',
                 'features' => [],
+                'turo_vehicle_id' => '3708128',
             ],
             [
                 'fleet_code' => 'Spaceship03',
@@ -56,6 +57,7 @@ class FleetVehicleSeeder extends Seeder
                 'interior_vehicle_color_id' => $blackColorId,
                 'battery_description' => '',
                 'features' => [$fsdFeatureId],
+                'turo_vehicle_id' => '3724889',
             ],
             [
                 'fleet_code' => 'Spaceship04',
@@ -69,6 +71,7 @@ class FleetVehicleSeeder extends Seeder
                 'interior_vehicle_color_id' => $blackColorId,
                 'battery_description' => '',
                 'features' => [],
+                'turo_vehicle_id' => '3733003',
             ],
             [
                 'fleet_code' => 'Spaceship05',
@@ -82,6 +85,7 @@ class FleetVehicleSeeder extends Seeder
                 'interior_vehicle_color_id' => $blackColorId,
                 'battery_description' => '',
                 'features' => [$fsdFeatureId],
+                'turo_vehicle_id' => '3747090',
             ],
             [
                 'fleet_code' => 'Spaceship06',
@@ -95,6 +99,7 @@ class FleetVehicleSeeder extends Seeder
                 'interior_vehicle_color_id' => $blackColorId,
                 'battery_description' => '',
                 'features' => [],
+                'turo_vehicle_id' => '3752185',
             ],
             [
                 'fleet_code' => 'Spaceship07',
@@ -108,6 +113,7 @@ class FleetVehicleSeeder extends Seeder
                 'interior_vehicle_color_id' => $blackColorId,
                 'battery_description' => '',
                 'features' => [$fsdFeatureId, $freeSuperchargingFeatureId],
+                'turo_vehicle_id' => '3775516',
             ],
             [
                 'fleet_code' => 'Spaceship08',
@@ -121,6 +127,7 @@ class FleetVehicleSeeder extends Seeder
                 'interior_vehicle_color_id' => $blackColorId,
                 'battery_description' => '',
                 'features' => [$fsdFeatureId],
+                'turo_vehicle_id' => '3775859',
             ],
             [
                 'fleet_code' => 'Spaceship09',
@@ -134,6 +141,7 @@ class FleetVehicleSeeder extends Seeder
                 'interior_vehicle_color_id' => $blackColorId,
                 'battery_description' => '',
                 'features' => [$fsdFeatureId],
+                'turo_vehicle_id' => '3794525',
             ],
             [
                 'fleet_code' => 'Spaceship10',
@@ -147,6 +155,7 @@ class FleetVehicleSeeder extends Seeder
                 'interior_vehicle_color_id' => $blackColorId,
                 'battery_description' => 'Long Range',
                 'features' => [],
+                'turo_vehicle_id' => '3802766',
             ],
         ];
 
@@ -178,7 +187,51 @@ class FleetVehicleSeeder extends Seeder
                     'vehicle_feature_id' => $featureId,
                 ], []);
             }
+
+            $this->seedTuroListing((string) $vehicle['turo_vehicle_id'], $fleetVehicleId, (string) $vehicle['fleet_code']);
         }
+    }
+
+    private function seedTuroListing(string $turoVehicleId, int $fleetVehicleId, string $fleetCode): void
+    {
+        $now = date('Y-m-d H:i:s');
+        $fields = $this->db->getFieldNames('vehicle_turo_listings');
+        $data = [
+            'fleet_vehicle_id' => $fleetVehicleId,
+            'is_active' => true,
+        ];
+
+        foreach ([
+            'source_system' => 'turo',
+            'listed_at' => $now,
+            'mapping_note' => "Seeded known Turo vehicle ID for {$fleetCode}.",
+            'updated_at' => $now,
+        ] as $field => $value) {
+            if (in_array($field, $fields, true)) {
+                $data[$field] = $value;
+            }
+        }
+
+        $existing = $this->db->table('vehicle_turo_listings')
+            ->where('turo_vehicle_id', $turoVehicleId)
+            ->get()
+            ->getRowArray();
+
+        if ($existing !== null) {
+            $this->db->table('vehicle_turo_listings')
+                ->where('id', (int) $existing['id'])
+                ->update($data);
+
+            return;
+        }
+
+        $insert = array_merge(['turo_vehicle_id' => $turoVehicleId], $data);
+
+        if (in_array('created_at', $fields, true)) {
+            $insert['created_at'] = $now;
+        }
+
+        $this->db->table('vehicle_turo_listings')->insert($insert);
     }
 
     private function lookupValueId(string $typeCode, string $valueCode): ?int

@@ -133,7 +133,7 @@ class TuroVehicleMappingService
             $items[$key] ??= [
                 'turo_vehicle_id' => $turoVehicleId,
                 'turo_listing_id' => $this->firstValue($payload, ['listing_id', 'turo_listing_id']),
-                'vehicle_name' => $this->firstValue($payload, ['vehicle_name', 'car_name', 'fleet_code']) ?? 'Unknown Turo vehicle',
+                'vehicle_name' => $this->firstValue($payload, ['vehicle', 'vehicle_name', 'car_name', 'fleet_code']) ?? 'Unknown Turo vehicle',
                 'year' => $this->firstValue($payload, ['year', 'model_year']),
                 'make' => $this->firstValue($payload, ['make', 'vehicle_make']),
                 'model' => $this->firstValue($payload, ['model', 'vehicle_model']),
