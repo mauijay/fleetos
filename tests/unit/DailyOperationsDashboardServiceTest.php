@@ -1,7 +1,19 @@
 <?php
 
+use App\Services\Fleet\AirportMovementWorkflowService;
+use App\Services\Fleet\DailyOperationsDashboardService;
+use App\Services\Fleet\FleetHealthService;
+use App\Services\Fleet\FleetStatisticsService;
 use App\Services\Fleet\MorningBriefingService;
+use App\Services\Fleet\RevenueService;
+use App\Services\Fleet\TaskService;
+use App\Services\Fleet\TripMovementChecklistService;
+use App\Services\Fleet\TuroAccessReimbursementService;
+use App\Services\Fleet\VehicleAvailabilityService;
 use App\Services\Fleet\VehicleDailyStateService;
+use App\Services\Turo\TuroImportIssueService;
+use App\Services\Turo\TuroTripReconciliationService;
+use App\Services\Turo\TuroVehicleMappingService;
 use CodeIgniter\Test\CIUnitTestCase;
 
 /**
@@ -109,6 +121,44 @@ final class DailyOperationsDashboardServiceTest extends CIUnitTestCase
 
         $this->assertSame('Battery not captured', $board[0]['battery_label']);
         $this->assertSame('Location not captured', $board[0]['location_label']);
+    }
+
+    public function testOperationalQueueAlwaysLinksAirportReceiptInbox(): void
+    {
+        $tasks = $this->getMockBuilder(TaskService::class)->disableOriginalConstructor()->onlyMethods(['today'])->getMock();
+        $availability = $this->getMockBuilder(VehicleAvailabilityService::class)->disableOriginalConstructor()->onlyMethods(['vehicleStatus'])->getMock();
+        $health = $this->getMockBuilder(FleetHealthService::class)->disableOriginalConstructor()->onlyMethods(['summary'])->getMock();
+        $statistics = $this->getMockBuilder(FleetStatisticsService::class)->disableOriginalConstructor()->onlyMethods(['currentMonth'])->getMock();
+        $importIssues = $this->getMockBuilder(TuroImportIssueService::class)->disableOriginalConstructor()->onlyMethods(['attentionSummary'])->getMock();
+        $vehicleMappings = $this->getMockBuilder(TuroVehicleMappingService::class)->disableOriginalConstructor()->onlyMethods(['attentionSummary'])->getMock();
+        $reconciliation = $this->getMockBuilder(TuroTripReconciliationService::class)->disableOriginalConstructor()->onlyMethods(['attentionSummary'])->getMock();
+        $checklists = $this->getMockBuilder(TripMovementChecklistService::class)->disableOriginalConstructor()->onlyMethods(['ensureForDay', 'summariesForDay'])->getMock();
+        $airport = $this->getMockBuilder(AirportMovementWorkflowService::class)->disableOriginalConstructor()->onlyMethods(['attentionSummary'])->getMock();
+        $reimbursements = $this->getMockBuilder(TuroAccessReimbursementService::class)->disableOriginalConstructor()->onlyMethods(['attentionSummary'])->getMock();
+
+        $tasks->method('today')->willReturn(['todays_pickups' => [], 'todays_returns' => [], 'airport_deliveries' => []]);
+        $availability->method('vehicleStatus')->willReturn([]);
+        $health->method('summary')->willReturn($this->emptyHealth());
+        $statistics->method('currentMonth')->willReturn(['fleet_utilization' => 0.0, 'completed_revenue' => 0.0, 'forecast_revenue' => 0.0, 'average_daily_rate' => 0.0]);
+        $importIssues->method('attentionSummary')->willReturn(['total_unresolved' => 0, 'href' => '/turo/import-issues']);
+        $vehicleMappings->method('attentionSummary')->willReturn(['unique_unmatched_vehicles' => 0, 'affected_issues' => 0, 'href' => '/turo/vehicle-matches']);
+        $reconciliation->method('attentionSummary')->willReturn(['awaiting_reconciliation' => 0, 'href' => '/turo/vehicle-matches']);
+        $checklists->method('summariesForDay')->willReturn([]);
+        $airport->method('attentionSummary')->willReturn(['airport_workflows_requiring_action' => 0, 'href' => '/operations/airport']);
+        $reimbursements->method('attentionSummary')->willReturn([
+            'needs_classification' => 0,
+            'ready_to_file' => 0,
+            'filed_pending' => 0,
+            'expenses_missing_run' => 0,
+            'runs_with_unallocated_expenses' => 0,
+            'expected_reimbursement_total' => 0.0,
+            'href' => '/operations/airport/reimbursements',
+        ]);
+
+        $dashboard = new DailyOperationsDashboardService($tasks, $availability, $health, $statistics, $this->getMockBuilder(RevenueService::class)->disableOriginalConstructor()->getMock(), $importIssues, $vehicleMappings, $reconciliation, $checklists, $airport, $reimbursements);
+        $queue = $dashboard->forToday(new DateTimeImmutable('2026-07-19 08:00:00'))['operational_queue'];
+
+        $this->assertContains(['label' => 'Airport Receipt Inbox', 'count' => 0, 'href' => '/operations/airport/reimbursements'], $queue);
     }
 
     private function board(): array

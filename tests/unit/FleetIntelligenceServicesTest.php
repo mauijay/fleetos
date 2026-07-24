@@ -544,6 +544,7 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
         $this->assertTrue($viewModel['vehicle_mappings']['has_unmatched']);
         $this->assertSame(1, $viewModel['vehicle_mappings']['unique_unmatched_vehicles']);
         $this->assertTrue($viewModel['trip_reconciliation']['has_reconciliation_work']);
+        $this->assertContains(['label' => 'Airport Receipts', 'href' => '/operations/airport/reimbursements', 'active' => 'false'], $viewModel['navigation']);
     }
 
     /** @param array<int, string> $methods */

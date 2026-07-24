@@ -100,7 +100,7 @@ class DailyOperationsDashboardService
             ['label' => 'Today\'s Airport Deliveries', 'count' => (int) $airport['airport_workflows_requiring_action'], 'href' => $airport['href']],
             ['label' => 'Airport Receipt Inbox', 'count' => (int) $reimbursements['needs_classification'] + (int) $reimbursements['ready_to_file'] + (int) $reimbursements['filed_pending'] + (int) $reimbursements['expenses_missing_run'], 'href' => $reimbursements['href']],
             ['label' => 'Import Turo Trips', 'count' => 1, 'href' => '/turo/imports'],
-        ], static fn (array $action): bool => (int) $action['count'] > 0 || $action['label'] === 'Import Turo Trips'));
+        ], static fn (array $action): bool => (int) $action['count'] > 0 || in_array($action['label'], ['Airport Receipt Inbox', 'Import Turo Trips'], true)));
     }
 
     private function tasks(): TaskService { return $this->taskService ?? service('taskService'); }
