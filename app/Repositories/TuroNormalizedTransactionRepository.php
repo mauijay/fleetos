@@ -136,6 +136,29 @@ class TuroNormalizedTransactionRepository
         return (float) ($row['total'] ?? 0);
     }
 
+    /** @return array<int, array<string, mixed>> */
+    public function operatingRevenueByVehicleInPeriod(string $fromDate, string $toDateExclusive): array
+    {
+        return $this->db->table('turo_transactions_normalized tn')
+            ->select('fv.id AS fleet_vehicle_id, fv.fleet_code, fv.display_name')
+            ->select('vtl.is_premium, vtl.code AS trim_code, vm.name AS vehicle_type')
+            ->select('COALESCE(SUM(tn.amount), 0) AS completed_revenue', false)
+            ->select('COALESCE(SUM(tn.amount), 0) AS host_payout', false)
+            ->select('COUNT(*) AS transaction_count', false)
+            ->join('fleet_vehicles fv', 'fv.id = tn.fleet_vehicle_id', 'left')
+            ->join('vehicle_trim_levels vtl', 'vtl.id = fv.vehicle_trim_level_id', 'left')
+            ->join('vehicle_specs vsp', 'vsp.id = fv.vehicle_spec_id', 'left')
+            ->join('vehicle_models vm', 'vm.id = vsp.vehicle_model_id', 'left')
+            ->where('tn.event_class', 'operating_revenue')
+            ->where('tn.fleet_vehicle_id IS NOT NULL')
+            ->where('tn.transaction_date >=', $fromDate)
+            ->where('tn.transaction_date <', $toDateExclusive)
+            ->groupBy('fv.id, fv.fleet_code, fv.display_name, vtl.is_premium, vtl.code, vm.name')
+            ->orderBy('completed_revenue', 'DESC')
+            ->get()
+            ->getResultArray();
+    }
+
     public function lifetimeOperatingRevenue(): float
     {
         $row = $this->db->table('turo_transactions_normalized')

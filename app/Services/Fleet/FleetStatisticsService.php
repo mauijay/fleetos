@@ -63,7 +63,7 @@ class FleetStatisticsService
     public function vehiclePerformance(?DateTimeImmutable $asOf = null): array
     {
         $asOf ??= new DateTimeImmutable();
-        $rows = $this->revenue()->byVehicle($asOf->format('Y-01-01'), $asOf->format('Y-m-01'));
+        $rows = $this->vehiclePerformanceRows($asOf);
         $daysElapsed = max(1, (int) $asOf->format('z') + 1);
 
         return array_map(static function (array $row) use ($daysElapsed): array {
@@ -76,6 +76,43 @@ class FleetStatisticsService
                 'revenue_per_available_day' => self::revenuePerAvailableDay($completedRevenue, $daysElapsed),
             ]);
         }, $rows);
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    private function vehiclePerformanceRows(DateTimeImmutable $asOf): array
+    {
+        $allocationRows = $this->revenue()->byVehicle($asOf->format('Y-01-01'), $asOf->format('Y-m-01'));
+        $revenueRows = $this->revenue()->operatingRevenueByVehicle(
+            $asOf->format('Y-01-01'),
+            $asOf->modify('first day of next month')->format('Y-m-d'),
+        );
+        $rowsByVehicle = [];
+
+        foreach ($allocationRows as $row) {
+            $fleetVehicleId = (int) ($row['fleet_vehicle_id'] ?? 0);
+            if ($fleetVehicleId <= 0) {
+                continue;
+            }
+
+            $rowsByVehicle[$fleetVehicleId] = $row;
+        }
+
+        foreach ($revenueRows as $row) {
+            $fleetVehicleId = (int) ($row['fleet_vehicle_id'] ?? 0);
+            if ($fleetVehicleId <= 0) {
+                continue;
+            }
+
+            $rowsByVehicle[$fleetVehicleId] = array_merge($rowsByVehicle[$fleetVehicleId] ?? [], $row, [
+                'completed_revenue' => (float) ($row['completed_revenue'] ?? 0),
+                'host_payout' => (float) ($row['host_payout'] ?? 0),
+            ]);
+        }
+
+        $rows = array_values($rowsByVehicle);
+        usort($rows, static fn (array $left, array $right): int => (float) ($right['completed_revenue'] ?? 0) <=> (float) ($left['completed_revenue'] ?? 0));
+
+        return $rows;
     }
 
     /** Returns tracked fleet value, loan balance, and equity. */

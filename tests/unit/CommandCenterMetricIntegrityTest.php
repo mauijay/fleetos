@@ -186,6 +186,30 @@ final class CommandCenterMetricIntegrityTest extends CIUnitTestCase
         $this->assertSame('pending', $period['cash_flow_state']);
     }
 
+    public function testVehiclePerformanceRanksByNormalizedOperatingRevenue(): void
+    {
+        $repository = $this->repositoryMock(['revenueByVehicle']);
+        $repository->method('revenueByVehicle')->willReturn([
+            ['fleet_vehicle_id' => 10, 'fleet_code' => 'Spaceship10', 'display_name' => 'Spaceship10', 'billable_days' => '4.000', 'completed_revenue' => '1209.00', 'host_payout' => '1209.00'],
+            ['fleet_vehicle_id' => 3, 'fleet_code' => 'Spaceship03', 'display_name' => 'Spaceship03', 'billable_days' => '9.000', 'completed_revenue' => '315.00', 'host_payout' => '315.00'],
+        ]);
+
+        $transactions = $this->transactionRepositoryMock(['operatingRevenueByVehicleInPeriod']);
+        $transactions->method('operatingRevenueByVehicleInPeriod')->willReturn([
+            ['fleet_vehicle_id' => 3, 'fleet_code' => 'Spaceship03', 'display_name' => 'Spaceship03', 'completed_revenue' => '3156.00', 'host_payout' => '3156.00'],
+            ['fleet_vehicle_id' => 10, 'fleet_code' => 'Spaceship10', 'display_name' => 'Spaceship10', 'completed_revenue' => '478.00', 'host_payout' => '478.00'],
+        ]);
+
+        $stats = new FleetStatisticsService($repository, new RevenueService($repository, $transactions));
+        $performance = $stats->vehiclePerformance(new DateTimeImmutable('2026-07-23 12:00:00'));
+
+        $this->assertSame('Spaceship03', $performance[0]['fleet_code']);
+        $this->assertSame(3156.0, $performance[0]['completed_revenue']);
+        $this->assertSame('Spaceship10', $performance[1]['fleet_code']);
+        $this->assertSame(478.0, $performance[1]['completed_revenue']);
+        $this->assertGreaterThan($performance[1]['utilization'], $performance[0]['utilization']);
+    }
+
     /** @param array<int, string> $methods */
     private function repositoryMock(array $methods): FleetIntelligenceRepository&MockObject
     {

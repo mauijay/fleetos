@@ -46,7 +46,7 @@ final class DecisionSupportRepositoryIntegrationTest extends CIUnitTestCase
 
     private function resetSchema(): void
     {
-        foreach (['trip_month_allocations', 'turo_trips_normalized', 'fleet_vehicles', 'vehicle_trim_levels', 'vehicle_specs', 'vehicle_models'] as $table) {
+        foreach (['turo_transactions_normalized', 'trip_month_allocations', 'turo_trips_normalized', 'fleet_vehicles', 'vehicle_trim_levels', 'vehicle_specs', 'vehicle_models'] as $table) {
             $this->connection->query('DROP TABLE IF EXISTS ' . $this->connection->escapeIdentifiers($this->connection->prefixTable($table)));
         }
     }
@@ -59,6 +59,7 @@ final class DecisionSupportRepositoryIntegrationTest extends CIUnitTestCase
         $this->connection->query('CREATE TABLE ' . $this->table('fleet_vehicles') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, fleet_code VARCHAR(80) NOT NULL, display_name VARCHAR(150) NOT NULL, vehicle_spec_id INTEGER NOT NULL, vehicle_trim_level_id INTEGER NOT NULL, deleted_at DATETIME NULL)');
         $this->connection->query('CREATE TABLE ' . $this->table('turo_trips_normalized') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, deleted_at DATETIME NULL)');
         $this->connection->query('CREATE TABLE ' . $this->table('trip_month_allocations') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, turo_trip_normalized_id INTEGER NOT NULL, fleet_vehicle_id INTEGER NOT NULL, allocation_month DATE NOT NULL, allocated_trip_days DECIMAL(8,3) NOT NULL DEFAULT 0, allocated_billable_days DECIMAL(8,3) NOT NULL DEFAULT 0, allocated_gross_revenue_amount DECIMAL(10,2) NOT NULL DEFAULT 0, allocated_host_payout_amount DECIMAL(10,2) NOT NULL DEFAULT 0, allocated_delivery_fee_amount DECIMAL(10,2) NOT NULL DEFAULT 0, allocated_reimbursement_amount DECIMAL(10,2) NOT NULL DEFAULT 0, is_forecast INTEGER NOT NULL DEFAULT 0)');
+        $this->connection->query('CREATE TABLE ' . $this->table('turo_transactions_normalized') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, fleet_vehicle_id INTEGER NULL, event_class VARCHAR(80) NOT NULL, amount DECIMAL(10,2) NOT NULL DEFAULT 0, transaction_date DATE NOT NULL)');
     }
 
     private function seedMeasuredFleetData(): void
@@ -89,6 +90,14 @@ final class DecisionSupportRepositoryIntegrationTest extends CIUnitTestCase
             $this->allocation(5, 1, '2026-06-01', 90, 90, 8010),
             $this->allocation(6, 2, '2026-06-01', 10, 10, 700),
         ]);
+        $this->connection->table('turo_transactions_normalized')->insertBatch([
+            $this->transaction(1, 1, '2026-04-15', 90),
+            $this->transaction(2, 2, '2026-04-15', 80),
+            $this->transaction(3, 1, '2026-05-15', 90),
+            $this->transaction(4, 2, '2026-05-15', 80),
+            $this->transaction(5, 1, '2026-06-15', 8010),
+            $this->transaction(6, 2, '2026-06-15', 700),
+        ]);
     }
 
     /** @return array<string, int|float|string> */
@@ -105,6 +114,18 @@ final class DecisionSupportRepositoryIntegrationTest extends CIUnitTestCase
             'allocated_delivery_fee_amount' => 0,
             'allocated_reimbursement_amount' => 0,
             'is_forecast' => 0,
+        ];
+    }
+
+    /** @return array<string, int|float|string> */
+    private function transaction(int $id, int $vehicleId, string $date, float $amount): array
+    {
+        return [
+            'id' => $id,
+            'fleet_vehicle_id' => $vehicleId,
+            'event_class' => 'operating_revenue',
+            'amount' => $amount,
+            'transaction_date' => $date,
         ];
     }
 

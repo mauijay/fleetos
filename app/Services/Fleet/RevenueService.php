@@ -97,6 +97,12 @@ class RevenueService
         return $this->repo()->revenueByVehicle($fromMonth, $toMonth);
     }
 
+    /** Returns earned operating revenue grouped by vehicle for the requested date range. */
+    public function operatingRevenueByVehicle(string $fromDate, string $toDateExclusive): array
+    {
+        return $this->transactions()->operatingRevenueByVehicleInPeriod($fromDate, $toDateExclusive);
+    }
+
     /** Returns revenue grouped by fleet ownership company for the requested month range. */
     public function byFleet(string $fromMonth, string $toMonth): array
     {
