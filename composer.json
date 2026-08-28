@@ -16,8 +16,11 @@
   },
   "require-dev": {
     "fakerphp/faker": "^1.9",
+    "friendsofphp/php-cs-fixer": "^3.89",
     "mikey179/vfsstream": "^1.6",
-    "phpunit/phpunit": "^10.5.16"
+    "phpstan/phpstan": "^2.1",
+    "phpstan/phpstan-phpunit": "^2.0",
+    "phpunit/phpunit": "^13"
   },
   "autoload": {
     "psr-4": {
@@ -39,6 +42,9 @@
     "sort-packages": true
   },
   "scripts": {
-    "test": "phpunit"
+    "test": "phpunit",
+    "analyze": "phpstan analyse --memory-limit=1G",
+    "cs": "php-cs-fixer fix --dry-run --diff --verbose",
+    "cs:fix": "php-cs-fixer fix --verbose"
   }
 }

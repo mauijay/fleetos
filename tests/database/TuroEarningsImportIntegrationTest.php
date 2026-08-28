@@ -1,5 +1,6 @@
 <?php
 
+use App\Controllers\TuroImports;
 use App\Repositories\AuditLogRepository;
 use App\Repositories\LookupRepository;
 use App\Repositories\TuroImportBatchRepository;
@@ -7,7 +8,6 @@ use App\Repositories\TuroImportErrorRepository;
 use App\Repositories\TuroNormalizedTransactionRepository;
 use App\Repositories\TuroNormalizedTripRepository;
 use App\Repositories\TuroRawTransactionRepository;
-use App\Controllers\TuroImports;
 use App\Services\Turo\TuroCsvReader;
 use App\Services\Turo\TuroCsvShapeDetector;
 use App\Services\Turo\TuroEarningsAmountResolver;
@@ -15,9 +15,9 @@ use App\Services\Turo\TuroEarningsImportService;
 use App\Services\Turo\TuroEarningsNormalizer;
 use App\Services\Turo\TuroImportAuditService;
 use App\Validation\Turo\TuroEarningsCsvValidator;
+use CodeIgniter\Database\BaseConnection;
 use CodeIgniter\HTTP\Files\UploadedFile;
 use CodeIgniter\HTTP\RedirectResponse;
-use CodeIgniter\Database\BaseConnection;
 use CodeIgniter\Test\CIUnitTestCase;
 use Config\Database;
 use Config\Services;
@@ -430,7 +430,7 @@ final class TuroEarningsImportIntegrationTest extends CIUnitTestCase
         $handle = fopen($path, 'wb');
 
         foreach ($rows as $row) {
-            fputcsv($handle, $row);
+            fputcsv($handle, $row, ',', '"', '\\');
         }
 
         fclose($handle);
@@ -461,10 +461,10 @@ final class TuroEarningsImportIntegrationTest extends CIUnitTestCase
     {
         $path = tempnam(sys_get_temp_dir(), 'earnings_csv_');
         $handle = fopen($path, 'wb');
-        fputcsv($handle, $headers);
+        fputcsv($handle, $headers, ',', '"', '\\');
 
         foreach ($rows as $row) {
-            fputcsv($handle, $row);
+            fputcsv($handle, $row, ',', '"', '\\');
         }
 
         fclose($handle);

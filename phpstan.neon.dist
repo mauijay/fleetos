@@ -1,0 +1,16 @@
+includes:
+    - vendor/phpstan/phpstan-phpunit/extension.neon
+    - phpstan-baseline.neon
+
+parameters:
+    level: 5
+    paths:
+        - app
+        - tests
+    tmpDir: build/phpstan
+    bootstrapFiles:
+        - app/Common.php
+    excludePaths:
+        analyse:
+            - app/Views/*
+            - app/Config/Routes.php

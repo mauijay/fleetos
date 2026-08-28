@@ -122,7 +122,7 @@ final class TuroImportsControllerTest extends CIUnitTestCase
         $handle = fopen($path, 'wb');
 
         foreach ($rows as $row) {
-            fputcsv($handle, $row);
+            fputcsv($handle, $row, ',', '"', '\\');
         }
 
         fclose($handle);

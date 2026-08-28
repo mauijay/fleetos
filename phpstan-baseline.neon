@@ -1,0 +1,649 @@
+parameters:
+	ignoreErrors:
+		-
+			message: '#^Function route_to not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: app/Config/Auth.php
+
+		-
+			message: '#^Function session not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: app/Config/Auth.php
+
+		-
+			message: '#^Function setting not found\.$#'
+			identifier: function.notFound
+			count: 6
+			path: app/Config/Auth.php
+
+		-
+			message: '#^Function site_url not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: app/Config/Auth.php
+
+		-
+			message: '#^Function url_to not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: app/Config/Auth.php
+
+		-
+			message: '#^Constant APPPATH not found\.$#'
+			identifier: constant.notFound
+			count: 1
+			path: app/Config/Autoload.php
+
+		-
+			message: '#^Constant WRITEPATH not found\.$#'
+			identifier: constant.notFound
+			count: 1
+			path: app/Config/Cache.php
+
+		-
+			message: '#^Constant ROOTPATH not found\.$#'
+			identifier: constant.notFound
+			count: 1
+			path: app/Config/Constants.php
+
+		-
+			message: '#^Constant APPPATH not found\.$#'
+			identifier: constant.notFound
+			count: 1
+			path: app/Config/Database.php
+
+		-
+			message: '#^Constant ENVIRONMENT not found\.$#'
+			identifier: constant.notFound
+			count: 1
+			path: app/Config/Database.php
+
+		-
+			message: '#^Constant ENVIRONMENT not found\.$#'
+			identifier: constant.notFound
+			count: 1
+			path: app/Config/Events.php
+
+		-
+			message: '#^Function is_cli not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: app/Config/Events.php
+
+		-
+			message: '#^Function service not found\.$#'
+			identifier: function.notFound
+			count: 2
+			path: app/Config/Events.php
+
+		-
+			message: '#^Left side of && is always true\.$#'
+			identifier: booleanAnd.leftAlwaysTrue
+			count: 1
+			path: app/Config/Events.php
+
+		-
+			message: '#^Constant APPPATH not found\.$#'
+			identifier: constant.notFound
+			count: 1
+			path: app/Config/Exceptions.php
+
+		-
+			message: '#^Property Config\\Kint\:\:\$plugins has unknown class Kint\\Parser\\ConstructablePluginInterface as its type\.$#'
+			identifier: class.notFound
+			count: 2
+			path: app/Config/Kint.php
+
+		-
+			message: '#^Property Config\\Kint\:\:\$richObjectPlugins has unknown class Kint\\Renderer\\Rich\\ValuePluginInterface as its type\.$#'
+			identifier: class.notFound
+			count: 1
+			path: app/Config/Kint.php
+
+		-
+			message: '#^Property Config\\Kint\:\:\$richTabPlugins has unknown class Kint\\Renderer\\Rich\\TabPluginInterface as its type\.$#'
+			identifier: class.notFound
+			count: 1
+			path: app/Config/Kint.php
+
+		-
+			message: '#^Constant ENVIRONMENT not found\.$#'
+			identifier: constant.notFound
+			count: 1
+			path: app/Config/Logger.php
+
+		-
+			message: '#^Constant FCPATH not found\.$#'
+			identifier: constant.notFound
+			count: 1
+			path: app/Config/Publisher.php
+
+		-
+			message: '#^Constant ROOTPATH not found\.$#'
+			identifier: constant.notFound
+			count: 1
+			path: app/Config/Publisher.php
+
+		-
+			message: '#^Constant APPPATH not found\.$#'
+			identifier: constant.notFound
+			count: 1
+			path: app/Config/Routing.php
+
+		-
+			message: '#^Constant ENVIRONMENT not found\.$#'
+			identifier: constant.notFound
+			count: 1
+			path: app/Config/Security.php
+
+		-
+			message: '#^Function config not found\.$#'
+			identifier: function.notFound
+			count: 7
+			path: app/Config/Services.php
+
+		-
+			message: '#^Constant WRITEPATH not found\.$#'
+			identifier: constant.notFound
+			count: 1
+			path: app/Config/Session.php
+
+		-
+			message: '#^Constant SYSTEMPATH not found\.$#'
+			identifier: constant.notFound
+			count: 1
+			path: app/Config/Toolbar.php
+
+		-
+			message: '#^Function redirect not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: app/Controllers/AirportOperations.php
+
+		-
+			message: '#^Function service not found\.$#'
+			identifier: function.notFound
+			count: 14
+			path: app/Controllers/AirportOperations.php
+
+		-
+			message: '#^Function session not found\.$#'
+			identifier: function.notFound
+			count: 4
+			path: app/Controllers/AirportOperations.php
+
+		-
+			message: '#^Function view not found\.$#'
+			identifier: function.notFound
+			count: 2
+			path: app/Controllers/AirportOperations.php
+
+		-
+			message: '#^Function redirect not found\.$#'
+			identifier: function.notFound
+			count: 4
+			path: app/Controllers/AirportReimbursements.php
+
+		-
+			message: '#^Function service not found\.$#'
+			identifier: function.notFound
+			count: 16
+			path: app/Controllers/AirportReimbursements.php
+
+		-
+			message: '#^Function session not found\.$#'
+			identifier: function.notFound
+			count: 4
+			path: app/Controllers/AirportReimbursements.php
+
+		-
+			message: '#^Function view not found\.$#'
+			identifier: function.notFound
+			count: 2
+			path: app/Controllers/AirportReimbursements.php
+
+		-
+			message: '#^Function service not found\.$#'
+			identifier: function.notFound
+			count: 2
+			path: app/Controllers/Home.php
+
+		-
+			message: '#^Function view not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: app/Controllers/Home.php
+
+		-
+			message: '#^Function service not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: app/Controllers/SecureFiles.php
+
+		-
+			message: '#^Function redirect not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: app/Controllers/TripMovementChecklists.php
+
+		-
+			message: '#^Function service not found\.$#'
+			identifier: function.notFound
+			count: 8
+			path: app/Controllers/TripMovementChecklists.php
+
+		-
+			message: '#^Function session not found\.$#'
+			identifier: function.notFound
+			count: 2
+			path: app/Controllers/TripMovementChecklists.php
+
+		-
+			message: '#^Function view not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: app/Controllers/TripMovementChecklists.php
+
+		-
+			message: '#^Function redirect not found\.$#'
+			identifier: function.notFound
+			count: 2
+			path: app/Controllers/TuroImportIssues.php
+
+		-
+			message: '#^Function service not found\.$#'
+			identifier: function.notFound
+			count: 4
+			path: app/Controllers/TuroImportIssues.php
+
+		-
+			message: '#^Function session not found\.$#'
+			identifier: function.notFound
+			count: 2
+			path: app/Controllers/TuroImportIssues.php
+
+		-
+			message: '#^Function view not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: app/Controllers/TuroImportIssues.php
+
+		-
+			message: '#^Constant WRITEPATH not found\.$#'
+			identifier: constant.notFound
+			count: 2
+			path: app/Controllers/TuroImports.php
+
+		-
+			message: '#^Function redirect not found\.$#'
+			identifier: function.notFound
+			count: 8
+			path: app/Controllers/TuroImports.php
+
+		-
+			message: '#^Function service not found\.$#'
+			identifier: function.notFound
+			count: 3
+			path: app/Controllers/TuroImports.php
+
+		-
+			message: '#^Function session not found\.$#'
+			identifier: function.notFound
+			count: 4
+			path: app/Controllers/TuroImports.php
+
+		-
+			message: '#^Function view not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: app/Controllers/TuroImports.php
+
+		-
+			message: '#^Function redirect not found\.$#'
+			identifier: function.notFound
+			count: 4
+			path: app/Controllers/TuroVehicleMatches.php
+
+		-
+			message: '#^Function service not found\.$#'
+			identifier: function.notFound
+			count: 6
+			path: app/Controllers/TuroVehicleMatches.php
+
+		-
+			message: '#^Function session not found\.$#'
+			identifier: function.notFound
+			count: 4
+			path: app/Controllers/TuroVehicleMatches.php
+
+		-
+			message: '#^Function view not found\.$#'
+			identifier: function.notFound
+			count: 2
+			path: app/Controllers/TuroVehicleMatches.php
+
+		-
+			message: '#^Parameter \#1 \$db of class App\\Repositories\\TuroNormalizedTransactionRepository constructor expects CodeIgniter\\Database\\BaseConnection\|null, CodeIgniter\\Database\\ConnectionInterface given\.$#'
+			identifier: argument.type
+			count: 1
+			path: app/Database/Migrations/2026-07-22-000009_AddEventClassToTuroTransactionsNormalizedTable.php
+
+		-
+			message: '#^Function auth not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: app/Database/Seeds/AdminUserSeeder.php
+
+		-
+			message: '#^Function config not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: app/Database/Seeds/AdminUserSeeder.php
+
+		-
+			message: '#^Function env not found\.$#'
+			identifier: function.notFound
+			count: 4
+			path: app/Database/Seeds/AdminUserSeeder.php
+
+		-
+			message: '#^Constant ENVIRONMENT not found\.$#'
+			identifier: constant.notFound
+			count: 1
+			path: app/Services/Files/PrivateFileStorageService.php
+
+		-
+			message: '#^Constant WRITEPATH not found\.$#'
+			identifier: constant.notFound
+			count: 2
+			path: app/Services/Files/PrivateFileStorageService.php
+
+		-
+			message: '#^Function config not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: app/Services/Files/PrivateFileStorageService.php
+
+		-
+			message: '#^Function service not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: app/Services/Files/PrivateFileStorageService.php
+
+		-
+			message: '#^Function service not found\.$#'
+			identifier: function.notFound
+			count: 2
+			path: app/Services/Fleet/AirportMovementWorkflowService.php
+
+		-
+			message: '#^Function service not found\.$#'
+			identifier: function.notFound
+			count: 10
+			path: app/Services/Fleet/DailyOperationsDashboardService.php
+
+		-
+			message: '#^Property App\\Services\\Fleet\\DailyOperationsDashboardService\:\:\$revenueService is never read, only written\.$#'
+			identifier: property.onlyWritten
+			count: 1
+			path: app/Services/Fleet/DailyOperationsDashboardService.php
+
+		-
+			message: '#^Function config not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: app/Services/Fleet/DecisionSupport/BusinessInsightService.php
+
+		-
+			message: '#^Function service not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: app/Services/Fleet/DecisionSupport/BusinessInsightService.php
+
+		-
+			message: '#^Function service not found\.$#'
+			identifier: function.notFound
+			count: 6
+			path: app/Services/Fleet/DecisionSupport/DecisionSupportDashboardService.php
+
+		-
+			message: '#^Function config not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: app/Services/Fleet/DecisionSupport/FleetOptimizationService.php
+
+		-
+			message: '#^Function service not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: app/Services/Fleet/DecisionSupport/FleetOptimizationService.php
+
+		-
+			message: '#^Function config not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: app/Services/Fleet/DecisionSupport/GuestRiskService.php
+
+		-
+			message: '#^Function service not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: app/Services/Fleet/DecisionSupport/GuestRiskService.php
+
+		-
+			message: '#^Function config not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: app/Services/Fleet/DecisionSupport/MaintenancePredictionService.php
+
+		-
+			message: '#^Function service not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: app/Services/Fleet/DecisionSupport/MaintenancePredictionService.php
+
+		-
+			message: '#^Function config not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: app/Services/Fleet/DecisionSupport/PricingRecommendationService.php
+
+		-
+			message: '#^Function service not found\.$#'
+			identifier: function.notFound
+			count: 2
+			path: app/Services/Fleet/DecisionSupport/PricingRecommendationService.php
+
+		-
+			message: '#^Function config not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: app/Services/Fleet/DecisionSupport/RevenueForecastService.php
+
+		-
+			message: '#^Function service not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: app/Services/Fleet/DecisionSupport/RevenueForecastService.php
+
+		-
+			message: '#^Function service not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: app/Services/Fleet/FleetCapacityService.php
+
+		-
+			message: '#^Function service not found\.$#'
+			identifier: function.notFound
+			count: 11
+			path: app/Services/Fleet/FleetCommandCenterViewModelService.php
+
+		-
+			message: '#^Function service not found\.$#'
+			identifier: function.notFound
+			count: 4
+			path: app/Services/Fleet/FleetCommandService.php
+
+		-
+			message: '#^Function service not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: app/Services/Fleet/FleetHealthService.php
+
+		-
+			message: '#^Function service not found\.$#'
+			identifier: function.notFound
+			count: 2
+			path: app/Services/Fleet/FleetStatisticsService.php
+
+		-
+			message: '#^Function service not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: app/Services/Fleet/RevenueService.php
+
+		-
+			message: '#^Function service not found\.$#'
+			identifier: function.notFound
+			count: 2
+			path: app/Services/Fleet/TaskService.php
+
+		-
+			message: '#^Function service not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: app/Services/Fleet/TripAnalyticsService.php
+
+		-
+			message: '#^Function service not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: app/Services/Fleet/TripMovementChecklistService.php
+
+		-
+			message: '#^Function config not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: app/Services/Fleet/TuroAccessReimbursementService.php
+
+		-
+			message: '#^Function service not found\.$#'
+			identifier: function.notFound
+			count: 2
+			path: app/Services/Fleet/TuroAccessReimbursementService.php
+
+		-
+			message: '#^Function service not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: app/Services/Fleet/VehicleAvailabilityService.php
+
+		-
+			message: '#^Function log_message not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: app/Services/Turo/TuroEarningsImportService.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>column" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: app/Services/Turo/TuroEarningsNormalizer.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>parsedValue" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 2
+			path: app/Services/Turo/TuroEarningsNormalizer.php
+
+		-
+			message: '#^Function service not found\.$#'
+			identifier: function.notFound
+			count: 2
+			path: app/Services/Turo/TuroImportIssueService.php
+
+		-
+			message: '#^Offset 1 on array\{non\-falsy\-string, numeric\-string\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/Services/Turo/TuroReservationUrlTripIdExtractor.php
+
+		-
+			message: '#^Function service not found\.$#'
+			identifier: function.notFound
+			count: 4
+			path: app/Services/Turo/TuroTripReconciliationService.php
+
+		-
+			message: '#^Function service not found\.$#'
+			identifier: function.notFound
+			count: 2
+			path: app/Services/Turo/TuroVehicleMappingService.php
+
+		-
+			message: '#^Constant FCPATH not found\.$#'
+			identifier: constant.notFound
+			count: 1
+			path: app/Services/View/AssetManifestService.php
+
+		-
+			message: '#^Call to method PHPUnit\\Framework\\Assert\:\:assertInstanceOf\(\) with ''CodeIgniter\\\\HTTP\\\\RedirectResponse'' and CodeIgniter\\HTTP\\RedirectResponse will always evaluate to true\.$#'
+			identifier: method.alreadyNarrowedType
+			count: 1
+			path: tests/database/TuroEarningsImportIntegrationTest.php
+
+		-
+			message: '#^Constant ROOTPATH not found\.$#'
+			identifier: constant.notFound
+			count: 1
+			path: tests/database/TuroEarningsImportIntegrationTest.php
+
+		-
+			message: '#^Function service not found\.$#'
+			identifier: function.notFound
+			count: 2
+			path: tests/database/TuroEarningsImportIntegrationTest.php
+
+		-
+			message: '#^Function session not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: tests/database/TuroEarningsImportIntegrationTest.php
+
+		-
+			message: '#^Function service not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: tests/session/ExampleSessionTest.php
+
+		-
+			message: '#^Constant HOMEPATH not found\.$#'
+			identifier: constant.notFound
+			count: 2
+			path: tests/unit/HealthTest.php
+
+		-
+			message: '#^Function service not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: tests/unit/HealthTest.php
+
+		-
+			message: '#^Call to method PHPUnit\\Framework\\Assert\:\:assertInstanceOf\(\) with ''CodeIgniter\\\\HTTP\\\\RedirectResponse'' and CodeIgniter\\HTTP\\RedirectResponse will always evaluate to true\.$#'
+			identifier: method.alreadyNarrowedType
+			count: 2
+			path: tests/unit/TuroImportsControllerTest.php
+
+		-
+			message: '#^Function service not found\.$#'
+			identifier: function.notFound
+			count: 3
+			path: tests/unit/TuroImportsControllerTest.php
+
+		-
+			message: '#^Function session not found\.$#'
+			identifier: function.notFound
+			count: 8
+			path: tests/unit/TuroImportsControllerTest.php
