@@ -79,6 +79,7 @@ class VehicleAvailabilityService
 
             return [
                 'fleet_vehicle_id' => (int) $vehicle['id'],
+                'fleet_number' => isset($vehicle['fleet_number']) ? (int) $vehicle['fleet_number'] : null,
                 'fleet_code' => $vehicle['fleet_code'],
                 'display_name' => $vehicle['display_name'],
                 'model' => trim((string) ($vehicle['model_year'] ?? '') . ' ' . (string) ($vehicle['make_name'] ?? '') . ' ' . (string) ($vehicle['model_name'] ?? '')),

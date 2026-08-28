@@ -408,6 +408,11 @@ h3 {
   font-size: 22px;
 }
 
+.movement-card .card-row {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
 .movement-card .status-badge {
   max-width: 190px;
   text-align: right;
@@ -730,6 +735,19 @@ h3 {
   padding: 0 22px;
 }
 
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 24px;
+}
+
+.form-actions .primary-action {
+  min-width: 190px;
+  min-height: 52px;
+  padding: 0 28px;
+  text-align: center;
+}
+
 .secondary-action {
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -1033,6 +1051,14 @@ h3 {
   border-color: rgba(251, 113, 133, 0.42);
 }
 
+.tone-trip-start {
+  border-color: rgba(52, 211, 153, 0.34);
+}
+
+.tone-trip-end {
+  border-color: rgba(251, 113, 133, 0.42);
+}
+
 .status-badge.tone-success,
 .count-pill {
   color: var(--success);
@@ -1047,6 +1073,16 @@ h3 {
 }
 
 .status-badge.tone-danger {
+  color: var(--danger);
+}
+
+.status-badge.tone-trip-start {
+  background: rgba(52, 211, 153, 0.1);
+  color: var(--success);
+}
+
+.status-badge.tone-trip-end {
+  background: rgba(251, 113, 133, 0.1);
   color: var(--danger);
 }
 
@@ -1257,6 +1293,16 @@ h3 {
 
   .vehicle-card {
     grid-template-columns: 1fr;
+  }
+
+  .form-actions .primary-action {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .movement-card .status-badge {
+    max-width: 100%;
+    text-align: left;
   }
 
   .receipt-preview {

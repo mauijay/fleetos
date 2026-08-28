@@ -23,4 +23,13 @@ class TuroRawTransactionRepository
 
         return (int) $this->db->insertID();
     }
+
+    public function findByBatchAndRowHash(int $batchId, string $rowHash): ?array
+    {
+        return $this->db->table('turo_transaction_raw')
+            ->where('turo_import_batch_id', $batchId)
+            ->where('row_hash', $rowHash)
+            ->get()
+            ->getRowArray();
+    }
 }

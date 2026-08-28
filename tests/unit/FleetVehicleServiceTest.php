@@ -36,16 +36,44 @@ final class FleetVehicleServiceTest extends CIUnitTestCase
 
     public function testCreateNormalizesCatalogCreatesMappingAndAudit(): void
     {
-        $result = $this->service->create($this->validData(), 42, 'turo-11');
+        $result = $this->service->create($this->validData([
+            'vehicle_drivetrain_id' => 2,
+            'battery_description' => '2.0L Turbo ICE',
+        ]), 42, 'turo-11');
 
         $this->assertTrue($result['success']);
         $vehicle = $this->service->vehicle((int) $result['id']);
         $this->assertSame(11, (int) $vehicle['fleet_number']);
         $this->assertSame('Ford', $vehicle['make_name']);
         $this->assertSame('Bronco', $vehicle['model_name']);
+        $this->assertSame(2, (int) $vehicle['vehicle_drivetrain_id']);
+        $this->assertSame('2.0L Turbo ICE', $vehicle['battery_description']);
         $this->assertSame('turo-11', $vehicle['turo_vehicle_id']);
         $audit = $this->connection->table('vehicle_turo_listing_audits')->get()->getRowArray();
         $this->assertSame(42, (int) $audit['created_by']);
+    }
+
+    public function testFormOptionsKeepAwdAndFourWheelDriveDistinct(): void
+    {
+        $options = $this->service->formOptions();
+
+        $this->assertSame([
+            ['id' => 1, 'name' => 'All-Wheel Drive'],
+            ['id' => 2, 'name' => 'Four-Wheel Drive'],
+        ], $options['drivetrains']);
+    }
+
+    public function testCreatingFourWheelDriveBroncoDoesNotChangeAwdTesla(): void
+    {
+        $this->seedAwdTesla();
+
+        $result = $this->service->create($this->validData(['vehicle_drivetrain_id' => 2]));
+
+        $this->assertTrue($result['success']);
+        $tesla = $this->service->vehicle(6);
+        $this->assertSame('Tesla', $tesla['make_name']);
+        $this->assertSame(1, (int) $tesla['vehicle_drivetrain_id']);
+        $this->assertSame(2, (int) $this->service->vehicle((int) $result['id'])['vehicle_drivetrain_id']);
     }
 
     public function testUniquenessAndCompanyScopeAreEnforced(): void
@@ -118,13 +146,24 @@ final class FleetVehicleServiceTest extends CIUnitTestCase
         $this->connection->table('fleet_vehicles')->insert(['id' => 5, 'company_id' => 1, 'vehicle_spec_id' => 1, 'vehicle_trim_level_id' => 1, 'vehicle_drivetrain_id' => 1, 'vehicle_status_id' => 1, 'fleet_number' => null, 'fleet_code' => 'Legacy', 'display_name' => 'Legacy', 'vin' => 'LEGACYVIN']);
     }
 
+    private function seedAwdTesla(): void
+    {
+        $this->connection->table('vehicle_makes')->insert(['id' => 2, 'code' => 'tesla', 'name' => 'Tesla']);
+        $this->connection->table('vehicle_models')->insert(['id' => 2, 'vehicle_make_id' => 2, 'code' => 'model_y', 'name' => 'Model Y']);
+        $this->connection->table('vehicle_specs')->insert(['id' => 2, 'vehicle_model_id' => 2, 'model_year' => 2026, 'vehicle_body_style_id' => 1, 'exterior_vehicle_color_id' => 1, 'interior_vehicle_color_id' => 1, 'battery_description' => '', 'seating_capacity' => 5]);
+        $this->connection->table('fleet_vehicles')->insert(['id' => 6, 'company_id' => 1, 'vehicle_spec_id' => 2, 'vehicle_trim_level_id' => 1, 'vehicle_drivetrain_id' => 1, 'vehicle_status_id' => 1, 'fleet_number' => 6, 'fleet_code' => 'Tesla-6', 'display_name' => 'Tesla 6', 'vin' => 'TESLAVIN6']);
+    }
+
     private function seedLookups(): void
     {
         $this->connection->table('companies')->insertBatch([['id' => 1, 'name' => 'Company A', 'is_active' => 1], ['id' => 2, 'name' => 'Company B', 'is_active' => 1]]);
         $this->connection->table('vehicle_body_styles')->insert(['id' => 1, 'name' => 'SUV']);
         $this->connection->table('vehicle_colors')->insert(['id' => 1, 'name' => 'Black']);
         $this->connection->table('vehicle_trim_levels')->insert(['id' => 1, 'name' => 'Base']);
-        $this->connection->table('vehicle_drivetrains')->insert(['id' => 1, 'name' => 'AWD']);
+        $this->connection->table('vehicle_drivetrains')->insertBatch([
+            ['id' => 1, 'name' => 'All-Wheel Drive'],
+            ['id' => 2, 'name' => 'Four-Wheel Drive'],
+        ]);
         $this->connection->table('vehicle_statuses')->insertBatch([['id' => 1, 'code' => 'active', 'name' => 'Active'], ['id' => 2, 'code' => 'pending_onboarding', 'name' => 'Pending Onboarding']]);
     }
 

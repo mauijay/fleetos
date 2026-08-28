@@ -121,7 +121,7 @@ final class TuroEarningsImportIntegrationTest extends CIUnitTestCase
         $this->assertSame(1, $this->connection->table('turo_transactions_normalized')->where('external_transaction_id', 'txn-150')->countAllResults());
     }
 
-    public function testReimportingSameFileIsRejectedBySourceHash(): void
+    public function testReimportingSameFileReusesCompletedBatchWithoutCreatingDuplicates(): void
     {
         $file = $this->csvFile([
             'transaction_id', 'transaction_type', 'amount', 'transaction_date',
@@ -129,11 +129,87 @@ final class TuroEarningsImportIntegrationTest extends CIUnitTestCase
             ['txn-200', 'Trip payment', '$90.00', '2026-01-11'],
         ]);
 
-        $this->service->import($file, null, 'earnings-hash.csv');
+        $first = $this->service->import($file, null, 'earnings-hash.csv');
+        $second = $this->service->import($file, null, 'earnings-hash.csv');
 
-        $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('This CSV source hash has already been imported.');
-        $this->service->import($file, null, 'earnings-hash.csv');
+        $this->assertSame($first->batchId, $second->batchId);
+        $this->assertSame(1, $second->rowsRead);
+        $this->assertSame(0, $second->rawRowsCreated);
+        $this->assertSame(0, $second->tripsNormalized);
+        $this->assertSame(1, $second->skippedRows);
+        $this->assertSame(1, $second->duplicateRows);
+        $this->assertSame(1, $this->connection->table('turo_import_batches')->countAllResults());
+        $this->assertSame(1, $this->connection->table('turo_transaction_raw')->countAllResults());
+        $this->assertSame(1, $this->connection->table('turo_transactions_normalized')->countAllResults());
+    }
+
+    public function testDuplicateRawRowIsSkippedWhileNewRowsContinue(): void
+    {
+        $file = $this->csvFile([
+            'transaction_id', 'transaction_type', 'amount', 'transaction_date',
+        ], [
+            ['', 'Adjustment', '$5.00', '2026-01-11'],
+            ['', 'Adjustment', '$5.00', '2026-01-11'],
+            ['txn-201', 'Trip payment', '$90.00', '2026-01-11'],
+        ]);
+
+        $result = $this->service->import($file, null, 'earnings-mixed-duplicate.csv');
+
+        $this->assertSame(3, $result->rowsRead);
+        $this->assertSame(2, $result->rawRowsCreated);
+        $this->assertSame(2, $result->tripsNormalized);
+        $this->assertSame(1, $result->skippedRows);
+        $this->assertSame(1, $result->duplicateRows);
+        $this->assertSame(1, $result->errorCount);
+        $this->assertSame(2, $this->connection->table('turo_transaction_raw')->countAllResults());
+        $this->assertSame(2, $this->connection->table('turo_transactions_normalized')->countAllResults());
+        $issue = $this->connection->table('turo_import_errors')->get()->getRowArray();
+        $this->assertSame('duplicate_raw_row_in_file', $issue['error_code']);
+        $this->assertStringNotContainsString('Duplicate entry', $issue['message']);
+    }
+
+    public function testFailedBatchResumesExistingRawRowsAndProcessesRemainingRows(): void
+    {
+        $file = $this->csvFile([
+            'transaction_id', 'transaction_type', 'amount', 'transaction_date',
+        ], [
+            ['txn-210', 'Adjustment', '$5.00', '2026-01-11'],
+            ['txn-211', 'Trip payment', '$90.00', '2026-01-11'],
+        ]);
+        $sourceHash = hash_file('sha256', $file);
+        $firstRow = iterator_to_array((new TuroCsvReader())->read($file))[0];
+        $rowHash = hash('sha256', json_encode($firstRow->row, JSON_THROW_ON_ERROR));
+        $failedStatusId = (new LookupRepository($this->connection))->valueId('import_status', 'failed');
+        $this->connection->table('turo_import_batches')->insert([
+            'id' => 80,
+            'import_status_lookup_value_id' => $failedStatusId,
+            'source_filename' => 'earnings-resume.csv',
+            'source_hash' => $sourceHash,
+            'row_count' => 1,
+            'error_message' => 'Duplicate entry from interrupted import',
+        ]);
+        $this->connection->table('turo_transaction_raw')->insert([
+            'turo_import_batch_id' => 80,
+            'external_transaction_id' => 'txn-210',
+            'transaction_date' => '2026-01-11',
+            'row_number' => 2,
+            'row_hash' => $rowHash,
+            'raw_payload' => json_encode($firstRow->row, JSON_THROW_ON_ERROR),
+        ]);
+
+        $result = $this->service->import($file, null, 'earnings-resume.csv');
+
+        $this->assertSame(80, $result->batchId);
+        $this->assertSame(2, $result->rowsRead);
+        $this->assertSame(1, $result->rawRowsCreated);
+        $this->assertSame(2, $result->tripsNormalized);
+        $this->assertSame(1, $result->skippedRows);
+        $this->assertSame(1, $result->duplicateRows);
+        $this->assertSame(2, $this->connection->table('turo_transaction_raw')->countAllResults());
+        $this->assertSame(2, $this->connection->table('turo_transactions_normalized')->countAllResults());
+        $batch = $this->connection->table('turo_import_batches')->where('id', 80)->get()->getRowArray();
+        $this->assertNull($batch['error_message']);
+        $this->assertSame(2, (int) $batch['row_count']);
     }
 
     public function testDuplicateExternalIdOrFingerprintAcrossDifferentFilesDoesNotDuplicateTransactions(): void

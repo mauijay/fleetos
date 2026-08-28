@@ -46,6 +46,45 @@ final class DailyOperationsDashboardServiceTest extends CIUnitTestCase
         $this->assertSame(count($board), count(array_unique(array_column($board, 'fleet_vehicle_id'))));
     }
 
+    public function testMovementBoardSortsTimedCardsChronologicallyWithStableUntimedFallback(): void
+    {
+        $vehicles = [
+            $this->vehicle(5),
+            $this->vehicle(4),
+            $this->vehicle(3, 'in_progress'),
+            $this->vehicle(2),
+            $this->vehicle(1),
+        ];
+        $vehicles[0]['fleet_number'] = 20;
+        $vehicles[1]['fleet_number'] = 10;
+        $vehicles[2]['fleet_number'] = 30;
+        $vehicles[3]['fleet_number'] = 2;
+        $vehicles[4]['fleet_number'] = 1;
+
+        $board = $this->states->movementBoard($vehicles, [
+            'todays_returns' => [
+                $this->reservation(4, '2026-07-18 12:00:00', '2026-07-19 17:00:00'),
+                $this->reservation(3, '2026-07-18 12:00:00', '2026-07-19 17:00:00'),
+            ],
+            'todays_pickups' => [
+                $this->reservation(5, '2026-07-19 15:00:00', '2026-07-20 15:00:00'),
+                $this->reservation(2, '2026-07-19 06:00:00', '2026-07-20 06:00:00'),
+            ],
+        ], $this->emptyHealth(), new DateTimeImmutable('2026-07-19 05:00:00'));
+
+        $this->assertSame([2, 5, 4, 3, 1], array_column($board, 'fleet_vehicle_id'));
+    }
+
+    public function testMovementLabelsAndTonesMatchTuroStartAndEndSemantics(): void
+    {
+        $board = array_column($this->states->movementBoard([$this->vehicle(4), $this->vehicle(9)], $this->today(), $this->emptyHealth(), new DateTimeImmutable('2026-07-19 08:00:00')), null, 'fleet_vehicle_id');
+
+        $this->assertSame('Ending at 8:30 AM', $board[4]['primary_status_label']);
+        $this->assertSame('trip-end', $board[4]['status_tone']);
+        $this->assertSame('Starting at 2:00 PM', $board[9]['primary_status_label']);
+        $this->assertSame('trip-start', $board[9]['status_tone']);
+    }
+
     public function testSameDayTurnaroundDurationAndThresholdsWork(): void
     {
         $byVehicle = array_column($this->board(), null, 'fleet_vehicle_id');

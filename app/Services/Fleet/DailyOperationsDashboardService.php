@@ -43,7 +43,6 @@ class DailyOperationsDashboardService
         $checklists = $this->checklists()->summariesForDay($asOf);
         $board = $this->stateService->movementBoard($vehicles, $today, $health, $asOf);
         $board = $this->attachChecklistSummaries($board, $checklists);
-        usort($board, static fn (array $left, array $right): int => strcmp($left['sort_priority'], $right['sort_priority']));
 
         $externalAlerts = $this->externalAlerts($importIssues, $vehicleMappings, $reconciliation, $airport, $reimbursements, $health);
         $attention = $this->stateService->immediateAttention($board, $externalAlerts);

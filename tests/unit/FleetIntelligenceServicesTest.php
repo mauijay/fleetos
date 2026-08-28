@@ -202,7 +202,7 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
     {
         $repository = $this->repositoryMock(['fleetVehicles', 'operationalReservationsBetween', 'airportDeliveriesBetween']);
         $repository->method('fleetVehicles')->willReturn([
-            ['id' => 1, 'fleet_code' => 'Spaceship-001', 'display_name' => 'Spaceship-001', 'is_available_for_booking' => true, 'odometer_miles' => 1200],
+            ['id' => 1, 'fleet_number' => 1, 'fleet_code' => 'Spaceship-001', 'display_name' => 'Spaceship-001', 'is_available_for_booking' => true, 'odometer_miles' => 1200],
             ['id' => 2, 'fleet_code' => 'Spaceship-002', 'display_name' => 'Spaceship-002', 'is_available_for_booking' => true, 'odometer_miles' => 2200],
         ]);
         $repository->method('operationalReservationsBetween')->willReturn([
@@ -214,6 +214,8 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
         $service = new VehicleAvailabilityService($repository);
         $statuses = $service->vehicleStatus(new DateTimeImmutable('2026-06-15 12:00:00'));
 
+        $this->assertSame(1, $statuses[0]['fleet_number']);
+        $this->assertNull($statuses[1]['fleet_number']);
         $this->assertSame('in_progress', $statuses[0]['status']);
         $this->assertSame('available', $statuses[1]['status']);
         $this->assertTrue($statuses[1]['airport_delivery_scheduled']);

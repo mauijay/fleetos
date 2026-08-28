@@ -16,8 +16,10 @@ class TuroImportBatchRepository
 
     public function findBySourceHash(string $sourceHash): ?array
     {
-        return $this->db->table('turo_import_batches')
-            ->where('source_hash', $sourceHash)
+        return $this->db->table('turo_import_batches batches')
+            ->select('batches.*, statuses.code AS status_code')
+            ->join('lookup_values statuses', 'statuses.id = batches.import_status_lookup_value_id', 'left')
+            ->where('batches.source_hash', $sourceHash)
             ->get()
             ->getRowArray();
     }

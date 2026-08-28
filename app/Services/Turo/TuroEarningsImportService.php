@@ -66,20 +66,32 @@ class TuroEarningsImportService
             throw new RuntimeException("Unable to hash CSV file: {$filePath}");
         }
 
-        if ($this->batches->findBySourceHash($sourceHash) !== null) {
-            throw new RuntimeException('This CSV source hash has already been imported.');
+        $existingBatch = $this->batches->findBySourceHash($sourceHash);
+        if ($existingBatch !== null && $existingBatch['status_code'] === 'completed') {
+            $rowCount = (int) $existingBatch['row_count'];
+
+            return new ImportResult((int) $existingBatch['id'], $rowCount, 0, 0, 0, 0, $rowCount, $rowCount, 0);
         }
 
         $sourceFilename ??= basename($filePath);
 
-        $batchId = $this->batches->create([
-            'import_type_lookup_value_id' => $this->lookups->valueId('import_type', 'turo_transactions'),
-            'import_status_lookup_value_id' => $this->lookups->valueId('import_status', 'processing'),
-            'source_filename' => $sourceFilename,
-            'source_hash' => $sourceHash,
-            'created_by' => $actorUserId,
-        ]);
-        $this->audit->imported($actorUserId, 'turo_import_batches', $batchId, ['source_filename' => $sourceFilename, 'source_hash' => $sourceHash]);
+        if ($existingBatch === null) {
+            $batchId = $this->batches->create([
+                'import_type_lookup_value_id' => $this->lookups->valueId('import_type', 'turo_transactions'),
+                'import_status_lookup_value_id' => $this->lookups->valueId('import_status', 'processing'),
+                'source_filename' => $sourceFilename,
+                'source_hash' => $sourceHash,
+                'created_by' => $actorUserId,
+            ]);
+            $this->audit->imported($actorUserId, 'turo_import_batches', $batchId, ['source_filename' => $sourceFilename, 'source_hash' => $sourceHash]);
+        } else {
+            $batchId = (int) $existingBatch['id'];
+            $this->batches->update($batchId, [
+                'import_status_lookup_value_id' => $this->lookups->valueId('import_status', 'processing'),
+                'error_message' => null,
+                'completed_at' => null,
+            ]);
+        }
 
         $rowsRead = 0;
         $rawRowsCreated = 0;
@@ -89,6 +101,7 @@ class TuroEarningsImportService
         $duplicateRows = 0;
         $unmatchedRows = 0;
         $seenTransactionIds = [];
+        $seenRowHashes = [];
 
         try {
             foreach ($this->csvReader->read($filePath) as $csvRow) {
@@ -112,6 +125,22 @@ class TuroEarningsImportService
 
                 $rawTransaction = $this->rawTransactionRow($csvRow->rowNumber, $csvRow->row);
 
+                if (isset($seenRowHashes[$rawTransaction->rowHash])) {
+                    $errorCount++;
+                    $skippedRows++;
+                    $duplicateRows++;
+                    $this->recordIssue(
+                        $batchId,
+                        $csvRow->rowNumber,
+                        new ValidationIssue('duplicate_raw_row_in_file', "This raw earnings row already appeared on row {$seenRowHashes[$rawTransaction->rowHash]} of this CSV. The first row was imported and this duplicate row was skipped.", null, 'warning'),
+                        $csvRow->row,
+                    );
+
+                    continue;
+                }
+
+                $seenRowHashes[$rawTransaction->rowHash] = $csvRow->rowNumber;
+
                 if ($rawTransaction->externalTransactionId !== null && isset($seenTransactionIds[$rawTransaction->externalTransactionId])) {
                     $errorCount++;
                     $skippedRows++;
@@ -130,13 +159,20 @@ class TuroEarningsImportService
                     $seenTransactionIds[$rawTransaction->externalTransactionId] = $csvRow->rowNumber;
                 }
 
-                $rawTransactionId = $this->createRawTransaction($batchId, $rawTransaction);
-                $rawRowsCreated++;
+                $existingRawTransaction = $this->rawTransactions->findByBatchAndRowHash($batchId, $rawTransaction->rowHash);
+                if ($existingRawTransaction === null) {
+                    $rawTransactionId = $this->createRawTransaction($batchId, $rawTransaction);
+                    $rawRowsCreated++;
+                } else {
+                    $rawTransactionId = (int) $existingRawTransaction['id'];
+                    $skippedRows++;
+                    $duplicateRows++;
+                }
 
                 $normalized = $this->normalizer->normalize($rawTransaction, $rawTransactionId);
                 $upsert = $this->normalizedTransactions->upsert($normalized);
                 $normalizedRows++;
-                if (! (bool) $upsert['created']) {
+                if (! (bool) $upsert['created'] && $existingRawTransaction === null) {
                     $duplicateRows++;
                 }
                 if ($normalized->turoTripNormalizedId === null) {

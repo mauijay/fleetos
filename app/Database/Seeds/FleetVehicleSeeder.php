@@ -10,9 +10,13 @@ class FleetVehicleSeeder extends Seeder
     {
         $companyId = $this->firstOrCreate('companies', ['slug' => 'go808-fleetos'], [
             'company_type_lookup_value_id' => $this->lookupValueId('company_type', 'fleet_owner'),
-            'name' => 'GO808 FleetOS',
-            'legal_name' => 'GO808 FleetOS',
+            'name' => '808biz, Inc.',
+            'legal_name' => '808biz, Inc.',
             'is_active' => true,
+        ]);
+        $this->db->table('companies')->where('id', $companyId)->update([
+            'name' => '808biz, Inc.',
+            'legal_name' => '808biz, Inc.',
         ]);
 
         $activeStatusId = $this->idByCode('vehicle_statuses', 'active');

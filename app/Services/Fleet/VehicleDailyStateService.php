@@ -17,7 +17,7 @@ class VehicleDailyStateService
         $cleaning = $this->ids($health['vehicles_needing_cleaning'] ?? []);
         $maintenance = $this->ids($health['vehicles_due_for_maintenance'] ?? []);
 
-        return array_map(function (array $vehicle) use ($pickups, $returns, $cleaning, $maintenance, $asOf): array {
+        $board = array_map(function (array $vehicle) use ($pickups, $returns, $cleaning, $maintenance, $asOf): array {
             $vehicleId = (int) $vehicle['fleet_vehicle_id'];
             $return = $returns[$vehicleId][0] ?? null;
             $pickup = $pickups[$vehicleId][0] ?? null;
@@ -27,6 +27,7 @@ class VehicleDailyStateService
 
             return [
                 'fleet_vehicle_id' => $vehicleId,
+                'fleet_number' => $vehicle['fleet_number'] ?? null,
                 'fleet_code' => (string) ($vehicle['fleet_code'] ?? $vehicle['display_name'] ?? 'Vehicle'),
                 'display_name' => (string) ($vehicle['display_name'] ?? $vehicle['fleet_code'] ?? 'Vehicle'),
                 'model' => (string) ($vehicle['model'] ?? ''),
@@ -44,9 +45,13 @@ class VehicleDailyStateService
                 'charging_status_label' => $pickup !== null || $turnaround !== null ? 'Charge level not captured; confirm charge' : 'Battery telemetry not connected',
                 'battery_label' => $vehicle['current_battery'] === null ? 'Battery not captured' : (string) $vehicle['current_battery'],
                 'actions' => $this->actions($flags, $turnaround),
-                'sort_priority' => $this->sortPriority($primaryStatus, $pickup, $return, $asOf),
+                'sort_priority' => $this->sortPriority($vehicle, $pickup, $return),
             ];
         }, $vehicles);
+
+        usort($board, static fn (array $left, array $right): int => strcmp($left['sort_priority'], $right['sort_priority']));
+
+        return $board;
     }
 
     /** @return array<int, array<string, mixed>> */
@@ -200,8 +205,8 @@ class VehicleDailyStateService
         return match ($status) {
             'late_return' => 'Return time passed; confirm return',
             'same_day_turnaround' => 'Same-day turnaround',
-            'returning_today' => 'Returning at ' . $this->timeLabel((string) ($return['ends_at'] ?? '')),
-            'departing_today' => 'Going out at ' . $this->timeLabel((string) ($pickup['starts_at'] ?? '')),
+            'returning_today' => 'Ending at ' . $this->timeLabel((string) ($return['ends_at'] ?? '')),
+            'departing_today' => 'Starting at ' . $this->timeLabel((string) ($pickup['starts_at'] ?? '')),
             'currently_rented' => 'Currently rented',
             'maintenance_required' => 'Maintenance required',
             'offline' => 'Offline or unavailable',
@@ -284,7 +289,13 @@ class VehicleDailyStateService
         if ($status === 'late_return' || ($turnaround['severity'] ?? '') === 'critical') {
             return 'danger';
         }
-        if ($status === 'same_day_turnaround' || ($turnaround['severity'] ?? '') === 'tight' || in_array($status, ['returning_today', 'departing_today'], true)) {
+        if ($status === 'returning_today') {
+            return 'trip-end';
+        }
+        if ($status === 'departing_today') {
+            return 'trip-start';
+        }
+        if ($status === 'same_day_turnaround' || ($turnaround['severity'] ?? '') === 'tight') {
             return 'warning';
         }
         if ($status === 'available') {
@@ -294,12 +305,19 @@ class VehicleDailyStateService
         return 'info';
     }
 
-    private function sortPriority(string $status, ?array $pickup, ?array $return, DateTimeImmutable $asOf): string
+    private function sortPriority(array $vehicle, ?array $pickup, ?array $return): string
     {
-        $rank = ['late_return' => 0, 'same_day_turnaround' => 1, 'returning_today' => 2, 'departing_today' => 3, 'currently_rented' => 4, 'maintenance_required' => 5, 'offline' => 6, 'available' => 7][$status] ?? 9;
-        $time = (string) ($return['ends_at'] ?? $pickup['starts_at'] ?? $asOf->format('Y-m-d H:i:s'));
+        $times = array_values(array_filter([
+            (string) ($return['ends_at'] ?? ''),
+            (string) ($pickup['starts_at'] ?? ''),
+        ]));
+        $time = $times === [] ? '' : min($times);
+        $timedRank = $time === '' ? '1' : '0';
+        $fleetNumber = isset($vehicle['fleet_number']) ? str_pad((string) $vehicle['fleet_number'], 10, '0', STR_PAD_LEFT) : '9999999999';
+        $fleetCode = strtolower((string) ($vehicle['fleet_code'] ?? $vehicle['display_name'] ?? ''));
+        $vehicleId = str_pad((string) ($vehicle['fleet_vehicle_id'] ?? 0), 10, '0', STR_PAD_LEFT);
 
-        return str_pad((string) $rank, 2, '0', STR_PAD_LEFT) . '-' . $time;
+        return implode('-', [$timedRank, $time, $fleetNumber, $fleetCode, $vehicleId]);
     }
 
     private function attention(string $severity, string $label, string $detail, string $href): array
