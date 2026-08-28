@@ -157,6 +157,7 @@ $summary = $review['summary'];
                                             <p class="muted"><?= esc((string) $issue['resolution_note']) ?></p>
                                         <?php endif; ?>
                                         <form class="resolution-form" action="/turo/import-issues/<?= esc((string) $issue['id'], 'attr') ?>/<?= $issue['requires_action'] ? 'resolve' : 'reopen' ?>" method="post">
+                                            <?= csrf_field() ?>
                                             <label>Note
                                                 <textarea name="resolution_note" rows="3" placeholder="Optional note about what changed or why this can be closed."></textarea>
                                             </label>

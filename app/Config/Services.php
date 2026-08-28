@@ -2,15 +2,18 @@
 
 namespace Config;
 
-use App\Repositories\FleetIntelligenceRepository;
 use App\Repositories\AirportMovementRepository;
 use App\Repositories\FileRepository;
+use App\Repositories\FleetIntelligenceRepository;
 use App\Repositories\MovementChecklistRepository;
 use App\Repositories\TuroAccessReimbursementRepository;
 use App\Repositories\TuroImportErrorRepository;
 use App\Repositories\TuroNormalizedTripRepository;
 use App\Repositories\TuroVehicleMappingIssueRepository;
 use App\Repositories\VehicleTuroListingRepository;
+use App\Services\Files\PrivateFileStorageService;
+use App\Services\Fleet\AirportMovementWorkflowService;
+use App\Services\Fleet\DailyOperationsDashboardService;
 use App\Services\Fleet\DecisionSupport\BusinessInsightService;
 use App\Services\Fleet\DecisionSupport\DecisionSupportDashboardService;
 use App\Services\Fleet\DecisionSupport\FleetOptimizationService;
@@ -19,27 +22,26 @@ use App\Services\Fleet\DecisionSupport\MaintenancePredictionService;
 use App\Services\Fleet\DecisionSupport\PricingRecommendationService;
 use App\Services\Fleet\DecisionSupport\RecommendationFactory;
 use App\Services\Fleet\DecisionSupport\RevenueForecastService;
-use App\Services\Fleet\AirportMovementWorkflowService;
-use App\Services\Fleet\DailyOperationsDashboardService;
 use App\Services\Fleet\FleetCommandCenterViewModelService;
 use App\Services\Fleet\FleetCommandService;
 use App\Services\Fleet\FleetHealthService;
 use App\Services\Fleet\FleetStatisticsService;
-use App\Services\Fleet\TripMovementChecklistService;
-use App\Services\Fleet\TuroAccessReimbursementService;
+use App\Services\Fleet\FleetVehicleService;
 use App\Services\Fleet\RevenueService;
 use App\Services\Fleet\TaskService;
 use App\Services\Fleet\TripAnalyticsService;
+use App\Services\Fleet\TripMovementChecklistService;
+use App\Services\Fleet\TuroAccessReimbursementService;
+use App\Services\Fleet\UnknownVehicleOnboardingService;
 use App\Services\Fleet\VehicleAvailabilityService;
-use App\Services\Files\PrivateFileStorageService;
-use App\Services\Turo\TuroImportIssueService;
 use App\Services\Turo\TuroEarningsImportService;
+use App\Services\Turo\TuroImportIssueService;
+use App\Services\Turo\TuroTransactionRelinkingService;
 use App\Services\Turo\TuroTripImportService;
 use App\Services\Turo\TuroTripReconciliationService;
 use App\Services\Turo\TuroVehicleMappingService;
 use App\Services\View\AssetManifestService;
 use CodeIgniter\Config\BaseService;
-use Config\DecisionSupport;
 
 /**
  * Services Configuration file.
@@ -56,6 +58,29 @@ use Config\DecisionSupport;
  */
 class Services extends BaseService
 {
+    public static function fleetVehicleService(bool $getShared = true): FleetVehicleService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('fleetVehicleService');
+        }
+
+        return new FleetVehicleService();
+    }
+
+    public static function unknownVehicleOnboardingService(bool $getShared = true): UnknownVehicleOnboardingService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('unknownVehicleOnboardingService');
+        }
+
+        return new UnknownVehicleOnboardingService(
+            static::fleetVehicleService(),
+            static::turoVehicleMappingService(),
+            static::turoTripReconciliationService(),
+            static::turoTransactionRelinkingService(),
+        );
+    }
+
     public static function fleetIntelligenceRepository(bool $getShared = true): FleetIntelligenceRepository
     {
         if ($getShared) {
@@ -221,6 +246,15 @@ class Services extends BaseService
             static::turoNormalizedTripRepository(),
             static::turoTripImportService(),
         );
+    }
+
+    public static function turoTransactionRelinkingService(bool $getShared = true): TuroTransactionRelinkingService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('turoTransactionRelinkingService');
+        }
+
+        return new TuroTransactionRelinkingService();
     }
 
     public static function revenueService(bool $getShared = true): RevenueService

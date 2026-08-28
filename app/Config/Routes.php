@@ -5,16 +5,23 @@ use CodeIgniter\Router\RouteCollection;
 /** @var RouteCollection $routes */
 $routes->group('', ['filter' => 'session'], static function (RouteCollection $routes): void {
 	$routes->get('/', 'Home::index');
-	$routes->get('turo/imports', 'TuroImports::index');
-	$routes->post('turo/imports', 'TuroImports::store');
-	$routes->post('turo/earnings-imports', 'TuroImports::storeEarnings');
-	$routes->get('turo/import-issues', 'TuroImportIssues::index');
-	$routes->post('turo/import-issues/(:num)/resolve', 'TuroImportIssues::resolve/$1');
-	$routes->post('turo/import-issues/(:num)/reopen', 'TuroImportIssues::reopen/$1');
-	$routes->get('turo/vehicle-matches', 'TuroVehicleMatches::index');
-	$routes->post('turo/vehicle-matches/map', 'TuroVehicleMatches::map');
-	$routes->get('turo/vehicle-matches/reprocess', 'TuroVehicleMatches::reprocessPreview');
-	$routes->post('turo/vehicle-matches/reprocess', 'TuroVehicleMatches::reprocess');
+	$routes->get('turo/imports', 'TuroImports::index', ['filter' => 'permission:admin.access']);
+	$routes->post('turo/imports', 'TuroImports::store', ['filter' => ['permission:admin.access', 'csrf']]);
+	$routes->post('turo/earnings-imports', 'TuroImports::storeEarnings', ['filter' => ['permission:admin.access', 'csrf']]);
+	$routes->get('turo/import-issues', 'TuroImportIssues::index', ['filter' => 'permission:admin.access']);
+	$routes->post('turo/import-issues/(:num)/resolve', 'TuroImportIssues::resolve/$1', ['filter' => ['permission:admin.access', 'csrf']]);
+	$routes->post('turo/import-issues/(:num)/reopen', 'TuroImportIssues::reopen/$1', ['filter' => ['permission:admin.access', 'csrf']]);
+	$routes->get('turo/vehicle-matches', 'TuroVehicleMatches::index', ['filter' => 'permission:admin.access']);
+	$routes->post('turo/vehicle-matches/map', 'TuroVehicleMatches::map', ['filter' => ['permission:admin.access', 'csrf']]);
+	$routes->get('turo/vehicle-matches/reprocess', 'TuroVehicleMatches::reprocessPreview', ['filter' => 'permission:admin.access']);
+	$routes->post('turo/vehicle-matches/reprocess', 'TuroVehicleMatches::reprocess', ['filter' => ['permission:admin.access', 'csrf']]);
+	$routes->group('fleet/vehicles', ['filter' => 'permission:admin.access'], static function (RouteCollection $routes): void {
+		$routes->get('', 'FleetVehicles::index');
+		$routes->get('new', 'FleetVehicles::new');
+		$routes->post('', 'FleetVehicles::create', ['filter' => 'csrf']);
+		$routes->get('(:num)/edit', 'FleetVehicles::edit/$1');
+		$routes->post('(:num)', 'FleetVehicles::update/$1', ['filter' => 'csrf']);
+	});
 	$routes->get('operations/checklists/(:num)', 'TripMovementChecklists::show/$1');
 	$routes->post('operations/checklists/(:num)/complete', 'TripMovementChecklists::complete/$1');
 	$routes->post('operations/checklists/(:num)/reopen', 'TripMovementChecklists::reopen/$1');

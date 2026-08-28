@@ -1,0 +1,14 @@
+<?php
+/** @var array{css:?string,js:?string} $assets */
+/** @var array<int, array<string, string>> $navigation */
+/** @var array<int, array<string, mixed>> $vehicles */
+/** @var string|null $notice */
+?>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Vehicles | FleetOS</title><?php if ($assets['css'] !== null): ?><link rel="stylesheet" href="/build/<?= esc($assets['css'], 'attr') ?>"><?php endif; ?></head>
+<body class="fleet-shell"><a class="skip-link" href="#main-content">Skip to main content</a><div class="app-frame import-frame"><?= view('fleet_command_center/components/navigation', ['items' => $navigation]) ?><main id="main-content" class="command-main import-main" tabindex="-1">
+<header class="top-status"><div><p class="eyebrow">Fleet</p><h1>Vehicles</h1><p class="status-copy">Permanent fleet identities, operating status, and Turo mappings.</p></div><a class="primary-action button-link" href="/fleet/vehicles/new">Add Vehicle</a></header>
+<?php if ($notice !== null): ?><section class="section import-message tone-success"><strong><?= esc($notice) ?></strong></section><?php endif; ?>
+<section class="section"><div class="section-heading"><p class="eyebrow"><?= count($vehicles) ?> vehicles</p><h2>Fleet Registry</h2></div>
+<?php if ($vehicles === []): ?><div class="empty-state">No fleet vehicles have been added.</div><?php endif; ?><div class="mapping-list">
+<?php foreach ($vehicles as $vehicle): ?><article class="mapping-card tone-<?= $vehicle['status_code'] === 'active' ? 'success' : 'info' ?>"><div class="mapping-card-main"><div><div class="vehicle-status-row"><span class="status-badge tone-info">Fleet #<?= esc((string) ($vehicle['fleet_number'] ?? 'Unassigned')) ?></span><span><?= esc((string) $vehicle['status_name']) ?></span></div><h3><?= esc((string) $vehicle['fleet_code']) ?></h3><p><?= esc(trim((string) $vehicle['model_year'] . ' ' . (string) $vehicle['make_name'] . ' ' . (string) $vehicle['model_name'] . ' ' . (string) $vehicle['trim_name'])) ?></p></div><dl class="issue-facts"><div><dt>Display name</dt><dd><?= esc((string) $vehicle['display_name']) ?></dd></div><div><dt>Plate</dt><dd><?= esc((string) ($vehicle['license_plate'] ?? 'Not assigned')) ?></dd></div><div><dt>Turo mapping</dt><dd><?= esc((string) ($vehicle['turo_vehicle_id'] ?? 'Not mapped')) ?></dd></div><div><dt>Status</dt><dd><?= esc((string) $vehicle['status_name']) ?></dd></div></dl></div><a class="action-link" href="/fleet/vehicles/<?= (int) $vehicle['id'] ?>/edit">Edit vehicle</a></article><?php endforeach; ?>
+</div></section><?= view('fleet_command_center/components/footer') ?></main></div><?php if ($assets['js'] !== null): ?><script type="module" src="/build/<?= esc($assets['js'], 'attr') ?>"></script><?php endif; ?></body></html>

@@ -92,6 +92,7 @@
                 <p><a class="text-link" href="/turo/import-issues">Open Import Issues</a> · <a class="text-link" href="/turo/vehicle-matches">Open Vehicle Matching</a></p>
 
                 <form class="upload-form" action="/turo/imports" method="post" enctype="multipart/form-data">
+                    <?= csrf_field() ?>
                     <label class="file-drop" for="trips_csv">
                         <span>Choose Turo trip_earnings_export</span>
                         <input id="trips_csv" name="trips_csv" type="file" accept=".csv,text/csv" required>
@@ -125,6 +126,7 @@
                 </div>
 
                 <form class="upload-form" action="/turo/earnings-imports" method="post" enctype="multipart/form-data">
+                    <?= csrf_field() ?>
                     <label class="file-drop" for="earnings_csv">
                         <span>Choose Turo earnings_export</span>
                         <input id="earnings_csv" name="earnings_csv" type="file" accept=".csv,text/csv" required>

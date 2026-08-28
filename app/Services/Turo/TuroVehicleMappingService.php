@@ -66,6 +66,23 @@ class TuroVehicleMappingService
         ];
     }
 
+    /** @return array<string, mixed>|null */
+    public function unmatchedVehicle(string $turoVehicleId): ?array
+    {
+        $target = trim($turoVehicleId);
+        if ($target === '') {
+            return null;
+        }
+
+        foreach ($this->queue(['status' => 'unmapped'])['items'] as $item) {
+            if ((string) $item['turo_vehicle_id'] === $target && $item['mapping'] === null) {
+                return $item;
+            }
+        }
+
+        return null;
+    }
+
     /** @return array<string, mixed> */
     public function map(string $turoVehicleId, int $fleetVehicleId, bool $confirmRemap = false, ?string $note = null, ?int $actorUserId = null): array
     {

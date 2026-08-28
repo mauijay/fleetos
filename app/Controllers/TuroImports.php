@@ -4,6 +4,7 @@ namespace App\Controllers;
 
 use App\DTOs\Turo\ImportResult;
 use CodeIgniter\HTTP\RedirectResponse;
+use CodeIgniter\Shield\Config\Services as ShieldServices;
 use Throwable;
 
 class TuroImports extends BaseController
@@ -42,7 +43,7 @@ class TuroImports extends BaseController
         $filePath = $uploadPath . DIRECTORY_SEPARATOR . $storedName;
 
         try {
-            $result = service('turoTripImportService')->import($filePath, null, $file->getClientName());
+            $result = service('turoTripImportService')->import($filePath, $this->actorUserId(), $file->getClientName());
         } catch (Throwable $exception) {
             $this->removeUploadedFile($filePath);
 
@@ -76,7 +77,7 @@ class TuroImports extends BaseController
         $filePath = $uploadPath . DIRECTORY_SEPARATOR . $storedName;
 
         try {
-            $result = service('turoEarningsImportService')->import($filePath, null, $file->getClientName());
+            $result = service('turoEarningsImportService')->import($filePath, $this->actorUserId(), $file->getClientName());
         } catch (Throwable $exception) {
             $this->removeUploadedFile($filePath);
 
@@ -93,6 +94,7 @@ class TuroImports extends BaseController
     {
         return [
             ['label' => 'Fleet Command Center', 'href' => '/', 'active' => 'false'],
+            ['label' => 'Vehicles', 'href' => '/fleet/vehicles', 'active' => 'false'],
             ['label' => 'Turo Import', 'href' => '/turo/imports', 'active' => 'true'],
             ['label' => 'Import Issues', 'href' => '/turo/import-issues', 'active' => 'false'],
             ['label' => 'Vehicle Matching', 'href' => '/turo/vehicle-matches', 'active' => 'false'],
@@ -126,5 +128,16 @@ class TuroImports extends BaseController
         if (is_file($filePath)) {
             unlink($filePath);
         }
+    }
+
+    private function actorUserId(): ?int
+    {
+        try {
+            $user = ShieldServices::auth()->user();
+        } catch (\Throwable) {
+            return null;
+        }
+
+        return $user === null ? null : (int) $user->id;
     }
 }

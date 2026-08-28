@@ -58,6 +58,7 @@ class TuroImportIssues extends BaseController
     {
         return [
             ['label' => 'Fleet Command Center', 'href' => '/', 'active' => 'false'],
+            ['label' => 'Vehicles', 'href' => '/fleet/vehicles', 'active' => 'false'],
             ['label' => 'Turo Import', 'href' => '/turo/imports', 'active' => 'false'],
             ['label' => 'Import Issues', 'href' => '/turo/import-issues', 'active' => 'true'],
             ['label' => 'Vehicle Matching', 'href' => '/turo/vehicle-matches', 'active' => 'false'],

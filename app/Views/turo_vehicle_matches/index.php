@@ -125,9 +125,10 @@ $summary = $queue['summary'];
                             </div>
 
                             <details class="issue-details">
-                                <summary>Map this vehicle</summary>
+                                <summary>Resolve this vehicle</summary>
                                 <div class="issue-detail-grid">
                                     <form class="resolution-form" action="/turo/vehicle-matches/map" method="post">
+                                        <?= csrf_field() ?>
                                         <input type="hidden" name="turo_vehicle_id" value="<?= esc($item['turo_vehicle_id'], 'attr') ?>">
                                         <label>FleetOS vehicle
                                             <select name="fleet_vehicle_id" required>
@@ -145,8 +146,13 @@ $summary = $queue['summary'];
                                             <span>Confirm remap or replace an existing active Turo mapping for this FleetOS vehicle.</span>
                                         </label>
                                         <p class="muted">Confirm before saving: map Turo vehicle “<?= esc($item['vehicle_name']) ?>” to the selected FleetOS vehicle.</p>
-                                        <button class="primary-action" type="submit">Save Mapping</button>
+                                        <button class="primary-action" type="submit">Match Existing Vehicle</button>
                                     </form>
+                                    <div class="resolution-form">
+                                        <h4>New Fleet Vehicle</h4>
+                                        <p class="muted">Create a normalized FleetOS vehicle using reliable details discovered in this import.</p>
+                                        <a class="primary-action button-link" href="/fleet/vehicles/new?turo_vehicle_id=<?= esc(rawurlencode($item['turo_vehicle_id']), 'attr') ?>">Add New Vehicle</a>
+                                    </div>
                                     <div class="resolution-form">
                                         <h4>Historical Rows</h4>
                                         <p class="muted">Mapping fixes future imports. Reprocessing verifies whether historical rows can be safely reconciled before issues are closed.</p>

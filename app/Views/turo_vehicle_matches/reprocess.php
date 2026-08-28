@@ -55,6 +55,7 @@ $summary = $result['summary'] ?? $preview['summary'];
 
                 <?php if (! $preview['is_empty']): ?>
                     <form class="resolution-form" action="/turo/vehicle-matches/reprocess" method="post">
+                        <?= csrf_field() ?>
                         <input type="hidden" name="turo_vehicle_id" value="<?= esc($preview['turo_vehicle_id'], 'attr') ?>">
                         <label>Operator note
                             <textarea name="resolution_note" rows="3">Reconciled after Turo vehicle mapping was confirmed.</textarea>

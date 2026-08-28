@@ -3,6 +3,7 @@
 namespace App\Controllers;
 
 use CodeIgniter\HTTP\RedirectResponse;
+use CodeIgniter\Shield\Config\Services as ShieldServices;
 
 class TuroVehicleMatches extends BaseController
 {
@@ -24,6 +25,7 @@ class TuroVehicleMatches extends BaseController
             (int) $this->request->getPost('fleet_vehicle_id'),
             $this->request->getPost('confirm_remap') === '1',
             $this->request->getPost('mapping_note'),
+            $this->actorUserId(),
         );
 
         return redirect()->back()->with(
@@ -59,7 +61,7 @@ class TuroVehicleMatches extends BaseController
             return redirect()->back()->with('turo_vehicle_mapping_error', 'Confirm before reprocessing eligible historical rows.');
         }
 
-        $result = service('turoTripReconciliationService')->execute($turoVehicleId, $this->request->getPost('resolution_note'));
+        $result = service('turoTripReconciliationService')->execute($turoVehicleId, $this->request->getPost('resolution_note'), $this->actorUserId());
 
         return redirect()
             ->to('/turo/vehicle-matches/reprocess?turo_vehicle_id=' . rawurlencode($turoVehicleId))
@@ -84,11 +86,23 @@ class TuroVehicleMatches extends BaseController
     {
         return [
             ['label' => 'Fleet Command Center', 'href' => '/', 'active' => 'false'],
+            ['label' => 'Vehicles', 'href' => '/fleet/vehicles', 'active' => 'false'],
             ['label' => 'Turo Import', 'href' => '/turo/imports', 'active' => 'false'],
             ['label' => 'Import Issues', 'href' => '/turo/import-issues', 'active' => 'false'],
             ['label' => 'Vehicle Matching', 'href' => '/turo/vehicle-matches', 'active' => 'true'],
             ['label' => 'Fleet', 'href' => '/#fleet-activity', 'active' => 'false'],
             ['label' => 'Revenue', 'href' => '/#financial-snapshot', 'active' => 'false'],
         ];
+    }
+
+    private function actorUserId(): ?int
+    {
+        try {
+            $user = ShieldServices::auth()->user();
+        } catch (\Throwable) {
+            return null;
+        }
+
+        return $user === null ? null : (int) $user->id;
     }
 }
