@@ -28,6 +28,18 @@ to your `app` folder. The affected files can be copied or merged from
 Copy `env` to `.env` and tailor for your app, specifically the baseURL
 and any database settings.
 
+## Production releases
+
+An annotated Git release tag and its exact commit are the source of truth for application files. The retired `deploy-files.txt` manifest must not be used to assemble partial releases.
+
+Production does not provide Node.js. Run `npm ci` and `npm run build` in a compatible local environment, then transfer the generated `public/build` directory with the release. On production, run `composer install --no-dev --optimize-autoloader` from the checked-out tag.
+
+Before backup or migration, verify the configured database name from the protected production configuration without printing credentials. The expected database is `go808com_turofleet`; stop if the configured identity differs.
+
+Store each production backup under `/home/go808com/ci4/deploy-backups/<timestamp>/`, retaining separate database and runtime artifacts. Record the deployed commit, verify the compressed database backup, and preserve checksums. Runtime backup and deployment must preserve `.env`, all `writable` data, the current `public/build`, and applicable runtime/error logs.
+
+Apply application migrations with `php spark migrate -n App`. Never use `migrate:refresh` in production.
+
 ## Important Change with index.php
 
 `index.php` is no longer in the root of the project! It has been moved inside the _public_ folder,

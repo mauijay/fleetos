@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.7.0 - Fleet Vehicle Management
+
+### Added
+
+- Add Fleet Vehicle Management with fleet numbers, vehicle editing, and unknown Turo vehicle onboarding.
+- Reconcile trips and relink normalized earnings after onboarding a vehicle.
+- Add Four-Wheel Drive as a distinct drivetrain while preserving existing AWD relationships.
+
+### Changed
+
+- Harden earnings imports against duplicate rows and make exact-file re-imports idempotent.
+- Order Daily Operations movements chronologically with Turo-consistent Starting and Ending wording and semantic badges.
+- Correct company master data to 808biz, Inc. and improve responsive vehicle form actions.
+- Strengthen authorization and CSRF handling for administrative vehicle and reconciliation workflows.
+
 ## v0.6.2 - Shield Protection
 
 ### Added

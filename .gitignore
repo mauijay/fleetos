@@ -64,6 +64,8 @@ Vagrantfile
 /writable/debugbar/*
 !/writable/debugbar/index.html
 
+/writable/backups/
+
 php_errors.log
 
 #-------------------------
