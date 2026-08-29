@@ -63,6 +63,34 @@ final class FleetVehicleServiceTest extends CIUnitTestCase
         ], $options['drivetrains']);
     }
 
+    public function testFormOptionsKeepExteriorCatalogBroadAndFilterInteriorColors(): void
+    {
+        $options = $this->service->formOptions();
+        $legacyOptions = $this->service->formOptions(4);
+
+        $this->assertSame(['Black', 'Gray', 'Silver', 'Tan', 'White'], array_column($options['exterior_colors'], 'name'));
+        $this->assertSame(['Black', 'Tan', 'White'], array_column($options['interior_colors'], 'name'));
+        $this->assertSame(['Black', 'Silver', 'Tan', 'White'], array_column($legacyOptions['interior_colors'], 'name'));
+    }
+
+    public function testCreateRejectsNonPreferredInteriorButEditPreservesCurrentLegacyInterior(): void
+    {
+        $create = $this->service->create($this->validData(['interior_vehicle_color_id' => 3]));
+        $this->assertSame('Choose Black, White, or Tan.', $create['errors']['interior_vehicle_color_id']);
+
+        $this->seedLegacyVehicle(4);
+        $update = $this->service->update(5, $this->validData([
+            'fleet_number' => 10,
+            'fleet_code' => 'Legacy',
+            'display_name' => 'Legacy Updated',
+            'vin' => 'LEGACYVIN',
+            'interior_vehicle_color_id' => 4,
+        ]));
+
+        $this->assertTrue($update['success']);
+        $this->assertSame(4, (int) $this->service->vehicle(5)['interior_vehicle_color_id']);
+    }
+
     public function testCreatingFourWheelDriveBroncoDoesNotChangeAwdTesla(): void
     {
         $this->seedAwdTesla();
@@ -138,11 +166,11 @@ final class FleetVehicleServiceTest extends CIUnitTestCase
         ], $overrides);
     }
 
-    private function seedLegacyVehicle(): void
+    private function seedLegacyVehicle(int $interiorColorId = 1): void
     {
         $this->connection->table('vehicle_makes')->insert(['id' => 1, 'code' => 'legacy', 'name' => 'Legacy']);
         $this->connection->table('vehicle_models')->insert(['id' => 1, 'vehicle_make_id' => 1, 'code' => 'legacy', 'name' => 'Legacy']);
-        $this->connection->table('vehicle_specs')->insert(['id' => 1, 'vehicle_model_id' => 1, 'model_year' => 2020, 'vehicle_body_style_id' => 1, 'exterior_vehicle_color_id' => 1, 'interior_vehicle_color_id' => 1, 'battery_description' => '', 'seating_capacity' => 5]);
+        $this->connection->table('vehicle_specs')->insert(['id' => 1, 'vehicle_model_id' => 1, 'model_year' => 2020, 'vehicle_body_style_id' => 1, 'exterior_vehicle_color_id' => 1, 'interior_vehicle_color_id' => $interiorColorId, 'battery_description' => '', 'seating_capacity' => 5]);
         $this->connection->table('fleet_vehicles')->insert(['id' => 5, 'company_id' => 1, 'vehicle_spec_id' => 1, 'vehicle_trim_level_id' => 1, 'vehicle_drivetrain_id' => 1, 'vehicle_status_id' => 1, 'fleet_number' => null, 'fleet_code' => 'Legacy', 'display_name' => 'Legacy', 'vin' => 'LEGACYVIN']);
     }
 
@@ -157,8 +185,14 @@ final class FleetVehicleServiceTest extends CIUnitTestCase
     private function seedLookups(): void
     {
         $this->connection->table('companies')->insertBatch([['id' => 1, 'name' => 'Company A', 'is_active' => 1], ['id' => 2, 'name' => 'Company B', 'is_active' => 1]]);
-        $this->connection->table('vehicle_body_styles')->insert(['id' => 1, 'name' => 'SUV']);
-        $this->connection->table('vehicle_colors')->insert(['id' => 1, 'name' => 'Black']);
+        $this->connection->table('vehicle_body_styles')->insert(['id' => 1, 'code' => 'suv', 'name' => 'SUV']);
+        $this->connection->table('vehicle_colors')->insertBatch([
+            ['id' => 1, 'code' => 'black', 'name' => 'Black'],
+            ['id' => 2, 'code' => 'white', 'name' => 'White'],
+            ['id' => 3, 'code' => 'gray', 'name' => 'Gray'],
+            ['id' => 4, 'code' => 'silver', 'name' => 'Silver'],
+            ['id' => 5, 'code' => 'tan', 'name' => 'Tan'],
+        ]);
         $this->connection->table('vehicle_trim_levels')->insert(['id' => 1, 'name' => 'Base']);
         $this->connection->table('vehicle_drivetrains')->insertBatch([
             ['id' => 1, 'name' => 'All-Wheel Drive'],
@@ -170,7 +204,10 @@ final class FleetVehicleServiceTest extends CIUnitTestCase
     private function createSchema(): void
     {
         $this->connection->query('CREATE TABLE ' . $this->table('companies') . ' (id INTEGER PRIMARY KEY, name VARCHAR(120), is_active INTEGER, deleted_at DATETIME NULL)');
-        foreach (['vehicle_body_styles', 'vehicle_colors', 'vehicle_trim_levels', 'vehicle_drivetrains'] as $table) {
+        foreach (['vehicle_body_styles', 'vehicle_colors'] as $table) {
+            $this->connection->query('CREATE TABLE ' . $this->table($table) . ' (id INTEGER PRIMARY KEY, code VARCHAR(80), name VARCHAR(120))');
+        }
+        foreach (['vehicle_trim_levels', 'vehicle_drivetrains'] as $table) {
             $this->connection->query('CREATE TABLE ' . $this->table($table) . ' (id INTEGER PRIMARY KEY, name VARCHAR(120))');
         }
         $this->connection->query('CREATE TABLE ' . $this->table('vehicle_statuses') . ' (id INTEGER PRIMARY KEY, code VARCHAR(80), name VARCHAR(120))');

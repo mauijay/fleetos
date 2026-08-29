@@ -25,10 +25,12 @@ class FleetVehicleSeeder extends Seeder
         $modelYId = $this->firstOrCreate('vehicle_models', ['vehicle_make_id' => $teslaMakeId, 'code' => 'model_y'], ['name' => 'Model Y']);
         $sedanBodyStyleId = $this->firstOrCreate('vehicle_body_styles', ['code' => 'sedan'], ['name' => 'Sedan']);
         $suvBodyStyleId = $this->firstOrCreate('vehicle_body_styles', ['code' => 'suv'], ['name' => 'SUV']);
+        $this->firstOrCreate('vehicle_body_styles', ['code' => 'truck'], ['name' => 'Truck']);
         $blackColorId = $this->firstOrCreate('vehicle_colors', ['code' => 'black'], ['name' => 'Black', 'hex_color' => '#000000']);
         $whiteColorId = $this->firstOrCreate('vehicle_colors', ['code' => 'white'], ['name' => 'White', 'hex_color' => '#FFFFFF']);
         $grayColorId = $this->firstOrCreate('vehicle_colors', ['code' => 'gray'], ['name' => 'Gray', 'hex_color' => '#808080']);
         $silverColorId = $this->firstOrCreate('vehicle_colors', ['code' => 'silver'], ['name' => 'Silver', 'hex_color' => '#C0C0C0']);
+        $this->firstOrCreate('vehicle_colors', ['code' => 'tan'], ['name' => 'Tan', 'hex_color' => '#D2B48C']);
         $fsdFeatureId = $this->firstOrCreate('vehicle_features', ['code' => 'fsd'], ['name' => 'Full Self-Driving']);
         $freeSuperchargingFeatureId = $this->firstOrCreate('vehicle_features', ['code' => 'free_supercharging_1_year'], [
             'name' => '1-Year Free Supercharging',

@@ -2,8 +2,8 @@
 
 use App\Repositories\FleetIntelligenceRepository;
 use App\Repositories\TuroNormalizedTransactionRepository;
-use App\Services\Fleet\DecisionSupport\DecisionSupportDashboardService;
 use App\Services\Fleet\DailyOperationsDashboardService;
+use App\Services\Fleet\DecisionSupport\DecisionSupportDashboardService;
 use App\Services\Fleet\FleetCommandCenterViewModelService;
 use App\Services\Fleet\FleetCommandService;
 use App\Services\Fleet\FleetHealthService;
@@ -457,6 +457,16 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
             ->forToday(new DateTimeImmutable('2026-06-15 08:00:00'));
 
         $this->assertSame('Fleet Command Center', $viewModel['page_title']);
+        $this->assertSame([
+            'Fleet Command Center',
+            'Fleet Activity',
+            'Vehicles',
+            'Turo Import',
+            'Import Issues',
+            'Vehicle Matching',
+        ], array_slice(array_column($viewModel['navigation'], 'label'), 0, 6));
+        $this->assertSame('true', $viewModel['navigation'][0]['active']);
+        $this->assertNotContains('Fleet', array_column($viewModel['navigation'], 'label'));
         $this->assertTrue($viewModel['mission_clear']);
         $this->assertCount(8, $viewModel['fleet_status']);
         $this->assertSame('Premium', $viewModel['vehicles'][0]['segment']);

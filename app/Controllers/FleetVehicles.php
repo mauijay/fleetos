@@ -94,7 +94,7 @@ class FleetVehicles extends BaseController
             'vehicle' => $vehicle,
             'data' => $data,
             'errors' => $errors,
-            'options' => Services::fleetVehicleService()->formOptions(),
+            'options' => Services::fleetVehicleService()->formOptions($vehicle === null ? null : (int) $vehicle['interior_vehicle_color_id']),
             'onboarding' => $onboarding,
         ])->render('fleet_vehicles/form');
     }
@@ -148,6 +148,7 @@ class FleetVehicles extends BaseController
     {
         return [
             ['label' => 'Fleet Command Center', 'href' => '/', 'active' => 'false'],
+            ['label' => 'Fleet Activity', 'href' => '/#fleet-activity', 'active' => 'false'],
             ['label' => 'Vehicles', 'href' => '/fleet/vehicles', 'active' => 'true'],
             ['label' => 'Turo Import', 'href' => '/turo/imports', 'active' => 'false'],
             ['label' => 'Import Issues', 'href' => '/turo/import-issues', 'active' => 'false'],

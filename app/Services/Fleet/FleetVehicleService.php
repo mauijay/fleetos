@@ -52,12 +52,18 @@ class FleetVehicleService
     }
 
     /** @return array<string, array<int, array<string, mixed>>> */
-    public function formOptions(): array
+    public function formOptions(?int $currentInteriorColorId = null): array
     {
+        $interiorColors = $this->db->table('vehicle_colors')->select('id, name')->whereIn('code', ['black', 'white', 'tan']);
+        if ($currentInteriorColorId !== null) {
+            $interiorColors->orWhere('id', $currentInteriorColorId);
+        }
+
         return [
             'companies' => $this->options('companies', 'name', true),
             'body_styles' => $this->options('vehicle_body_styles'),
-            'colors' => $this->options('vehicle_colors'),
+            'exterior_colors' => $this->options('vehicle_colors'),
+            'interior_colors' => $interiorColors->orderBy('name', 'ASC')->get()->getResultArray(),
             'trim_levels' => $this->options('vehicle_trim_levels'),
             'drivetrains' => $this->options('vehicle_drivetrains'),
             'statuses' => $this->options('vehicle_statuses'),
@@ -67,7 +73,7 @@ class FleetVehicleService
     /** @return array{success:bool,id?:int,errors:array<string,string>} */
     public function create(array $data, ?int $actorUserId = null, ?string $turoVehicleId = null): array
     {
-        $errors = $this->validate($data, null);
+        $errors = $this->validate($data, null, null);
         if ($turoVehicleId !== null && trim($turoVehicleId) !== '' && $this->listings()->findActiveByTuroVehicleId($turoVehicleId) !== null) {
             $errors['turo_vehicle_id'] = 'That Turo vehicle is already mapped.';
         }
@@ -130,7 +136,7 @@ class FleetVehicleService
             return ['success' => false, 'errors' => ['fleet_number' => 'An assigned fleet number cannot be changed through ordinary editing.']];
         }
 
-        $errors = $this->validate($data, $id);
+        $errors = $this->validate($data, $id, (int) $existing['interior_vehicle_color_id']);
         if ($errors !== []) {
             return ['success' => false, 'errors' => $errors];
         }
@@ -170,7 +176,7 @@ class FleetVehicleService
     }
 
     /** @return array<string, string> */
-    private function validate(array $data, ?int $ignoreId): array
+    private function validate(array $data, ?int $ignoreId, ?int $currentInteriorColorId): array
     {
         $errors = [];
         foreach (['company_id', 'fleet_number', 'fleet_code', 'display_name', 'model_year', 'make_name', 'model_name', 'vehicle_body_style_id', 'exterior_vehicle_color_id', 'interior_vehicle_color_id', 'vehicle_trim_level_id', 'vehicle_drivetrain_id', 'vehicle_status_id'] as $field) {
@@ -192,6 +198,11 @@ class FleetVehicleService
             if ($this->db->table($table)->where('id', (int) $data[$field])->countAllResults() !== 1) {
                 $errors[$field] = 'Choose a valid option.';
             }
+        }
+        $interiorColorId = (int) $data['interior_vehicle_color_id'];
+        $preferredInterior = $this->db->table('vehicle_colors')->where('id', $interiorColorId)->whereIn('code', ['black', 'white', 'tan'])->countAllResults() === 1;
+        if (! $preferredInterior && $interiorColorId !== $currentInteriorColorId) {
+            $errors['interior_vehicle_color_id'] = 'Choose Black, White, or Tan.';
         }
         $this->unique($errors, 'fleet_code', trim((string) $data['fleet_code']), $ignoreId);
         $vin = $this->nullable($data['vin'] ?? null);
