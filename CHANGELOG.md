@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.7.1 - Vehicle Catalog and Fleet Navigation
+
+### Catalog
+
+- Add Truck as a normalized vehicle body style and Tan to the vehicle color catalog.
+- Add production-safe catalog migration 000012 with idempotent, non-destructive convergence.
+
+### Navigation and Selection
+
+- Refine new interior color selections to Black, White, and Tan while safely preserving existing non-preferred interior colors during editing.
+- Keep the broader exterior color catalog unchanged.
+- Rename the operational Fleet navigation destination to Fleet Activity and reorder the primary workflow as Fleet Command Center, Fleet Activity, Vehicles, Turo Import, Import Issues, and Vehicle Matching.
+
 ## v0.7.0 - Fleet Vehicle Management
 
 ### Added
