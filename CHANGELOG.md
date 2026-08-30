@@ -1,5 +1,49 @@
 # Changelog
 
+## v0.8.0 - Vehicle Capital Management
+
+### Vehicle Workspace
+
+- Add a vehicle detail workspace with Overview, Acquisition, Financing, Financial Performance, and Notes & Documents sections.
+
+### Acquisition
+
+- Add an optional acquisition record with Purchase Order Subtotal, acquisition and funding methods, source and reference, rebates and incentives, trade-in credit, and cash paid at closing as distinct recorded facts.
+- Keep the existing vehicle `purchase_date` as the acquisition date without reconstructing dealer accounting or inferring purchase-order arithmetic.
+- Link an acquisition explicitly to its original financing agreement when applicable.
+
+### Financing
+
+- Add reusable lenders and support multiple financing agreements per vehicle.
+- Record original principal, APR, term, payment, first-payment and maturity dates, status, and refinance lineage with paid-off and refinanced states.
+
+### Balance and Payoff
+
+- Add dated authoritative principal and payoff snapshots with as-of dates, source provenance, and snapshot history.
+- Allow same-date corrections to update the authoritative snapshot while preserving prior values in actor-aware audit history.
+
+### Data Integrity
+
+- Use `loans.original_principal` as the sole source of original financed principal and preserve the explicitly linked acquisition financing agreement through later refinancing.
+- Avoid arbitrary-loan selection when multiple agreements exist.
+- Preserve legacy `current_balance` compatibility while treating it as non-authoritative when no dated snapshot exists.
+
+### Security and Audit
+
+- Require `admin.access`, CSRF protection on financial writes, authenticated actor IDs in audit history, and transactions around financial changes.
+
+### Terminology
+
+- Replace misleading Fleet Value, Fleet Equity, accounting Profit, and ROI labels with conservative factual financial terminology.
+
+### Gradual Backfill
+
+- Keep existing vehicles valid without acquisition or financing records and create no synthetic financial data during migration.
+
+### Not Included
+
+- This release does not add market valuation, equity, depreciation, tax basis, accounting ledger or journal entries, or a fleet balance sheet.
+
 ## v0.7.1 - Vehicle Catalog and Fleet Navigation
 
 ### Catalog
