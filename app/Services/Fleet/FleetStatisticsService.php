@@ -3,7 +3,6 @@
 namespace App\Services\Fleet;
 
 use App\Repositories\FleetIntelligenceRepository;
-use App\Services\Fleet\RevenueService;
 use DateTimeImmutable;
 
 class FleetStatisticsService
@@ -115,7 +114,7 @@ class FleetStatisticsService
         return $rows;
     }
 
-    /** Returns tracked fleet value, loan balance, and equity. */
+    /** Returns recorded startup costs and outstanding vehicle debt. */
     public function fleetValue(): array
     {
         return $this->repo()->fleetCapital();
@@ -136,7 +135,7 @@ class FleetStatisticsService
         return $this->revenue()->lifetimeOperatingRevenue();
     }
 
-    /** Returns tracked lifetime profit after startup capital and known operating costs. */
+    /** Returns lifetime operating revenue less recorded startup costs. */
     public function lifetimeProfit(): float
     {
         $capital = $this->fleetValue();
@@ -144,7 +143,7 @@ class FleetStatisticsService
         return $this->lifetimeRevenue() - $capital['startup_costs'];
     }
 
-    /** Returns per-vehicle ROI using lifetime revenue and tracked fleet capital. */
+    /** Returns per-vehicle revenue relative to recorded startup costs. */
     public function vehicleRoi(): array
     {
         $capitalByVehicle = $this->repo()->fleetCapitalByVehicle();

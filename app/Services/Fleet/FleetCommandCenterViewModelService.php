@@ -185,6 +185,9 @@ class FleetCommandCenterViewModelService
     private function financialSnapshot(array $currentMonth, array $statistics): array
     {
         $premiumBase = $statistics['premium_vs_base'];
+        $capital = $statistics['fleet_value'];
+        $startupCosts = (float) ($capital['startup_costs'] ?? $capital['fleet_value'] ?? 0);
+        $outstandingDebt = (float) ($capital['outstanding_loan_balance'] ?? $capital['loan_balance'] ?? 0);
 
         return [
             $this->financialCard('Current Month Revenue', $this->money(isset($currentMonth['completed_revenue']) ? (float) $currentMonth['completed_revenue'] : null), 'Recognized operating revenue'),
@@ -196,9 +199,8 @@ class FleetCommandCenterViewModelService
             $this->financialCard('RevPAD', $this->money((float) $currentMonth['revenue_per_available_day']), 'Revenue per available day'),
             $this->financialCard('Premium Revenue', $this->money($this->segmentRevenue($premiumBase, 'premium')), 'Premium fleet segment'),
             $this->financialCard('Base Revenue', $this->money($this->segmentRevenue($premiumBase, 'base')), 'Base fleet segment'),
-            $this->financialCard('Fleet Value', $this->money((float) $statistics['fleet_value']['fleet_value']), 'Tracked startup capital'),
-            $this->financialCard('Loan Balance', $this->money((float) $statistics['fleet_value']['loan_balance']), 'Current principal'),
-            $this->financialCard('Fleet Equity', $this->money((float) $statistics['fleet_value']['fleet_equity']), 'Value less loans'),
+            $this->financialCard('Recorded Startup Costs', $this->money($startupCosts), 'Legacy startup-cost records'),
+            $this->financialCard('Outstanding Vehicle Debt', $this->money($outstandingDebt), 'Latest dated principal or legacy balance'),
         ];
     }
 
@@ -221,9 +223,9 @@ class FleetCommandCenterViewModelService
     private function executiveKpis(array $statistics, array $tripAnalytics, array $vehiclePerformance): array
     {
         return [
-            $this->metricCard('Fleet ROI', $this->averageRoi($statistics['vehicle_roi']), 'Known vehicle capital only', '#financial-snapshot', 'neutral'),
+            $this->metricCard('Revenue / Recorded Startup Cost', $this->averageRoi($statistics['vehicle_roi']), 'Known startup-cost records only', '#financial-snapshot', 'neutral'),
             $this->metricCard('Lifetime Revenue', $this->money((float) $statistics['lifetime_revenue']), 'All completed history', '#financial-snapshot', 'success'),
-            $this->metricCard('Lifetime Profit', $this->money((float) $statistics['lifetime_profit']), 'Revenue less startup capital', '#financial-snapshot', 'success'),
+            $this->metricCard('Revenue Less Recorded Startup Costs', $this->money((float) $statistics['lifetime_profit']), 'Not accounting profit', '#financial-snapshot', 'success'),
             $this->metricCard('Average Trip Length', number_format((float) $tripAnalytics['average_trip_length'], 1) . ' days', 'Year to date', '#fleet-timeline', 'neutral'),
             $this->metricCard('Year-to-Date + 7-Day Utilization', $this->percent((float) $tripAnalytics['utilization']), 'Occupied vehicle-days through the operational horizon', '#fleet-timeline', 'neutral'),
             $this->metricCard('Revenue per Vehicle', $this->money((float) $statistics['current_month']['revenue_per_vehicle']), 'Current month', '#financial-snapshot', 'success'),

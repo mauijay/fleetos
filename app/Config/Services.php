@@ -10,6 +10,7 @@ use App\Repositories\TuroAccessReimbursementRepository;
 use App\Repositories\TuroImportErrorRepository;
 use App\Repositories\TuroNormalizedTripRepository;
 use App\Repositories\TuroVehicleMappingIssueRepository;
+use App\Repositories\VehicleCapitalRepository;
 use App\Repositories\VehicleTuroListingRepository;
 use App\Services\Files\PrivateFileStorageService;
 use App\Services\Fleet\AirportMovementWorkflowService;
@@ -34,6 +35,7 @@ use App\Services\Fleet\TripMovementChecklistService;
 use App\Services\Fleet\TuroAccessReimbursementService;
 use App\Services\Fleet\UnknownVehicleOnboardingService;
 use App\Services\Fleet\VehicleAvailabilityService;
+use App\Services\Fleet\VehicleCapitalService;
 use App\Services\Turo\TuroEarningsImportService;
 use App\Services\Turo\TuroImportIssueService;
 use App\Services\Turo\TuroTransactionRelinkingService;
@@ -65,6 +67,24 @@ class Services extends BaseService
         }
 
         return new FleetVehicleService();
+    }
+
+    public static function vehicleCapitalRepository(bool $getShared = true): VehicleCapitalRepository
+    {
+        if ($getShared) {
+            return static::getSharedInstance('vehicleCapitalRepository');
+        }
+
+        return new VehicleCapitalRepository();
+    }
+
+    public static function vehicleCapitalService(bool $getShared = true): VehicleCapitalService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('vehicleCapitalService');
+        }
+
+        return new VehicleCapitalService(repository: static::vehicleCapitalRepository());
     }
 
     public static function unknownVehicleOnboardingService(bool $getShared = true): UnknownVehicleOnboardingService

@@ -91,12 +91,12 @@ class BusinessInsightService
         }
 
         return [$this->factory()->make(
-            'Lifetime profit is negative',
+            'Revenue has not recovered recorded startup costs',
             'Business Insight',
             'High',
             90,
             'Tracked lifetime revenue does not yet exceed startup capital.',
-            ['lifetime_profit' => round($profit, 2), 'lifetime_revenue' => round((float) ($summary['lifetime_revenue'] ?? 0), 2)],
+            ['revenue_less_recorded_startup_costs' => round($profit, 2), 'lifetime_revenue' => round((float) ($summary['lifetime_revenue'] ?? 0), 2)],
             'Prioritize revenue growth and cost control before expanding fleet capital commitments.',
             $asOf,
             self::class,

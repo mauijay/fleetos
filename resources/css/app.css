@@ -767,6 +767,21 @@ h3 {
   text-align: center;
 }
 
+.vehicle-detail-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: stretch;
+  justify-content: flex-end;
+  gap: 14px;
+  margin-left: auto;
+}
+
+.vehicle-detail-actions .button-link {
+  min-height: 44px;
+  padding: 0 18px;
+  white-space: nowrap;
+}
+
 .import-notes {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   margin-top: 16px;
@@ -904,6 +919,119 @@ h3 {
   color: var(--success);
   font-size: 13px;
   font-weight: 750;
+}
+
+.capital-tabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 4px 0;
+}
+
+.capital-tabs a {
+  flex: 0 0 auto;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 750;
+  padding: 10px 12px;
+}
+
+.capital-tabs a:hover,
+.capital-tabs a:focus-visible {
+  border-color: var(--success);
+  color: var(--text);
+}
+
+.capital-facts {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.capital-wide {
+  grid-column: 1 / -1;
+}
+
+.capital-readonly {
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  min-height: 64px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  padding: 9px 10px;
+}
+
+.capital-readonly span,
+.capital-readonly small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.capital-readonly strong {
+  font-size: 15px;
+}
+
+.capital-subsection {
+  margin-top: 28px;
+  border-top: 1px solid var(--line);
+  padding-top: 20px;
+}
+
+.capital-disclosure {
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.capital-disclosure summary {
+  cursor: pointer;
+  color: var(--success);
+  font-size: 13px;
+  font-weight: 750;
+  padding: 4px 0;
+}
+
+.capital-disclosure form,
+.capital-disclosure .issue-facts {
+  margin-top: 14px;
+}
+
+.capital-loan {
+  border-left: 3px solid var(--success);
+}
+
+.capital-balance {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-1);
+  padding: 12px;
+}
+
+.capital-balance div {
+  display: grid;
+  gap: 3px;
+}
+
+.capital-balance div:last-child {
+  color: var(--muted);
+  font-size: 12px;
+  text-align: right;
+}
+
+.capital-balance strong {
+  font-size: 18px;
+}
+
+.capital-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
 }
 
 .issue-detail-grid {
@@ -1163,6 +1291,14 @@ h3 {
     display: block;
   }
 
+  .capital-balance {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .capital-balance div:last-child {
+    text-align: left;
+  }
   .side-nav {
     display: none;
   }
@@ -1255,6 +1391,18 @@ h3 {
     min-height: 48px;
   }
 
+  .vehicle-detail-actions {
+    align-self: stretch;
+    flex-wrap: wrap;
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .vehicle-detail-actions .button-link {
+    flex: 1 1 180px;
+    min-height: 48px;
+  }
+
   .movement-checklist-item {
     grid-template-columns: 1fr;
   }
@@ -1298,6 +1446,15 @@ h3 {
   .form-actions .primary-action {
     width: 100%;
     min-width: 0;
+  }
+
+  .vehicle-detail-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .vehicle-detail-actions .button-link {
+    width: 100%;
   }
 
   .movement-card .status-badge {

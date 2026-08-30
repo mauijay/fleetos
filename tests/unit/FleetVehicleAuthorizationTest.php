@@ -33,7 +33,7 @@ final class FleetVehicleAuthorizationTest extends CIUnitTestCase
     {
         $routes = CoreServices::routes();
         $routes->loadRoutes();
-        foreach (['turo/imports', 'turo/earnings-imports', 'turo/vehicle-matches/map', 'turo/vehicle-matches/reprocess', 'fleet/vehicles', 'fleet/vehicles/([0-9]+)'] as $route) {
+        foreach (['turo/imports', 'turo/earnings-imports', 'turo/vehicle-matches/map', 'turo/vehicle-matches/reprocess', 'fleet/vehicles', 'fleet/vehicles/([0-9]+)', 'fleet/vehicles/([0-9]+)/acquisition', 'fleet/vehicles/([0-9]+)/lenders', 'fleet/vehicles/([0-9]+)/loans', 'fleet/vehicles/([0-9]+)/loans/([0-9]+)', 'fleet/vehicles/([0-9]+)/loans/([0-9]+)/snapshots'] as $route) {
             $filters = $routes->getRoutesOptions($route, 'POST')['filter'] ?? [];
             $this->assertContains('permission:admin.access', (array) $filters, $route);
             $this->assertContains('csrf', (array) $filters, $route);

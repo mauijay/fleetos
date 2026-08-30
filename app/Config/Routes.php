@@ -19,8 +19,14 @@ $routes->group('', ['filter' => 'session'], static function (RouteCollection $ro
 		$routes->get('', 'FleetVehicles::index');
 		$routes->get('new', 'FleetVehicles::new');
 		$routes->post('', 'FleetVehicles::create', ['filter' => 'csrf']);
+		$routes->get('(:num)', 'VehicleCapital::show/$1');
 		$routes->get('(:num)/edit', 'FleetVehicles::edit/$1');
 		$routes->post('(:num)', 'FleetVehicles::update/$1', ['filter' => 'csrf']);
+		$routes->post('(:num)/acquisition', 'VehicleCapital::saveAcquisition/$1', ['filter' => 'csrf']);
+		$routes->post('(:num)/lenders', 'VehicleCapital::createLender/$1', ['filter' => 'csrf']);
+		$routes->post('(:num)/loans', 'VehicleCapital::createLoan/$1', ['filter' => 'csrf']);
+		$routes->post('(:num)/loans/(:num)', 'VehicleCapital::updateLoan/$1/$2', ['filter' => 'csrf']);
+		$routes->post('(:num)/loans/(:num)/snapshots', 'VehicleCapital::saveSnapshot/$1/$2', ['filter' => 'csrf']);
 	});
 	$routes->get('operations/checklists/(:num)', 'TripMovementChecklists::show/$1');
 	$routes->post('operations/checklists/(:num)/complete', 'TripMovementChecklists::complete/$1');

@@ -234,13 +234,11 @@ class FleetIntelligenceRepository
     public function fleetCapital(): array
     {
         $startupCosts = $this->sumAll('startup_costs', 'amount');
-        $loanBalance = $this->sumAll('loans', 'current_balance');
+        $loanBalance = $this->outstandingLoanBalance();
 
         return [
-            'fleet_value' => $startupCosts,
-            'loan_balance' => $loanBalance,
-            'fleet_equity' => $startupCosts - $loanBalance,
             'startup_costs' => $startupCosts,
+            'outstanding_loan_balance' => $loanBalance,
         ];
     }
 
@@ -254,7 +252,7 @@ class FleetIntelligenceRepository
             $capital[$fleetVehicleId]['startup_costs'] = $amount;
         }
 
-        foreach ($this->sumByVehicle('loans', 'current_balance') as $fleetVehicleId => $amount) {
+        foreach ($this->outstandingLoanBalanceByVehicle() as $fleetVehicleId => $amount) {
             $capital[$fleetVehicleId] ??= ['startup_costs' => 0.0, 'loan_balance' => 0.0];
             $capital[$fleetVehicleId]['loan_balance'] = $amount;
         }
@@ -396,14 +394,22 @@ class FleetIntelligenceRepository
     /** @return array<int, array<string, mixed>> */
     public function activeLoans(): array
     {
-        return $this->db->table('loans')
+        $builder = $this->db->table('loans')
             ->select('loans.*, fv.fleet_code, fv.display_name, lookup_values.code AS status_code')
             ->join('fleet_vehicles fv', 'fv.id = loans.fleet_vehicle_id')
             ->join('lookup_values', 'lookup_values.id = loans.loan_status_lookup_value_id', 'left')
             ->where('loans.deleted_at', null)
             ->where('loans.paid_off_on', null)
-            ->get()
-            ->getResultArray();
+            ->groupStart()
+                ->where('lookup_values.code', null)
+                ->orWhereNotIn('lookup_values.code', ['paid_off', 'refinanced'])
+            ->groupEnd();
+
+        if ($this->db->fieldExists('closed_on', 'loans')) {
+            $builder->where('loans.closed_on', null);
+        }
+
+        return $builder->get()->getResultArray();
     }
 
     /** @return array<int, array<string, mixed>> */
@@ -504,12 +510,19 @@ class FleetIntelligenceRepository
 
     private function activeLoanPaymentTotal(): float
     {
-        $row = $this->db->table('loans')
+        $builder = $this->db->table('loans')
             ->select('SUM(monthly_payment) AS total', false)
+            ->join('lookup_values loan_status', 'loan_status.id = loans.loan_status_lookup_value_id', 'left')
             ->where('deleted_at', null)
             ->where('paid_off_on', null)
-            ->get()
-            ->getRowArray();
+            ->groupStart()
+                ->where('loan_status.code', null)
+                ->orWhereNotIn('loan_status.code', ['paid_off', 'refinanced'])
+            ->groupEnd();
+        if ($this->db->fieldExists('closed_on', 'loans')) {
+            $builder->where('closed_on', null);
+        }
+        $row = $builder->get()->getRowArray();
 
         return (float) ($row['total'] ?? 0);
     }
@@ -535,6 +548,63 @@ class FleetIntelligenceRepository
             ->getRowArray();
 
         return (float) ($row['total'] ?? 0);
+    }
+
+    private function outstandingLoanBalance(): float
+    {
+        $rows = $this->outstandingLoanRows();
+
+        return array_sum(array_map(static fn (array $row): float => (float) ($row['balance'] ?? 0), $rows));
+    }
+
+    /** @return array<int, float> */
+    private function outstandingLoanBalanceByVehicle(): array
+    {
+        $balances = [];
+        foreach ($this->outstandingLoanRows() as $row) {
+            $vehicleId = (int) $row['fleet_vehicle_id'];
+            $balances[$vehicleId] = ($balances[$vehicleId] ?? 0.0) + (float) ($row['balance'] ?? 0);
+        }
+
+        return $balances;
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    private function outstandingLoanRows(): array
+    {
+        $builder = $this->db->table('loans')
+            ->select('loans.id, loans.fleet_vehicle_id, loans.current_balance')
+            ->join('lookup_values loan_status', 'loan_status.id = loans.loan_status_lookup_value_id', 'left')
+            ->where('loans.deleted_at', null)
+            ->where('loans.paid_off_on', null)
+            ->groupStart()
+                ->where('loan_status.code', null)
+                ->orWhereNotIn('loan_status.code', ['paid_off', 'refinanced'])
+            ->groupEnd();
+
+        if ($this->db->fieldExists('closed_on', 'loans')) {
+            $builder->where('loans.closed_on', null);
+        }
+
+        $rows = $builder->get()->getResultArray();
+        foreach ($rows as &$row) {
+            $row['balance'] = $row['current_balance'];
+            if (! $this->db->tableExists('loan_balance_snapshots')) {
+                continue;
+            }
+            $snapshot = $this->db->table('loan_balance_snapshots')
+                ->select('principal_balance, payoff_amount')
+                ->where('loan_id', (int) $row['id'])
+                ->orderBy('as_of_date', 'DESC')
+                ->orderBy('id', 'DESC')
+                ->get(1)->getRowArray();
+            if ($snapshot !== null) {
+                $row['balance'] = $snapshot['principal_balance'] ?? $snapshot['payoff_amount'];
+            }
+        }
+        unset($row);
+
+        return $rows;
     }
 
     /** @return array<int, float> */

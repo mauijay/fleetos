@@ -106,7 +106,7 @@ final class DecisionSupportServicesTest extends CIUnitTestCase
 
         $this->assertSame('Premium inventory is producing outsized revenue', $insights[0]->title);
         $this->assertSame(90, $insights[0]->metrics['premium_revenue_share']);
-        $this->assertSame('Lifetime profit is negative', $insights[1]->title);
+        $this->assertSame('Revenue has not recovered recorded startup costs', $insights[1]->title);
         $this->assertSame('Fleet has no completed revenue this month', $insights[2]->title);
     }
 
