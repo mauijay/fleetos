@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.8.1 - Vehicle Registration & Desktop Productivity
+
+### Desktop Productivity
+
+- Use wider vehicle-page desktop space beginning at 1440px while keeping the Fleet Registry and Edit Vehicle major sections single-column through 1699px.
+- At 1700px and wider, show two Fleet Registry cards per row and arrange Edit Vehicle into two major columns.
+- Preserve existing mobile and tablet behavior and scope all new width and layout treatment to vehicle pages.
+
+### Ownership & Registration
+
+- Add registered owner, registration renewal due, and Hawaiʻi safety inspection due fields.
+- Support company, individual, or joint-owner descriptions as free text, independent of financing and company ownership.
+
+### Edit Vehicle Information Architecture
+
+- Add Ownership & Registration and Service & Lifecycle sections.
+- Clarify VIN placement within the vehicle specification and identity structure.
+
+### Registration & Compliance Workspace
+
+- Add a Registration & Compliance summary and display missing values as Not entered.
+
+### Registration Data Integrity
+
+- Keep all registration and compliance fields nullable with no inference, automatic date calculation, or backfill, so existing vehicles remain valid.
+
+### Deferred Capabilities
+
+- This release does not add compliance alerts, a Command Center due-soon or overdue panel, scheduled reminders, borrower/co-borrower/obligor tracking, or automatic registration or safety-date calculation.
+
 ## v0.8.0 - Vehicle Capital Management
 
 ### Vehicle Workspace
