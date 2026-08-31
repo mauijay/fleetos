@@ -130,6 +130,70 @@ final class FleetVehicleServiceTest extends CIUnitTestCase
         $this->assertSame(10, (int) $this->service->vehicle(5)['fleet_number']);
     }
 
+    public function testRegistrationComplianceFieldsSaveFreeTextAndDates(): void
+    {
+        $result = $this->service->create($this->validData([
+            'registered_owner' => 'Jordan Lee & 808biz, Inc.',
+            'registration_renewal_on' => '2027-08-31',
+            'safety_inspection_due_on' => '2027-06-30',
+        ]));
+
+        $this->assertTrue($result['success']);
+        $vehicle = $this->service->vehicle((int) $result['id']);
+        $this->assertSame('Jordan Lee & 808biz, Inc.', $vehicle['registered_owner']);
+        $this->assertSame('2027-08-31', $vehicle['registration_renewal_on']);
+        $this->assertSame('2027-06-30', $vehicle['safety_inspection_due_on']);
+    }
+
+    public function testRegistrationComplianceFieldsAcceptNullValues(): void
+    {
+        $result = $this->service->create($this->validData([
+            'registered_owner' => ' ',
+            'registration_renewal_on' => '',
+            'safety_inspection_due_on' => null,
+        ]));
+
+        $this->assertTrue($result['success']);
+        $vehicle = $this->service->vehicle((int) $result['id']);
+        $this->assertNull($vehicle['registered_owner']);
+        $this->assertNull($vehicle['registration_renewal_on']);
+        $this->assertNull($vehicle['safety_inspection_due_on']);
+    }
+
+    public function testVehicleEditSavesRegistrationComplianceValues(): void
+    {
+        $this->seedLegacyVehicle();
+        $result = $this->service->update(5, $this->validData([
+            'fleet_number' => 10,
+            'fleet_code' => 'Legacy',
+            'display_name' => 'Legacy',
+            'vin' => 'LEGACYVIN',
+            'registered_owner' => 'Alex Morgan / Taylor Morgan',
+            'registration_renewal_on' => '2027-03-31',
+            'safety_inspection_due_on' => '2027-01-31',
+        ]));
+
+        $this->assertTrue($result['success']);
+        $vehicle = $this->service->vehicle(5);
+        $this->assertSame('Alex Morgan / Taylor Morgan', $vehicle['registered_owner']);
+        $this->assertSame('2027-03-31', $vehicle['registration_renewal_on']);
+        $this->assertSame('2027-01-31', $vehicle['safety_inspection_due_on']);
+    }
+
+    public function testRegistrationComplianceValidationRejectsInvalidValues(): void
+    {
+        $result = $this->service->create($this->validData([
+            'registered_owner' => str_repeat('x', 191),
+            'registration_renewal_on' => '2027-02-29',
+            'safety_inspection_due_on' => 'not-a-date',
+        ]));
+
+        $this->assertSame('Registered owner must be 190 characters or fewer.', $result['errors']['registered_owner']);
+        $this->assertSame('Enter a valid date.', $result['errors']['registration_renewal_on']);
+        $this->assertSame('Enter a valid date.', $result['errors']['safety_inspection_due_on']);
+        $this->assertSame(0, $this->connection->table('fleet_vehicles')->countAllResults());
+    }
+
     public function testSilentDatabaseFailureRollsBackVehicleUpdate(): void
     {
         $this->seedLegacyVehicle();
@@ -214,7 +278,7 @@ final class FleetVehicleServiceTest extends CIUnitTestCase
         $this->connection->query('CREATE TABLE ' . $this->table('vehicle_makes') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, code VARCHAR(80), name VARCHAR(120), created_at DATETIME NULL, updated_at DATETIME NULL)');
         $this->connection->query('CREATE TABLE ' . $this->table('vehicle_models') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, vehicle_make_id INTEGER, code VARCHAR(80), name VARCHAR(120), created_at DATETIME NULL, updated_at DATETIME NULL)');
         $this->connection->query('CREATE TABLE ' . $this->table('vehicle_specs') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, vehicle_model_id INTEGER, model_year INTEGER, vehicle_body_style_id INTEGER, exterior_vehicle_color_id INTEGER, interior_vehicle_color_id INTEGER, battery_description VARCHAR(120), seating_capacity INTEGER, created_at DATETIME NULL, updated_at DATETIME NULL)');
-        $this->connection->query('CREATE TABLE ' . $this->table('fleet_vehicles') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, company_id INTEGER, vehicle_spec_id INTEGER, vehicle_trim_level_id INTEGER, vehicle_drivetrain_id INTEGER, vehicle_status_id INTEGER, fleet_number INTEGER NULL, fleet_code VARCHAR(80) UNIQUE, display_name VARCHAR(150), vin VARCHAR(32) NULL UNIQUE, license_plate VARCHAR(32) NULL, purchase_date DATE NULL, in_service_date DATE NULL, out_of_service_date DATE NULL, odometer_miles INTEGER NULL, sort_order INTEGER DEFAULT 0, created_at DATETIME NULL, updated_at DATETIME NULL, deleted_at DATETIME NULL, UNIQUE(company_id, fleet_number))');
+        $this->connection->query('CREATE TABLE ' . $this->table('fleet_vehicles') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, company_id INTEGER, vehicle_spec_id INTEGER, vehicle_trim_level_id INTEGER, vehicle_drivetrain_id INTEGER, vehicle_status_id INTEGER, fleet_number INTEGER NULL, fleet_code VARCHAR(80) UNIQUE, display_name VARCHAR(150), vin VARCHAR(32) NULL UNIQUE, license_plate VARCHAR(32) NULL, registered_owner VARCHAR(190) NULL, registration_renewal_on DATE NULL, safety_inspection_due_on DATE NULL, purchase_date DATE NULL, in_service_date DATE NULL, out_of_service_date DATE NULL, odometer_miles INTEGER NULL, sort_order INTEGER DEFAULT 0, created_at DATETIME NULL, updated_at DATETIME NULL, deleted_at DATETIME NULL, UNIQUE(company_id, fleet_number))');
         $this->connection->query('CREATE TABLE ' . $this->table('vehicle_turo_listings') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, fleet_vehicle_id INTEGER, turo_vehicle_id VARCHAR(80) UNIQUE, source_system VARCHAR(40), is_active INTEGER, listed_at DATETIME NULL, unlisted_at DATETIME NULL, mapping_note TEXT NULL, mapped_by INTEGER NULL, created_at DATETIME NULL, updated_at DATETIME NULL)');
         $this->connection->query('CREATE TABLE ' . $this->table('vehicle_turo_listing_audits') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, vehicle_turo_listing_id INTEGER, action VARCHAR(40), turo_vehicle_id VARCHAR(80), old_fleet_vehicle_id INTEGER NULL, new_fleet_vehicle_id INTEGER NULL, note TEXT NULL, created_by INTEGER NULL, created_at DATETIME NULL)');
     }

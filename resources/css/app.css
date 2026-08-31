@@ -654,6 +654,24 @@ h3 {
   max-width: 1180px;
 }
 
+.vehicle-form-layout,
+.vehicle-form-column {
+  display: grid;
+  gap: 24px;
+}
+
+.vehicle-form-column {
+  align-content: start;
+}
+
+.vehicle-form-column .section-heading {
+  margin-bottom: -12px;
+}
+
+.compliance-summary {
+  margin-top: 24px;
+}
+
 .import-message strong {
   display: block;
   margin-bottom: 6px;
@@ -1255,6 +1273,31 @@ h3 {
   border-radius: 999px;
   color: var(--subtle);
   padding: 5px 9px;
+}
+
+@media (min-width: 1440px) {
+  .vehicle-main {
+    max-width: none;
+  }
+
+  .vehicle-form-column .issue-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .vehicle-form-column {
+    min-width: 0;
+  }
+}
+
+@media (min-width: 1700px) {
+  .vehicle-registry-grid,
+  .vehicle-form-layout {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .vehicle-registry-grid .mapping-card {
+    min-width: 0;
+  }
 }
 
 @media (max-width: 1280px) {

@@ -96,6 +96,9 @@ class FleetVehicleService
                 'display_name' => trim((string) $data['display_name']),
                 'vin' => $this->nullable($data['vin'] ?? null),
                 'license_plate' => $this->nullable($data['license_plate'] ?? null),
+                'registered_owner' => $this->nullable($data['registered_owner'] ?? null),
+                'registration_renewal_on' => $this->nullable($data['registration_renewal_on'] ?? null),
+                'safety_inspection_due_on' => $this->nullable($data['safety_inspection_due_on'] ?? null),
                 'purchase_date' => $this->nullable($data['purchase_date'] ?? null),
                 'in_service_date' => $this->nullable($data['in_service_date'] ?? null),
                 'out_of_service_date' => $this->nullable($data['out_of_service_date'] ?? null),
@@ -154,6 +157,9 @@ class FleetVehicleService
                 'display_name' => trim((string) $data['display_name']),
                 'vin' => $this->nullable($data['vin'] ?? null),
                 'license_plate' => $this->nullable($data['license_plate'] ?? null),
+                'registered_owner' => $this->nullable($data['registered_owner'] ?? null),
+                'registration_renewal_on' => $this->nullable($data['registration_renewal_on'] ?? null),
+                'safety_inspection_due_on' => $this->nullable($data['safety_inspection_due_on'] ?? null),
                 'purchase_date' => $this->nullable($data['purchase_date'] ?? null),
                 'in_service_date' => $this->nullable($data['in_service_date'] ?? null),
                 'out_of_service_date' => $this->nullable($data['out_of_service_date'] ?? null),
@@ -215,6 +221,16 @@ class FleetVehicleService
         }
         if ($number->countAllResults() > 0) {
             $errors['fleet_number'] = 'That fleet number is already assigned for this company.';
+        }
+        $registeredOwner = $this->nullable($data['registered_owner'] ?? null);
+        if ($registeredOwner !== null && mb_strlen($registeredOwner) > 190) {
+            $errors['registered_owner'] = 'Registered owner must be 190 characters or fewer.';
+        }
+        foreach (['registration_renewal_on', 'safety_inspection_due_on'] as $field) {
+            $value = $this->nullable($data[$field] ?? null);
+            if ($value !== null && ! $this->isDate($value)) {
+                $errors[$field] = 'Enter a valid date.';
+            }
         }
 
         return $errors;
@@ -294,5 +310,12 @@ class FleetVehicleService
     private function nullableInt(mixed $value): ?int
     {
         return $this->nullable($value) === null ? null : (int) $value;
+    }
+
+    private function isDate(string $value): bool
+    {
+        $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $value);
+
+        return $date !== false && $date->format('Y-m-d') === $value;
     }
 }

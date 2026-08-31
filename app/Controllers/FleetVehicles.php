@@ -102,7 +102,7 @@ class FleetVehicles extends BaseController
     /** @return array<string, mixed> */
     private function vehicleData(): array
     {
-        $fields = ['company_id', 'fleet_number', 'fleet_code', 'display_name', 'model_year', 'make_name', 'model_name', 'vehicle_body_style_id', 'exterior_vehicle_color_id', 'interior_vehicle_color_id', 'vehicle_trim_level_id', 'vehicle_drivetrain_id', 'vehicle_status_id', 'vin', 'license_plate', 'purchase_date', 'in_service_date', 'out_of_service_date', 'odometer_miles', 'battery_description', 'seating_capacity'];
+        $fields = ['company_id', 'fleet_number', 'fleet_code', 'display_name', 'model_year', 'make_name', 'model_name', 'vehicle_body_style_id', 'exterior_vehicle_color_id', 'interior_vehicle_color_id', 'vehicle_trim_level_id', 'vehicle_drivetrain_id', 'vehicle_status_id', 'vin', 'license_plate', 'registered_owner', 'registration_renewal_on', 'safety_inspection_due_on', 'purchase_date', 'in_service_date', 'out_of_service_date', 'odometer_miles', 'battery_description', 'seating_capacity'];
         $data = [];
         foreach ($fields as $field) {
             $data[$field] = $this->request->getPost($field);
