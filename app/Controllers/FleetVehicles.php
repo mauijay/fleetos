@@ -78,7 +78,7 @@ class FleetVehicles extends BaseController
     public function update(int $id): RedirectResponse
     {
         $data = $this->vehicleData();
-        $result = Services::fleetVehicleService()->update($id, $data);
+        $result = Services::fleetVehicleService()->update($id, $data, $this->actorUserId());
         if (! $result['success']) {
             return CoreServices::redirectresponse()->to("/fleet/vehicles/{$id}/edit")->with('fleet_vehicle_data', $data)->with('fleet_vehicle_errors', $result['errors']);
         }
@@ -102,24 +102,29 @@ class FleetVehicles extends BaseController
     /** @return array<string, mixed> */
     private function vehicleData(): array
     {
-        $fields = ['company_id', 'fleet_number', 'fleet_code', 'display_name', 'model_year', 'make_name', 'model_name', 'vehicle_body_style_id', 'exterior_vehicle_color_id', 'interior_vehicle_color_id', 'vehicle_trim_level_id', 'vehicle_drivetrain_id', 'vehicle_status_id', 'vin', 'license_plate', 'registered_owner', 'registration_renewal_on', 'safety_inspection_due_on', 'purchase_date', 'in_service_date', 'out_of_service_date', 'odometer_miles', 'battery_description', 'seating_capacity'];
+        $fields = ['company_id', 'fleet_number', 'fleet_code', 'display_name', 'model_year', 'make_name', 'model_name', 'vehicle_body_style_id', 'exterior_vehicle_color_id', 'interior_vehicle_color_id', 'vehicle_trim_level_id', 'vehicle_drivetrain_id', 'vehicle_status_id', 'vin', 'license_plate', 'registered_owner', 'registration_renewal_on', 'safety_inspection_due_on', 'purchase_date', 'in_service_date', 'out_of_service_date', 'odometer_miles', 'battery_description', 'seating_capacity', 'energy_kind', 'ready_energy_target_percent'];
         $data = [];
         foreach ($fields as $field) {
             $data[$field] = $this->request->getPost($field);
         }
+        $data['operational_capabilities'] = (array) $this->request->getPost('operational_capabilities');
 
         return $data;
     }
 
-    private function actorUserId(): ?int
+    private function actorUserId(): int
     {
         try {
             $user = ShieldServices::auth()->user();
         } catch (\Throwable) {
-            return null;
+            throw new \RuntimeException('An authenticated operator is required.');
         }
 
-        return $user === null ? null : (int) $user->id;
+        if ($user === null) {
+            throw new \RuntimeException('An authenticated operator is required.');
+        }
+
+        return (int) $user->id;
     }
 
     /** @return array<string, mixed> */

@@ -12,6 +12,7 @@ use App\Repositories\TuroImportBatchRepository;
 use App\Repositories\TuroImportErrorRepository;
 use App\Repositories\TuroNormalizedTripRepository;
 use App\Repositories\TuroRawTripRepository;
+use App\Services\Fleet\ScheduledMovementLocationService;
 use App\Validation\Turo\TuroTripCsvValidator;
 use CodeIgniter\Database\BaseConnection;
 use Config\Database;
@@ -36,6 +37,7 @@ class TuroTripImportService
         private readonly TripMonthAllocationRepository $allocations = new TripMonthAllocationRepository(),
         private readonly TuroImportErrorRepository $errors = new TuroImportErrorRepository(),
         private readonly TuroImportAuditService $audit = new TuroImportAuditService(),
+        private readonly ScheduledMovementLocationService $scheduledLocations = new ScheduledMovementLocationService(),
     ) {
         $this->db = $db ?? Database::connect();
     }
@@ -202,6 +204,12 @@ class TuroTripImportService
 
         $normalizedTrip = $this->normalizer->normalize($rawTripRow, $rawTripId);
         $upsert = $this->normalizedTrips->upsert($normalizedTrip);
+        $this->scheduledLocations->retainForTrip(
+            (int) $upsert['id'],
+            $normalizedTrip->fleetVehicleId,
+            $this->normalizer->scheduledLocationText($rawTripRow->payload, 'pickup'),
+            $this->normalizer->scheduledLocationText($rawTripRow->payload, 'return'),
+        );
         $tripAllocations = $this->allocationService->allocate($normalizedTrip);
         $this->allocations->replaceForTrip($upsert['id'], $tripAllocations);
 

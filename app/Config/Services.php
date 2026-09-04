@@ -6,6 +6,7 @@ use App\Repositories\AirportMovementRepository;
 use App\Repositories\FileRepository;
 use App\Repositories\FleetIntelligenceRepository;
 use App\Repositories\MovementChecklistRepository;
+use App\Repositories\OperationalFactsRepository;
 use App\Repositories\TuroAccessReimbursementRepository;
 use App\Repositories\TuroImportErrorRepository;
 use App\Repositories\TuroNormalizedTripRepository;
@@ -14,6 +15,7 @@ use App\Repositories\VehicleCapitalRepository;
 use App\Repositories\VehicleTuroListingRepository;
 use App\Services\Files\PrivateFileStorageService;
 use App\Services\Fleet\AirportMovementWorkflowService;
+use App\Services\Fleet\CurrentVehicleLocationService;
 use App\Services\Fleet\DailyOperationsDashboardService;
 use App\Services\Fleet\DecisionSupport\BusinessInsightService;
 use App\Services\Fleet\DecisionSupport\DecisionSupportDashboardService;
@@ -28,7 +30,16 @@ use App\Services\Fleet\FleetCommandService;
 use App\Services\Fleet\FleetHealthService;
 use App\Services\Fleet\FleetStatisticsService;
 use App\Services\Fleet\FleetVehicleService;
+use App\Services\Fleet\LocationClassificationService;
+use App\Services\Fleet\MovementAssessmentService;
+use App\Services\Fleet\MovementEventService;
+use App\Services\Fleet\MovementOperationalFactPresentationService;
+use App\Services\Fleet\MovementOperationalFactService;
+use App\Services\Fleet\NextConfirmedTripService;
+use App\Services\Fleet\PlanningHorizonService;
 use App\Services\Fleet\RevenueService;
+use App\Services\Fleet\ScheduledLocationBackfillService;
+use App\Services\Fleet\ScheduledMovementLocationService;
 use App\Services\Fleet\TaskService;
 use App\Services\Fleet\TripAnalyticsService;
 use App\Services\Fleet\TripMovementChecklistService;
@@ -36,6 +47,7 @@ use App\Services\Fleet\TuroAccessReimbursementService;
 use App\Services\Fleet\UnknownVehicleOnboardingService;
 use App\Services\Fleet\VehicleAvailabilityService;
 use App\Services\Fleet\VehicleCapitalService;
+use App\Services\Fleet\VehicleOperationalProfileService;
 use App\Services\Turo\TuroEarningsImportService;
 use App\Services\Turo\TuroImportIssueService;
 use App\Services\Turo\TuroTransactionRelinkingService;
@@ -126,6 +138,114 @@ class Services extends BaseService
         }
 
         return new MovementChecklistRepository();
+    }
+
+    public static function operationalFactsRepository(bool $getShared = true): OperationalFactsRepository
+    {
+        if ($getShared) {
+            return static::getSharedInstance('operationalFactsRepository');
+        }
+
+        return new OperationalFactsRepository();
+    }
+
+    public static function movementEventService(bool $getShared = true): MovementEventService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('movementEventService');
+        }
+
+        return new MovementEventService(static::operationalFactsRepository());
+    }
+
+    public static function movementAssessmentService(bool $getShared = true): MovementAssessmentService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('movementAssessmentService');
+        }
+
+        return new MovementAssessmentService(static::operationalFactsRepository());
+    }
+
+    public static function currentVehicleLocationService(bool $getShared = true): CurrentVehicleLocationService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('currentVehicleLocationService');
+        }
+
+        return new CurrentVehicleLocationService(static::operationalFactsRepository());
+    }
+
+    public static function movementOperationalFactService(bool $getShared = true): MovementOperationalFactService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('movementOperationalFactService');
+        }
+
+        return new MovementOperationalFactService(null, static::movementEventService(), static::movementAssessmentService());
+    }
+
+    public static function movementOperationalFactPresentationService(bool $getShared = true): MovementOperationalFactPresentationService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('movementOperationalFactPresentationService');
+        }
+
+        return new MovementOperationalFactPresentationService(static::operationalFactsRepository());
+    }
+
+    public static function locationClassificationService(bool $getShared = true): LocationClassificationService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('locationClassificationService');
+        }
+
+        return new LocationClassificationService();
+    }
+
+    public static function scheduledMovementLocationService(bool $getShared = true): ScheduledMovementLocationService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('scheduledMovementLocationService');
+        }
+
+        return new ScheduledMovementLocationService(static::operationalFactsRepository(), static::locationClassificationService());
+    }
+
+    public static function scheduledLocationBackfillService(bool $getShared = true): ScheduledLocationBackfillService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('scheduledLocationBackfillService');
+        }
+
+        return new ScheduledLocationBackfillService(static::operationalFactsRepository(), static::locationClassificationService());
+    }
+
+    public static function vehicleOperationalProfileService(bool $getShared = true): VehicleOperationalProfileService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('vehicleOperationalProfileService');
+        }
+
+        return new VehicleOperationalProfileService(static::operationalFactsRepository());
+    }
+
+    public static function planningHorizonService(bool $getShared = true): PlanningHorizonService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('planningHorizonService');
+        }
+
+        return new PlanningHorizonService();
+    }
+
+    public static function nextConfirmedTripService(bool $getShared = true): NextConfirmedTripService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('nextConfirmedTripService');
+        }
+
+        return new NextConfirmedTripService(static::operationalFactsRepository(), static::planningHorizonService());
     }
 
     public static function fileRepository(bool $getShared = true): FileRepository

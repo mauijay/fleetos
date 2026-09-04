@@ -33,7 +33,7 @@ final class FleetVehicleAuthorizationTest extends CIUnitTestCase
     {
         $routes = CoreServices::routes();
         $routes->loadRoutes();
-        foreach (['turo/imports', 'turo/earnings-imports', 'turo/vehicle-matches/map', 'turo/vehicle-matches/reprocess', 'fleet/vehicles', 'fleet/vehicles/([0-9]+)', 'fleet/vehicles/([0-9]+)/acquisition', 'fleet/vehicles/([0-9]+)/lenders', 'fleet/vehicles/([0-9]+)/loans', 'fleet/vehicles/([0-9]+)/loans/([0-9]+)', 'fleet/vehicles/([0-9]+)/loans/([0-9]+)/snapshots'] as $route) {
+        foreach (['turo/imports', 'turo/earnings-imports', 'turo/vehicle-matches/map', 'turo/vehicle-matches/reprocess', 'fleet/vehicles', 'fleet/vehicles/([0-9]+)', 'fleet/vehicles/([0-9]+)/acquisition', 'fleet/vehicles/([0-9]+)/lenders', 'fleet/vehicles/([0-9]+)/loans', 'fleet/vehicles/([0-9]+)/loans/([0-9]+)', 'fleet/vehicles/([0-9]+)/loans/([0-9]+)/snapshots', 'operations/checklists/([0-9]+)/facts', 'operations/checklists/([0-9]+)/facts/correct', 'operations/checklists/([0-9]+)/complete', 'operations/checklists/([0-9]+)/reopen', 'operations/checklist-items/([0-9]+)/complete', 'operations/checklist-items/([0-9]+)/undo', 'operations/checklist-items/([0-9]+)/not-applicable', 'operations/checklists/([0-9]+)/disposition'] as $route) {
             $filters = $routes->getRoutesOptions($route, 'POST')['filter'] ?? [];
             $this->assertContains('permission:admin.access', (array) $filters, $route);
             $this->assertContains('csrf', (array) $filters, $route);

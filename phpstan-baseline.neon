@@ -229,12 +229,6 @@ parameters:
 			path: app/Controllers/TripMovementChecklists.php
 
 		-
-			message: '#^Function service not found\.$#'
-			identifier: function.notFound
-			count: 8
-			path: app/Controllers/TripMovementChecklists.php
-
-		-
 			message: '#^Function session not found\.$#'
 			identifier: function.notFound
 			count: 2

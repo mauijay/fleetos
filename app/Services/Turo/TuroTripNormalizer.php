@@ -77,6 +77,17 @@ class TuroTripNormalizer
         return number_format((float) $normalized, 2, '.', '');
     }
 
+    public function scheduledLocationText(array $row, string $movementType): ?string
+    {
+        $specific = match ($movementType) {
+            'pickup' => ['pickup_location', 'pickup_address', 'start_location', 'delivery_location'],
+            'return' => ['return_location', 'return_address', 'dropoff_location', 'drop_off_location', 'end_location'],
+            default => throw new \InvalidArgumentException('Movement type must be pickup or return.'),
+        };
+
+        return $this->value($row, array_merge($specific, ['pickup_return_location', 'pickup_and_return_location', 'location']));
+    }
+
     /** @return string[] */
     public function moneyAliases(string $field): array
     {

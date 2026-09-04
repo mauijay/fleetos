@@ -47,7 +47,7 @@ class MovementChecklistRepository
     public function checklist(int $id): ?array
     {
         $row = $this->db->table('trip_movement_checklists checklists')
-            ->select('checklists.*, trips.guest_name, trips.starts_at, trips.ends_at, trips.turo_trip_id, fv.fleet_code, fv.display_name')
+            ->select('checklists.*, trips.guest_name, trips.starts_at, trips.ends_at, trips.turo_trip_id, fv.company_id, fv.fleet_code, fv.display_name')
             ->join('turo_trips_normalized trips', 'trips.id = checklists.turo_trip_normalized_id', 'left')
             ->join('fleet_vehicles fv', 'fv.id = checklists.fleet_vehicle_id', 'left')
             ->where('checklists.id', $id)

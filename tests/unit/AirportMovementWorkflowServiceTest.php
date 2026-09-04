@@ -143,7 +143,7 @@ final class AirportMovementWorkflowServiceTest extends CIUnitTestCase
 
     private function createSchema(): void
     {
-        $this->connection->query('CREATE TABLE ' . $this->table('fleet_vehicles') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, fleet_code VARCHAR(80), display_name VARCHAR(150))');
+        $this->connection->query('CREATE TABLE ' . $this->table('fleet_vehicles') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, company_id INTEGER NULL, fleet_code VARCHAR(80), display_name VARCHAR(150))');
         $this->connection->query('CREATE TABLE ' . $this->table('turo_trips_normalized') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, fleet_vehicle_id INTEGER, turo_trip_id VARCHAR(80), guest_name VARCHAR(190), starts_at DATETIME, ends_at DATETIME)');
         $this->connection->query('CREATE TABLE ' . $this->table('airports') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, code VARCHAR(10), name VARCHAR(190))');
         $this->connection->query('CREATE TABLE ' . $this->table('airport_deliveries') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, fleet_vehicle_id INTEGER, airport_id INTEGER, turo_trip_normalized_id INTEGER, scheduled_at DATETIME, completed_at DATETIME NULL, delivery_fee_amount DECIMAL(10,2), parking_cost_amount DECIMAL(10,2), deleted_at DATETIME NULL)');

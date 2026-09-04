@@ -160,6 +160,22 @@ final class FleetVehicleServiceTest extends CIUnitTestCase
         $this->assertNull($vehicle['safety_inspection_due_on']);
     }
 
+    public function testOperationalProfileAndCapabilitiesAreSavedWithActor(): void
+    {
+        $result = $this->service->create($this->validData([
+            'energy_kind' => 'electric',
+            'ready_energy_target_percent' => 80,
+            'operational_capabilities' => ['key_card', 'charging_adapter'],
+        ]), 42);
+
+        $this->assertTrue($result['success']);
+        $vehicle = $this->service->vehicle((int) $result['id']);
+        $this->assertSame('electric', $vehicle['energy_kind']);
+        $this->assertSame(80, (int) $vehicle['ready_energy_target_percent']);
+        $this->assertSame(['key_card', 'charging_adapter'], $vehicle['capabilities']);
+        $this->assertSame(42, (int) $this->connection->table('operational_fact_audits')->get()->getRowArray()['actor_user_id']);
+    }
+
     public function testVehicleEditSavesRegistrationComplianceValues(): void
     {
         $this->seedLegacyVehicle();
@@ -281,11 +297,14 @@ final class FleetVehicleServiceTest extends CIUnitTestCase
         $this->connection->query('CREATE TABLE ' . $this->table('fleet_vehicles') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, company_id INTEGER, vehicle_spec_id INTEGER, vehicle_trim_level_id INTEGER, vehicle_drivetrain_id INTEGER, vehicle_status_id INTEGER, fleet_number INTEGER NULL, fleet_code VARCHAR(80) UNIQUE, display_name VARCHAR(150), vin VARCHAR(32) NULL UNIQUE, license_plate VARCHAR(32) NULL, registered_owner VARCHAR(190) NULL, registration_renewal_on DATE NULL, safety_inspection_due_on DATE NULL, purchase_date DATE NULL, in_service_date DATE NULL, out_of_service_date DATE NULL, odometer_miles INTEGER NULL, sort_order INTEGER DEFAULT 0, created_at DATETIME NULL, updated_at DATETIME NULL, deleted_at DATETIME NULL, UNIQUE(company_id, fleet_number))');
         $this->connection->query('CREATE TABLE ' . $this->table('vehicle_turo_listings') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, fleet_vehicle_id INTEGER, turo_vehicle_id VARCHAR(80) UNIQUE, source_system VARCHAR(40), is_active INTEGER, listed_at DATETIME NULL, unlisted_at DATETIME NULL, mapping_note TEXT NULL, mapped_by INTEGER NULL, created_at DATETIME NULL, updated_at DATETIME NULL)');
         $this->connection->query('CREATE TABLE ' . $this->table('vehicle_turo_listing_audits') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, vehicle_turo_listing_id INTEGER, action VARCHAR(40), turo_vehicle_id VARCHAR(80), old_fleet_vehicle_id INTEGER NULL, new_fleet_vehicle_id INTEGER NULL, note TEXT NULL, created_by INTEGER NULL, created_at DATETIME NULL)');
+        $this->connection->query('CREATE TABLE ' . $this->table('vehicle_operational_profiles') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, fleet_vehicle_id INTEGER UNIQUE, energy_kind VARCHAR(20), ready_energy_target_percent INTEGER NULL, created_by INTEGER NULL, updated_by INTEGER NULL, created_at DATETIME NULL, updated_at DATETIME NULL)');
+        $this->connection->query('CREATE TABLE ' . $this->table('vehicle_operational_capabilities') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, fleet_vehicle_id INTEGER, capability_code VARCHAR(60), is_applicable INTEGER, created_by INTEGER NULL, updated_by INTEGER NULL, created_at DATETIME NULL, updated_at DATETIME NULL, UNIQUE(fleet_vehicle_id, capability_code))');
+        $this->connection->query('CREATE TABLE ' . $this->table('operational_fact_audits') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, company_id INTEGER NULL, table_name VARCHAR(80), record_id INTEGER, action VARCHAR(60), old_values TEXT NULL, new_values TEXT NULL, actor_user_id INTEGER NULL, created_at DATETIME NULL)');
     }
 
     private function resetSchema(): void
     {
-        foreach (['vehicle_turo_listing_audits', 'vehicle_turo_listings', 'fleet_vehicles', 'vehicle_specs', 'vehicle_models', 'vehicle_makes', 'vehicle_statuses', 'vehicle_drivetrains', 'vehicle_trim_levels', 'vehicle_colors', 'vehicle_body_styles', 'companies'] as $table) {
+        foreach (['operational_fact_audits', 'vehicle_operational_capabilities', 'vehicle_operational_profiles', 'vehicle_turo_listing_audits', 'vehicle_turo_listings', 'fleet_vehicles', 'vehicle_specs', 'vehicle_models', 'vehicle_makes', 'vehicle_statuses', 'vehicle_drivetrains', 'vehicle_trim_levels', 'vehicle_colors', 'vehicle_body_styles', 'companies'] as $table) {
             $this->connection->query('DROP TABLE IF EXISTS ' . $this->table($table));
         }
     }

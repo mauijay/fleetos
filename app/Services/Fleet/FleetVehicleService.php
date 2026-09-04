@@ -11,7 +11,7 @@ class FleetVehicleService
 {
     private BaseConnection $db;
 
-    public function __construct(?BaseConnection $db = null, private readonly ?VehicleTuroListingRepository $listings = null)
+    public function __construct(?BaseConnection $db = null, private readonly ?VehicleTuroListingRepository $listings = null, private readonly ?VehicleOperationalProfileService $operationalProfiles = null)
     {
         $this->db = $db ?? Database::connect();
     }
@@ -48,7 +48,11 @@ class FleetVehicleService
             ->join('vehicle_turo_listings listings', 'listings.fleet_vehicle_id = fv.id AND listings.is_active = 1', 'left')
             ->where('fv.id', $id)->where('fv.deleted_at', null)->get()->getRowArray();
 
-        return $row === null ? null : $row;
+        if ($row === null) {
+            return null;
+        }
+
+        return array_merge($row, $this->profiles()->profile($id) ?? ['energy_kind' => 'unknown', 'ready_energy_target_percent' => null, 'capabilities' => []]);
     }
 
     /** @return array<string, array<int, array<string, mixed>>> */
@@ -109,6 +113,10 @@ class FleetVehicleService
             ]);
             $id = (int) $this->db->insertID();
 
+            if ($this->hasOperationalProfileData($data)) {
+                $this->profiles()->save($id, (string) $data['energy_kind'], $data['ready_energy_target_percent'] ?? null, (array) ($data['operational_capabilities'] ?? []), (int) $actorUserId);
+            }
+
             if ($turoVehicleId !== null && trim($turoVehicleId) !== '') {
                 $this->listings()->createMapping($turoVehicleId, $id, 'Created from unknown Turo vehicle onboarding.', $actorUserId);
             }
@@ -128,7 +136,7 @@ class FleetVehicleService
     }
 
     /** @return array{success:bool,id?:int,errors:array<string,string>} */
-    public function update(int $id, array $data): array
+    public function update(int $id, array $data, ?int $actorUserId = null): array
     {
         $existing = $this->vehicle($id);
         if ($existing === null) {
@@ -147,7 +155,7 @@ class FleetVehicleService
         $this->db->transBegin();
         try {
             $this->db->table('fleet_vehicles')->where('id', $id)->update([
-                    'company_id' => (int) $data['company_id'],
+                'company_id' => (int) $data['company_id'],
                 'vehicle_spec_id' => $this->vehicleSpecId($data),
                 'vehicle_trim_level_id' => (int) $data['vehicle_trim_level_id'],
                 'vehicle_drivetrain_id' => (int) $data['vehicle_drivetrain_id'],
@@ -166,6 +174,10 @@ class FleetVehicleService
                 'odometer_miles' => $this->nullableInt($data['odometer_miles'] ?? null),
                 'updated_at' => date('Y-m-d H:i:s'),
             ]);
+
+            if ($this->hasOperationalProfileData($data)) {
+                $this->profiles()->save($id, (string) $data['energy_kind'], $data['ready_energy_target_percent'] ?? null, (array) ($data['operational_capabilities'] ?? []), (int) $actorUserId);
+            }
 
             if ($this->db->transStatus() === false) {
                 throw new \RuntimeException('Vehicle update transaction failed.');
@@ -293,6 +305,16 @@ class FleetVehicleService
     private function listings(): VehicleTuroListingRepository
     {
         return $this->listings ?? new VehicleTuroListingRepository($this->db);
+    }
+
+    private function profiles(): VehicleOperationalProfileService
+    {
+        return $this->operationalProfiles ?? new VehicleOperationalProfileService(new \App\Repositories\OperationalFactsRepository($this->db));
+    }
+
+    private function hasOperationalProfileData(array $data): bool
+    {
+        return array_key_exists('energy_kind', $data);
     }
 
     private function code(string $value): string

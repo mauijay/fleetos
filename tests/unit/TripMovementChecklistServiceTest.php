@@ -1,7 +1,6 @@
 <?php
 
 use App\Repositories\MovementChecklistRepository;
-use App\Services\Fleet\MovementReadinessService;
 use App\Services\Fleet\TripMovementChecklistService;
 use CodeIgniter\Database\BaseConnection;
 use CodeIgniter\Test\CIUnitTestCase;
@@ -141,7 +140,7 @@ final class TripMovementChecklistServiceTest extends CIUnitTestCase
 
     private function createSchema(): void
     {
-        $this->connection->query('CREATE TABLE ' . $this->table('fleet_vehicles') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, fleet_code VARCHAR(80), display_name VARCHAR(150))');
+        $this->connection->query('CREATE TABLE ' . $this->table('fleet_vehicles') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, company_id INTEGER NULL, fleet_code VARCHAR(80), display_name VARCHAR(150))');
         $this->connection->query('CREATE TABLE ' . $this->table('turo_trips_normalized') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, fleet_vehicle_id INTEGER, turo_trip_id VARCHAR(80), guest_name VARCHAR(190), starts_at DATETIME, ends_at DATETIME)');
         $this->connection->query('CREATE TABLE ' . $this->table('trip_movement_checklists') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, turo_trip_normalized_id INTEGER, fleet_vehicle_id INTEGER, movement_type VARCHAR(40), scheduled_at DATETIME, readiness_status VARCHAR(40), vehicle_disposition VARCHAR(40) NULL, completed_at DATETIME NULL, completion_note TEXT NULL, created_at DATETIME NULL, updated_at DATETIME NULL)');
         $this->connection->query('CREATE UNIQUE INDEX ' . $this->table('trip_movement_checklists_unique') . ' ON ' . $this->table('trip_movement_checklists') . ' (turo_trip_normalized_id, movement_type, scheduled_at)');
