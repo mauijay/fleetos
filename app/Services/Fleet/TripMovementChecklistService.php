@@ -17,7 +17,7 @@ class TripMovementChecklistService
     }
 
     /** @return array<string, mixed> */
-    public function ensureForMovement(array $reservation, string $movementType, bool $isAirport = false): array
+    public function ensureForMovement(array $reservation, string $movementType, bool $isAirport = false, ?string $projectionSource = null): array
     {
         $tripId = (int) ($reservation['id'] ?? 0);
         $vehicleId = (int) ($reservation['fleet_vehicle_id'] ?? 0);
@@ -25,13 +25,18 @@ class TripMovementChecklistService
 
         $existing = $this->repo()->findByMovement($tripId, $movementType, $scheduledAt);
         if ($existing === null) {
-            $checklistId = $this->repo()->createChecklist([
+            $data = [
                 'turo_trip_normalized_id' => $tripId,
                 'fleet_vehicle_id' => $vehicleId,
                 'movement_type' => $movementType,
                 'scheduled_at' => $scheduledAt,
                 'readiness_status' => 'not_started',
-            ]);
+            ];
+            if ($projectionSource !== null) {
+                $data['projection_source'] = $projectionSource;
+                $data['projected_at'] = date('Y-m-d H:i:s');
+            }
+            $checklistId = $this->repo()->createChecklist($data);
 
             foreach ($this->definitions->items($movementType, $isAirport) as $item) {
                 $this->repo()->createItem([
@@ -46,6 +51,15 @@ class TripMovementChecklistService
         }
 
         return $this->checklist($this->repo()->findByMovement($tripId, $movementType, $scheduledAt)['id']);
+    }
+
+    /**
+     * @phpstan-impure
+     * @return array<string, mixed>|null
+     */
+    public function existingForMovement(int $tripId, string $movementType, string $scheduledAt): ?array
+    {
+        return $this->repo()->findByMovement($tripId, $movementType, $scheduledAt);
     }
 
     /** @return array<int, array<string, mixed>> */

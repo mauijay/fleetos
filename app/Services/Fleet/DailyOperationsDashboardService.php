@@ -21,6 +21,7 @@ class DailyOperationsDashboardService
         private readonly ?TripMovementChecklistService $checklistService = null,
         private readonly ?AirportMovementWorkflowService $airportWorkflowService = null,
         private readonly ?TuroAccessReimbursementService $turoAccessReimbursementService = null,
+        private readonly ?MovementBoardIntelligenceService $movementBoardIntelligenceService = null,
         private readonly VehicleDailyStateService $stateService = new VehicleDailyStateService(),
         private readonly MorningBriefingService $briefingService = new MorningBriefingService(),
     ) {
@@ -39,10 +40,10 @@ class DailyOperationsDashboardService
         $reconciliation = $this->reconciliation()->attentionSummary();
         $airport = $this->airport()->attentionSummary($asOf);
         $reimbursements = $this->reimbursements()->attentionSummary();
-        $this->checklists()->ensureForDay($today);
         $checklists = $this->checklists()->summariesForDay($asOf);
         $board = $this->stateService->movementBoard($vehicles, $today, $health, $asOf);
         $board = $this->attachChecklistSummaries($board, $checklists);
+        $board = $this->movementBoardIntelligence()->enrich($board, $asOf);
 
         $externalAlerts = $this->externalAlerts($importIssues, $vehicleMappings, $reconciliation, $airport, $reimbursements, $health);
         $attention = $this->stateService->immediateAttention($board, $externalAlerts);
@@ -63,10 +64,10 @@ class DailyOperationsDashboardService
                 'revenue_this_week' => 'Pending capture',
             ],
             'data_honesty' => [
-                'Battery telemetry is not connected, so charge levels require confirmation.',
-                'Cleaning completion is not tracked as a workflow yet; same-day returns are flagged for confirmation.',
-                'Pickup and return locations are only available when airport delivery records exist; otherwise location is not captured.',
-                'Travel time and staging deadlines are not calculated without a maps/traffic integration.',
+                'Condition and energy are shown from the latest recorded movement assessment; missing observations remain explicitly not captured.',
+                'Current and last-known locations require recorded movement events; planned locations come from normalized trip schedules and are labeled separately.',
+                'Confirmed future trips and recommendation strength depend on Turo import freshness; stale snapshots require operator review.',
+                'Positioning recommendations do not include live GPS, traffic, travel time, or automatic transportation availability.',
             ],
         ];
     }
@@ -102,16 +103,50 @@ class DailyOperationsDashboardService
         ], static fn (array $action): bool => (int) $action['count'] > 0 || in_array($action['label'], ['Airport Receipt Inbox', 'Import Turo Trips'], true)));
     }
 
-    private function tasks(): TaskService { return $this->taskService ?? service('taskService'); }
-    private function availability(): VehicleAvailabilityService { return $this->availabilityService ?? service('vehicleAvailabilityService'); }
-    private function health(): FleetHealthService { return $this->healthService ?? service('fleetHealthService'); }
-    private function statistics(): FleetStatisticsService { return $this->statisticsService ?? service('fleetStatisticsService'); }
-    private function importIssues(): TuroImportIssueService { return $this->importIssueService ?? service('turoImportIssueService'); }
-    private function vehicleMappings(): TuroVehicleMappingService { return $this->vehicleMappingService ?? service('turoVehicleMappingService'); }
-    private function reconciliation(): TuroTripReconciliationService { return $this->reconciliationService ?? service('turoTripReconciliationService'); }
-    private function checklists(): TripMovementChecklistService { return $this->checklistService ?? service('tripMovementChecklistService'); }
-    private function airport(): AirportMovementWorkflowService { return $this->airportWorkflowService ?? service('airportMovementWorkflowService'); }
-    private function reimbursements(): TuroAccessReimbursementService { return $this->turoAccessReimbursementService ?? service('turoAccessReimbursementService'); }
+    private function tasks(): TaskService
+    {
+        return $this->taskService ?? service('taskService');
+    }
+    private function availability(): VehicleAvailabilityService
+    {
+        return $this->availabilityService ?? service('vehicleAvailabilityService');
+    }
+    private function health(): FleetHealthService
+    {
+        return $this->healthService ?? service('fleetHealthService');
+    }
+    private function statistics(): FleetStatisticsService
+    {
+        return $this->statisticsService ?? service('fleetStatisticsService');
+    }
+    private function importIssues(): TuroImportIssueService
+    {
+        return $this->importIssueService ?? service('turoImportIssueService');
+    }
+    private function vehicleMappings(): TuroVehicleMappingService
+    {
+        return $this->vehicleMappingService ?? service('turoVehicleMappingService');
+    }
+    private function reconciliation(): TuroTripReconciliationService
+    {
+        return $this->reconciliationService ?? service('turoTripReconciliationService');
+    }
+    private function checklists(): TripMovementChecklistService
+    {
+        return $this->checklistService ?? service('tripMovementChecklistService');
+    }
+    private function airport(): AirportMovementWorkflowService
+    {
+        return $this->airportWorkflowService ?? service('airportMovementWorkflowService');
+    }
+    private function reimbursements(): TuroAccessReimbursementService
+    {
+        return $this->turoAccessReimbursementService ?? service('turoAccessReimbursementService');
+    }
+    private function movementBoardIntelligence(): MovementBoardIntelligenceService
+    {
+        return $this->movementBoardIntelligenceService ?? new MovementBoardIntelligenceService();
+    }
 
     private function attachChecklistSummaries(array $board, array $checklists): array
     {

@@ -461,10 +461,11 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
             'Fleet Command Center',
             'Fleet Activity',
             'Vehicles',
+            'Location Aliases',
             'Turo Import',
             'Import Issues',
             'Vehicle Matching',
-        ], array_slice(array_column($viewModel['navigation'], 'label'), 0, 6));
+        ], array_slice(array_column($viewModel['navigation'], 'label'), 0, 7));
         $this->assertSame('true', $viewModel['navigation'][0]['active']);
         $this->assertNotContains('Fleet', array_column($viewModel['navigation'], 'label'));
         $this->assertTrue($viewModel['mission_clear']);

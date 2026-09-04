@@ -25,6 +25,7 @@ class TripMovementChecklists extends BaseController
             'latestFacts' => $latestFacts,
             'correctingFacts' => $correctingFacts,
             'factFormData' => $factFormData,
+            'hnlGarages' => (new \App\Services\Fleet\HnlGarageCatalog())->definitions(),
             'notice' => session()->getFlashdata('movement_checklist_notice'),
             'error' => session()->getFlashdata('movement_checklist_error'),
         ]);

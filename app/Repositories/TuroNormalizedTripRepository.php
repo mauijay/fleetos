@@ -51,14 +51,23 @@ class TuroNormalizedTripRepository
         if ($existing === null) {
             $this->db->table('turo_trips_normalized')->insert(array_merge($data, ['created_at' => $now]));
 
-            return ['id' => (int) $this->db->insertID(), 'created' => true, 'old' => null, 'new' => $data];
+            return ['id' => (int) $this->db->insertID(), 'created' => true, 'materially_changed' => true, 'old' => null, 'new' => $data];
         }
 
         $this->db->table('turo_trips_normalized')
             ->where('id', $existing['id'])
             ->update($data);
 
-        return ['id' => (int) $existing['id'], 'created' => false, 'old' => $existing, 'new' => $data];
+        $materialFields = ['fleet_vehicle_id', 'trip_status_lookup_value_id', 'starts_at', 'ends_at', 'canceled_at'];
+        $materiallyChanged = false;
+        foreach ($materialFields as $field) {
+            if ((string) ($existing[$field] ?? '') !== (string) ($data[$field] ?? '')) {
+                $materiallyChanged = true;
+                break;
+            }
+        }
+
+        return ['id' => (int) $existing['id'], 'created' => false, 'materially_changed' => $materiallyChanged, 'old' => $existing, 'new' => $data];
     }
 
     /** @return array<string, mixed>|null */
@@ -71,5 +80,41 @@ class TuroNormalizedTripRepository
             ->getRowArray();
 
         return $row === null ? null : $row;
+    }
+
+    /** @return array<string, mixed>|null */
+    public function find(int $tripId): ?array
+    {
+        $row = $this->db->table('turo_trips_normalized trips')
+            ->select('trips.*, statuses.code AS trip_status_code')
+            ->join('lookup_values statuses', 'statuses.id = trips.trip_status_lookup_value_id', 'left')
+            ->where('trips.id', $tripId)
+            ->where('trips.deleted_at', null)
+            ->get()
+            ->getRowArray();
+
+        return $row === null ? null : $row;
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    public function movementsBetween(string $start, string $end): array
+    {
+        return $this->db->table('turo_trips_normalized trips')
+            ->select('trips.*, statuses.code AS trip_status_code')
+            ->join('lookup_values statuses', 'statuses.id = trips.trip_status_lookup_value_id', 'left')
+            ->where('trips.deleted_at', null)
+            ->groupStart()
+                ->groupStart()
+                    ->where('trips.starts_at >=', $start)
+                    ->where('trips.starts_at <', $end)
+                ->groupEnd()
+                ->orGroupStart()
+                    ->where('trips.ends_at >=', $start)
+                    ->where('trips.ends_at <', $end)
+                ->groupEnd()
+            ->groupEnd()
+            ->orderBy('trips.starts_at', 'ASC')
+            ->get()
+            ->getResultArray();
     }
 }

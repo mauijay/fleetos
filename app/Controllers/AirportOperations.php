@@ -30,7 +30,11 @@ class AirportOperations extends BaseController
 
     public function recordStaging(int $id): RedirectResponse
     {
-        return $this->back(service('airportMovementWorkflowService')->recordStaging($id, $this->request->getPost()), 'Staging details saved.', 'Staging details could not be saved.');
+        try {
+            return $this->back(service('airportMovementWorkflowService')->recordStaging($id, $this->request->getPost()), 'Staging details saved.', 'Staging details could not be saved.');
+        } catch (\InvalidArgumentException $exception) {
+            return $this->back(false, '', $exception->getMessage());
+        }
     }
 
     public function markStaged(int $id): RedirectResponse

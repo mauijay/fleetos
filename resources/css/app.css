@@ -23,7 +23,7 @@
 }
 
 body.fleet-shell {
-  min-width: 320px;
+  min-width: 0;
   margin: 0;
   background: var(--bg);
   color: var(--text);
@@ -404,18 +404,181 @@ h3 {
   line-height: 1.45;
 }
 
-.movement-card h3 {
-  font-size: 22px;
+.movement-card--structured {
+  display: grid;
+  grid-template-rows: auto auto auto auto auto 1fr auto;
+  gap: 0;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
 }
 
-.movement-card .card-row {
+.movement-card__header,
+.movement-card__footer,
+.movement-card__subheading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.movement-card__header {
   align-items: flex-start;
-  flex-wrap: wrap;
+  padding: 16px 16px 12px;
 }
 
-.movement-card .status-badge {
+.movement-card__identity {
+  min-width: 0;
+}
+
+.movement-card__identity h3 {
+  overflow-wrap: anywhere;
+  font-size: 20px;
+}
+
+.movement-card__identity p {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.movement-card__header .status-badge {
+  flex: 0 1 auto;
   max-width: 190px;
   text-align: right;
+  white-space: normal;
+}
+
+.movement-card__primary {
+  margin: 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.025);
+  padding: 11px 16px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.movement-card__facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0;
+  background: var(--line);
+}
+
+.movement-card__fact {
+  min-width: 0;
+  background: var(--surface-2);
+  padding: 11px 16px;
+}
+
+.movement-card__fact--location,
+.movement-card__fact--trip {
+  grid-column: 1 / -1;
+}
+
+.movement-card__fact dt {
+  margin-bottom: 3px;
+  color: var(--subtle);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.movement-card__fact dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+
+.movement-card__fact dd span {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.movement-card__blockers,
+.movement-card__recommendation,
+.movement-card__operator-plan {
+  border-top: 1px solid var(--line);
+  padding: 12px 16px;
+}
+
+.movement-card__blockers h4,
+.movement-card__recommendation h4,
+.movement-card__operator-plan h4 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.movement-card__blockers p,
+.movement-card__recommendation p,
+.movement-card__operator-plan p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.movement-card__subheading span {
+  display: inline-grid;
+  min-width: 24px;
+  min-height: 24px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--warning);
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.movement-card__blockers ul {
+  margin: 7px 0 0;
+  padding-left: 18px;
+  color: var(--warning);
+  font-size: 12px;
+}
+
+.movement-card__recommendation h4 {
+  color: var(--info);
+}
+
+.movement-card__operator-plan {
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.movement-card__plan-stale,
+.movement-card__freshness.is-stale strong {
+  color: var(--warning);
+}
+
+.movement-card__footer {
+  align-items: flex-end;
+  border-top: 1px solid var(--line);
+  padding: 12px 16px 16px;
+}
+
+.movement-card__freshness {
+  display: grid;
+  gap: 2px;
+  color: var(--subtle);
+  font-size: 11px;
+}
+
+.movement-card__freshness strong {
+  font-weight: 700;
+}
+
+.movement-card__action {
+  flex: 0 0 auto;
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  border-radius: var(--radius);
+  background: rgba(56, 189, 248, 0.1);
+  color: var(--info);
+  padding: 0 14px;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .timeline-event {
@@ -815,6 +978,31 @@ h3 {
 
 .issue-filters {
   grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.hnl-parking-fields {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  min-width: 0;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.hnl-parking-fields legend {
+  padding: 0 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.hnl-parking-fields label,
+.hnl-parking-fields select {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .issue-filters label,
@@ -1361,6 +1549,10 @@ h3 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .movement-board-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .receipt-match-layout {
     grid-template-columns: 1fr;
   }
@@ -1453,6 +1645,7 @@ h3 {
   .compact-financial-grid,
   .import-result-grid,
   .issue-filters,
+  .hnl-parking-fields,
   .issue-facts,
   .issue-detail-grid,
   .financial-grid,
@@ -1465,6 +1658,10 @@ h3 {
   }
 
   .upload-form {
+    grid-template-columns: 1fr;
+  }
+
+  .movement-board-grid {
     grid-template-columns: 1fr;
   }
 
@@ -1509,6 +1706,7 @@ h3 {
   .compact-financial-grid,
   .import-result-grid,
   .issue-filters,
+  .hnl-parking-fields,
   .issue-facts,
   .issue-detail-grid,
   .raw-value-list,
@@ -1542,6 +1740,16 @@ h3 {
   .movement-card .status-badge {
     max-width: 100%;
     text-align: left;
+  }
+
+  .movement-card__header,
+  .movement-card__footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .movement-card__action {
+    width: 100%;
   }
 
   .receipt-preview {

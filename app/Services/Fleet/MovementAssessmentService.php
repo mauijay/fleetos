@@ -15,7 +15,7 @@ class MovementAssessmentService
         return $this->repo()->createAssessment($this->assessmentData($vehicleId, $tripId, $eventId, $movementType, $cleanliness, $energyPercent, $capturedAt, $source, $actorUserId, $note));
     }
 
-    public function correct(int $assessmentId, array $replacement, int $actorUserId, string $reason): int
+    public function correct(int $assessmentId, array $replacement, int $actorUserId, string $reason, bool $manageTransaction = true): int
     {
         if (trim($reason) === '') {
             throw new \InvalidArgumentException('A correction reason is required.');
@@ -28,7 +28,7 @@ class MovementAssessmentService
             ? (int) $replacement['trip_movement_event_id']
             : ($original['trip_movement_event_id'] === null ? null : (int) $original['trip_movement_event_id']);
         $data = $this->assessmentData((int) $original['fleet_vehicle_id'], $original['turo_trip_normalized_id'] === null ? null : (int) $original['turo_trip_normalized_id'], $eventId, (string) ($replacement['movement_type'] ?? $original['movement_type']), $replacement['cleanliness'] ?? $original['cleanliness'], $replacement['energy_percent'] ?? $original['energy_percent'], (string) ($replacement['captured_at'] ?? $original['captured_at']), (string) ($replacement['source'] ?? 'operator_correction'), $actorUserId, $replacement['note'] ?? $original['note']);
-        return $this->repo()->correctAssessment($assessmentId, $data, $actorUserId, trim($reason));
+        return $this->repo()->correctAssessment($assessmentId, $data, $actorUserId, trim($reason), $manageTransaction);
     }
 
     public function void(int $assessmentId, int $actorUserId, string $reason): bool

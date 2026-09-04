@@ -13,6 +13,7 @@ class AirportMovementWorkflowService
         private readonly ?AirportMovementRepository $repository = null,
         private readonly ?TripMovementChecklistService $checklists = null,
         private readonly AirportInstructionService $instructions = new AirportInstructionService(),
+        private readonly HnlGarageCatalog $hnlGarages = new HnlGarageCatalog(),
     ) {
     }
 
@@ -30,6 +31,21 @@ class AirportMovementWorkflowService
         }
 
         return $workflows;
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    public function deliveriesForTrip(int $tripId): array
+    {
+        return $this->repo()->airportDeliveriesForTrip($tripId);
+    }
+
+    /**
+     * @phpstan-impure
+     * @return array<string, mixed>|null
+     */
+    public function existingForMovement(int $tripId, string $movementType, string $scheduledAt): ?array
+    {
+        return $this->repo()->findWorkflow($tripId, $movementType, $scheduledAt);
     }
 
     /** @return array<string, mixed> */
@@ -57,7 +73,7 @@ class AirportMovementWorkflowService
                 'airport_id' => (int) $delivery['airport_id'],
                 'movement_type' => $movementType,
                 'scheduled_at' => $scheduledAt,
-                'garage' => 'HNL International Parking Garage',
+                'garage' => 'international',
                 'parking_cost_responsibility' => 'unknown',
             ]);
 
@@ -77,7 +93,13 @@ class AirportMovementWorkflowService
 
     public function recordStaging(int $id, array $data): bool
     {
-        $payload = $this->clean($data, ['garage', 'terminal', 'airline_or_flight', 'parking_level', 'parking_zone', 'parking_row', 'parking_stall', 'parking_entry_at', 'parking_access_method', 'parking_ticket_location', 'operator_notes']);
+        $parking = $this->hnlGarages->validate($data['garage'] ?? null, $data['parking_level'] ?? null, $data['parking_row'] ?? null);
+        $payload = $this->clean($data, ['terminal', 'airline_or_flight', 'parking_zone', 'parking_entry_at', 'parking_access_method', 'parking_ticket_location', 'operator_notes']);
+        $payload = array_merge($payload, [
+            'garage' => $parking['garage_code'],
+            'parking_level' => (string) $parking['level'],
+            'parking_row' => $parking['row'],
+        ]);
         return $this->repo()->updateWorkflow($id, array_merge($payload, ['workflow_status' => 'preparing']), 'staging_recorded');
     }
 
@@ -131,7 +153,7 @@ class AirportMovementWorkflowService
 
     public function recordReturnLocation(int $id, array $data): bool
     {
-        $payload = $this->clean($data, ['guest_reported_level', 'guest_reported_zone', 'guest_reported_row', 'guest_reported_stall', 'guest_note', 'parking_ticket_location']);
+        $payload = $this->clean($data, ['guest_reported_level', 'guest_reported_zone', 'guest_reported_row', 'guest_note', 'parking_ticket_location']);
         return $this->repo()->updateWorkflow($id, array_merge($payload, ['workflow_status' => 'returned', 'return_location_reported_at' => date('Y-m-d H:i:s')]), 'return_location_recorded');
     }
 
@@ -187,7 +209,6 @@ class AirportMovementWorkflowService
     /** @return array<int, array<string, mixed>> */
     public function today(DateTimeImmutable $day, array $filters = []): array
     {
-        $this->ensureForDay($day);
         $workflows = $this->repo()->workflowsBetween($day->setTime(0, 0)->format('Y-m-d H:i:s'), $day->modify('+1 day')->setTime(0, 0)->format('Y-m-d H:i:s'));
         if (($filters['status'] ?? '') !== '') {
             $workflows = array_values(array_filter($workflows, static fn (array $workflow): bool => $workflow['workflow_status'] === $filters['status']));
@@ -210,7 +231,28 @@ class AirportMovementWorkflowService
     private function view(array $workflow): array
     {
         $instruction = $workflow['movement_type'] === 'return' ? $this->instructions->returnInstructions($workflow) : $this->instructions->pickupInstructions($workflow);
-        return array_merge($workflow, ['exists' => true, 'instruction' => $instruction, 'exceptions' => $this->repo()->openExceptions((int) $workflow['id']), 'href' => '/operations/airport/' . (int) $workflow['id']]);
+        $parking = null;
+        try {
+            if (trim((string) ($workflow['garage'] ?? '')) !== '' && trim((string) ($workflow['parking_level'] ?? '')) !== '' && trim((string) ($workflow['parking_row'] ?? '')) !== '') {
+                $parking = $this->hnlGarages->validate($workflow['garage'], $workflow['parking_level'], $workflow['parking_row']);
+            }
+        } catch (\InvalidArgumentException) {
+            $parking = null;
+        }
+        $presentation = $parking === null ? null : $this->hnlGarages->presentation($parking['garage_code'], $parking['level'], $parking['row']);
+
+        return array_merge($workflow, [
+            'exists' => true,
+            'instruction' => $instruction,
+            'exceptions' => $this->repo()->openExceptions((int) $workflow['id']),
+            'href' => '/operations/airport/' . (int) $workflow['id'],
+            'garage_definitions' => $this->hnlGarages->definitions(),
+            'airport_parking' => $parking,
+            'garage_line' => $presentation['garage_line'] ?? null,
+            'position_line' => $presentation['position_line'] ?? null,
+            'approved_turo_garage' => $presentation['approved_turo_garage'] ?? null,
+            'garage_attention' => ($presentation['approved_turo_garage'] ?? null) === false ? 'Wrong airport garage - recovery / relocation required' : null,
+        ]);
     }
 
     private function completeChecklistItem(int $checklistId, string $itemCode): void

@@ -32,6 +32,23 @@ class AirportMovementRepository
             ->getResultArray();
     }
 
+    /** @return array<int, array<string, mixed>> */
+    public function airportDeliveriesForTrip(int $tripId): array
+    {
+        return $this->db->table('airport_deliveries deliveries')
+            ->select('deliveries.*, airports.code AS airport_code, airports.name AS airport_name')
+            ->select('trips.starts_at AS trip_starts_at, trips.ends_at AS trip_ends_at, trips.guest_name, trips.turo_trip_id')
+            ->select('fv.fleet_code, fv.display_name')
+            ->join('airports', 'airports.id = deliveries.airport_id')
+            ->join('turo_trips_normalized trips', 'trips.id = deliveries.turo_trip_normalized_id', 'left')
+            ->join('fleet_vehicles fv', 'fv.id = deliveries.fleet_vehicle_id', 'left')
+            ->where('deliveries.turo_trip_normalized_id', $tripId)
+            ->where('deliveries.deleted_at', null)
+            ->orderBy('deliveries.scheduled_at', 'ASC')
+            ->get()
+            ->getResultArray();
+    }
+
     /** @return array<string, mixed>|null */
     public function findWorkflow(int $tripId, string $movementType, string $scheduledAt): ?array
     {

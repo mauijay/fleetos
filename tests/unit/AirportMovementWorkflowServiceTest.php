@@ -49,7 +49,7 @@ final class AirportMovementWorkflowServiceTest extends CIUnitTestCase
     {
         $workflow = $this->pickupWorkflow();
 
-        $this->assertTrue($this->service->recordStaging((int) $workflow['id'], ['parking_level' => '7', 'parking_row' => 'C', 'parking_stall' => '742', 'parking_entry_at' => '2026-07-19 10:00:00']));
+        $this->assertTrue($this->service->recordStaging((int) $workflow['id'], ['garage' => 'international', 'parking_level' => '7', 'parking_row' => 'F', 'parking_entry_at' => '2026-07-19 10:00:00']));
         $this->assertFalse($this->service->markStaged((int) $workflow['id'], ['vehicle_parked' => '1']));
         $this->assertTrue($this->service->markStaged((int) $workflow['id'], ['vehicle_parked' => '1', 'vehicle_locked' => '1', 'key_card_placed' => '1', 'parking_details_verified' => '1']));
 
@@ -65,26 +65,35 @@ final class AirportMovementWorkflowServiceTest extends CIUnitTestCase
         $instructions = (new AirportInstructionService())->pickupInstructions($workflow);
         $this->assertFalse($instructions['complete']);
 
-        $this->service->recordStaging((int) $workflow['id'], ['garage' => 'HNL International Parking Garage', 'parking_level' => '7', 'parking_row' => 'C', 'parking_stall' => '742']);
+        $this->service->recordStaging((int) $workflow['id'], ['garage' => 'international', 'parking_level' => '7', 'parking_row' => 'F']);
         $this->assertTrue($this->service->markInstructionsSent((int) $workflow['id']));
         $updated = $this->service->workflow((int) $workflow['id']);
 
         $this->assertSame('instructions_sent', $updated['workflow_status']);
         $this->assertStringContainsString('Level 7', $updated['guest_instructions']);
-        $this->assertStringContainsString('Stall 742', $updated['guest_instructions']);
+        $this->assertStringContainsString('Row F', $updated['guest_instructions']);
+        $this->assertStringNotContainsString('Stall', $updated['guest_instructions']);
     }
 
     public function testGuestPickupAndReturnRecoveryCanBeConfirmed(): void
     {
         $pickup = $this->pickupWorkflow();
-        $this->service->recordStaging((int) $pickup['id'], ['parking_level' => '7', 'parking_stall' => '742']);
+        $this->service->recordStaging((int) $pickup['id'], ['garage' => 'international', 'parking_level' => '7', 'parking_row' => 'F']);
         $this->service->markStaged((int) $pickup['id'], ['vehicle_parked' => '1', 'vehicle_locked' => '1', 'key_card_placed' => '1', 'parking_details_verified' => '1']);
         $this->assertTrue($this->service->confirmGuestPickup((int) $pickup['id']));
 
         $return = $this->returnWorkflow();
-        $this->assertTrue($this->service->recordReturnLocation((int) $return['id'], ['guest_reported_level' => '8', 'guest_reported_row' => 'D', 'guest_reported_stall' => '812']));
+        $this->assertTrue($this->service->recordReturnLocation((int) $return['id'], ['guest_reported_level' => '8', 'guest_reported_row' => 'D']));
         $this->assertTrue($this->service->confirmVehicleLocated((int) $return['id']));
         $this->assertSame('vehicle_located', $this->service->workflow((int) $return['id'])['workflow_status']);
+    }
+
+    public function testStagingRejectsInvalidLevelAndConflictingGarageRow(): void
+    {
+        $workflow = $this->pickupWorkflow();
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->service->recordStaging((int) $workflow['id'], ['garage' => 'terminal_2', 'parking_level' => '7', 'parking_row' => 'M']);
     }
 
     public function testParkingCostValidationAndExceptionRecording(): void
@@ -106,10 +115,18 @@ final class AirportMovementWorkflowServiceTest extends CIUnitTestCase
 
     public function testAttentionSummaryCountsIncompleteAirportWork(): void
     {
+        $this->service->ensureForDay(new DateTimeImmutable('2026-07-19 08:00:00'));
         $summary = $this->service->attentionSummary(new DateTimeImmutable('2026-07-19 08:00:00'));
 
         $this->assertTrue($summary['has_airport_work']);
         $this->assertSame(2, $summary['airport_workflows_requiring_action']);
+    }
+
+    public function testTodayDoesNotCreateAirportWorkflows(): void
+    {
+        $this->assertSame([], $this->service->today(new DateTimeImmutable('2026-07-19 08:00:00')));
+        $this->assertSame(0, $this->connection->table('airport_movement_workflows')->countAllResults());
+        $this->assertSame(0, $this->connection->table('trip_movement_checklists')->countAllResults());
     }
 
     private function pickupWorkflow(): array

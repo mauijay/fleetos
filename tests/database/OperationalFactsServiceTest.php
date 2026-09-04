@@ -42,7 +42,7 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
         $this->connection->query('CREATE TABLE ' . $this->table('turo_trip_raw') . ' (id INTEGER PRIMARY KEY, turo_import_batch_id INTEGER NULL, raw_payload TEXT)');
         $this->connection->query('CREATE TABLE ' . $this->table('airports') . ' (id INTEGER PRIMARY KEY, code VARCHAR(20))');
         $this->connection->query('CREATE TABLE ' . $this->table('airport_movement_workflows') . ' (id INTEGER PRIMARY KEY, turo_trip_normalized_id INTEGER, airport_id INTEGER, movement_type VARCHAR(40), scheduled_at DATETIME)');
-        $this->connection->query('CREATE TABLE ' . $this->table('turo_trips_normalized') . ' (id INTEGER PRIMARY KEY, fleet_vehicle_id INTEGER NULL, turo_trip_raw_id INTEGER NULL, trip_status_lookup_value_id INTEGER NULL, starts_at DATETIME NULL, deleted_at DATETIME NULL)');
+        $this->connection->query('CREATE TABLE ' . $this->table('turo_trips_normalized') . ' (id INTEGER PRIMARY KEY, fleet_vehicle_id INTEGER NULL, turo_trip_raw_id INTEGER NULL, trip_status_lookup_value_id INTEGER NULL, guest_name VARCHAR(190) NULL, starts_at DATETIME NULL, ends_at DATETIME NULL, deleted_at DATETIME NULL)');
         (new CreateMovementOperationalFacts(Database::forge($this->connection)))->up();
         $this->connection->table('fleet_vehicles')->insertBatch([
             ['id' => 10, 'company_id' => 1, 'deleted_at' => null],
@@ -342,20 +342,31 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
         $this->assertSame(0, $service->run(true)['would_upsert']);
     }
 
-    public function testNextConfirmedTripExcludesCanceledAndCompletedStatuses(): void
+    public function testNextConfirmedTripIncludesOnlyEarliestFutureBookedTripWithDistinctStatusAndPickupFields(): void
     {
         $this->connection->table('lookup_values')->insertBatch([
             ['id' => 1, 'code' => 'canceled_zero_payout'],
             ['id' => 2, 'code' => 'completed'],
             ['id' => 3, 'code' => 'booked'],
             ['id' => 4, 'code' => 'completed'],
+            ['id' => 5, 'code' => 'in_progress'],
         ]);
         $this->connection->table('turo_import_batches')->insert(['id' => 1, 'import_status_lookup_value_id' => 4, 'source_filename' => 'future-trips.csv', 'completed_at' => '2026-08-31 12:00:00']);
         $this->connection->table('turo_trip_raw')->insert(['id' => 1, 'turo_import_batch_id' => 1, 'raw_payload' => '{}']);
         $this->connection->table('turo_trips_normalized')->insertBatch([
             ['id' => 301, 'fleet_vehicle_id' => 10, 'turo_trip_raw_id' => null, 'trip_status_lookup_value_id' => 1, 'starts_at' => '2026-09-01 10:00:00'],
             ['id' => 302, 'fleet_vehicle_id' => 10, 'turo_trip_raw_id' => null, 'trip_status_lookup_value_id' => 2, 'starts_at' => '2026-09-01 11:00:00'],
+            ['id' => 304, 'fleet_vehicle_id' => 10, 'turo_trip_raw_id' => null, 'trip_status_lookup_value_id' => 5, 'starts_at' => '2026-09-01 12:00:00'],
+            ['id' => 305, 'fleet_vehicle_id' => 10, 'turo_trip_raw_id' => 1, 'trip_status_lookup_value_id' => 3, 'starts_at' => '2026-09-03 02:00:00'],
             ['id' => 303, 'fleet_vehicle_id' => 10, 'turo_trip_raw_id' => 1, 'trip_status_lookup_value_id' => 3, 'starts_at' => '2026-09-03 02:00:00'],
+        ]);
+        $this->repository->upsertScheduledLocation(303, 10, 'pickup', [
+            'location_class' => 'airport_hnl',
+            'source_text' => 'HNL Terminal 2',
+            'airport_id' => null,
+            'airport_movement_workflow_id' => null,
+            'classification_source' => 'explicit',
+            'classification_status' => 'classified',
         ]);
 
         $trip = (new NextConfirmedTripService($this->repository))->forVehicle(10, new DateTimeImmutable('2026-09-01 00:00:00'));
@@ -365,8 +376,58 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
         $this->assertSame('completed', $trip['import_status_code']);
         $this->assertSame('2026-08-31 12:00:00', $trip['import_completed_at']);
         $this->assertSame('future-trips.csv', $trip['import_source_filename']);
+        $this->assertSame('airport_hnl', $trip['pickup_location_class']);
+        $this->assertSame('HNL Terminal 2', $trip['pickup_location_source_text']);
         $this->assertArrayNotHasKey('status_code', $trip);
         $this->assertSame('near_term', $trip['planning_horizon']);
+    }
+
+    public function testBoardContextReadsLatestEventEventAssessmentAndFullTripSchedule(): void
+    {
+        $this->connection->table('lookup_values')->insertBatch([
+            ['id' => 11, 'code' => 'booked'],
+            ['id' => 12, 'code' => 'completed'],
+        ]);
+        $this->connection->table('turo_import_batches')->insert(['id' => 11, 'import_status_lookup_value_id' => 12, 'completed_at' => '2026-09-02 06:00:00']);
+        $this->connection->table('turo_trip_raw')->insert(['id' => 11, 'turo_import_batch_id' => 11, 'raw_payload' => '{}']);
+        $this->connection->table('turo_trips_normalized')->where('id', 100)->update([
+            'turo_trip_raw_id' => 11,
+            'trip_status_lookup_value_id' => 11,
+            'guest_name' => 'Board Guest',
+            'starts_at' => '2026-09-03 08:00:00',
+            'ends_at' => '2026-09-05 17:00:00',
+        ]);
+        foreach (['pickup' => ['airport_hnl', 'HNL Terminal 2'], 'return' => ['home', 'Fleet yard']] as $movementType => [$locationClass, $sourceText]) {
+            $this->repository->upsertScheduledLocation(100, 10, $movementType, [
+                'location_class' => $locationClass,
+                'source_text' => $sourceText,
+                'airport_id' => null,
+                'airport_movement_workflow_id' => null,
+                'classification_source' => 'explicit',
+                'classification_status' => 'classified',
+            ]);
+        }
+        $handoffId = $this->events->record(10, 100, 'actual_handoff', 'pickup', '2026-09-03 08:05:00', 'airport_hnl', 'Terminal 2', 'operator', 7);
+        $this->assessments->record(10, 100, $handoffId, 'pickup', 'clean', null, '2026-09-03 08:06:00', 'operator', 7);
+        $positionedId = $this->events->record(10, 100, 'vehicle_positioned', null, '2026-09-03 09:00:00', 'home', 'Operator note', 'operator', 7);
+        $returnId = $this->events->record(10, 100, 'actual_return', 'return', '2026-09-05 17:05:00', 'home', 'Fleet yard', 'operator', 7);
+        $this->assessments->record(10, 100, $returnId, 'return', 'dirty', 25, '2026-09-05 17:06:00', 'operator', 7);
+
+        $event = $this->repository->latestActiveMovementEvent(10, '2026-09-04 12:00:00');
+        $lifecycleEvent = $this->repository->latestActiveLifecycleEvent(10, '2026-09-04 12:00:00');
+        $assessment = $this->repository->assessmentForEventOrTrip((int) $lifecycleEvent['id'], 100);
+        $schedule = $this->repository->tripSchedule(100);
+
+        $this->assertSame($positionedId, (int) $event['id']);
+        $this->assertSame($handoffId, (int) $lifecycleEvent['id']);
+        $this->assertSame('actual_handoff', $lifecycleEvent['event_code']);
+        $this->assertSame('airport_hnl', $lifecycleEvent['location_class']);
+        $this->assertSame('Terminal 2', $lifecycleEvent['location_detail']);
+        $this->assertNull($assessment['energy_percent']);
+        $this->assertSame('booked', $schedule['trip_status_code']);
+        $this->assertSame('completed', $schedule['import_status_code']);
+        $this->assertSame('airport_hnl', $schedule['pickup_location_class']);
+        $this->assertSame('home', $schedule['return_location_class']);
     }
 
     private function table(string $table): string

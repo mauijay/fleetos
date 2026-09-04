@@ -14,6 +14,7 @@ class MovementOperationalFactService
         ?BaseConnection $db = null,
         private readonly MovementEventService $events = new MovementEventService(),
         private readonly MovementAssessmentService $assessments = new MovementAssessmentService(),
+        private readonly ?VehiclePositioningPlanService $positioningPlans = null,
     ) {
         $this->db = $db ?? Database::connect();
     }
@@ -43,6 +44,12 @@ class MovementOperationalFactService
                 'checklist_operator',
                 $actorUserId,
                 $data['note'] ?? null,
+                [
+                    'garage_code' => $data['airport_garage_code'] ?? null,
+                    'level' => $data['airport_parking_level'] ?? null,
+                    'row' => $data['airport_parking_row'] ?? null,
+                    'structured_input_present' => array_key_exists('airport_garage_code', $data),
+                ],
             );
             $this->assessments->record(
                 (int) $checklist['fleet_vehicle_id'],
@@ -56,6 +63,7 @@ class MovementOperationalFactService
                 $actorUserId,
                 $data['note'] ?? null,
             );
+            $this->plans()->invalidateForWrite((int) $checklist['fleet_vehicle_id'], 'new_actual_movement_event', $actorUserId);
             if ($this->db->transStatus() === false) {
                 throw new RuntimeException('Operational fact transaction failed.');
             }
@@ -90,15 +98,19 @@ class MovementOperationalFactService
                 'occurred_at' => $this->presentValue($data, 'occurred_at', $event['occurred_at']),
                 'location_class' => $this->presentValue($data, 'location_class', $event['location_class']),
                 'location_detail' => $this->presentValue($data, 'location_detail', $event['location_detail']),
+                'airport_garage_code' => $this->presentValue($data, 'airport_garage_code', $event['airport_garage_code'] ?? null),
+                'airport_parking_level' => $this->presentValue($data, 'airport_parking_level', $event['airport_parking_level'] ?? null),
+                'airport_parking_row' => $this->presentValue($data, 'airport_parking_row', $event['airport_parking_row'] ?? null),
                 'note' => $this->presentValue($data, 'note', $event['note']),
-            ], $actorUserId, $reason);
+            ], $actorUserId, $reason, false);
             $this->assessments->correct($assessmentId, [
                 'trip_movement_event_id' => $replacementEventId,
                 'captured_at' => $this->presentValue($data, 'occurred_at', $assessment['captured_at']),
                 'cleanliness' => $this->presentValue($data, 'cleanliness', $assessment['cleanliness']),
                 'energy_percent' => $this->presentValue($data, 'energy_percent', $assessment['energy_percent']),
                 'note' => $this->presentValue($data, 'note', $assessment['note']),
-            ], $actorUserId, $reason);
+            ], $actorUserId, $reason, false);
+            $this->plans()->invalidateForWrite((int) $checklist['fleet_vehicle_id'], 'corrected_actual_movement_event', $actorUserId);
             if ($this->db->transStatus() === false) {
                 throw new RuntimeException('Operational fact correction transaction failed.');
             }
@@ -117,5 +129,10 @@ class MovementOperationalFactService
         }
 
         return $data[$key];
+    }
+
+    private function plans(): VehiclePositioningPlanService
+    {
+        return $this->positioningPlans ?? new VehiclePositioningPlanService(new \App\Repositories\OperationalFactsRepository($this->db));
     }
 }

@@ -45,6 +45,146 @@ class OperationalFactsRepository
         return $row === null ? null : $row;
     }
 
+    /** @return array<string, mixed>|null */
+    public function locationAlias(int $companyId, string $normalizedSourceKey): ?array
+    {
+        $row = $this->db->table('movement_location_aliases')
+            ->where('company_id', $companyId)
+            ->where('normalized_source_key', $normalizedSourceKey)
+            ->get()
+            ->getRowArray();
+
+        return $row === null ? null : $row;
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    public function unknownLocationSources(): array
+    {
+        return $this->db->table('scheduled_movement_locations locations')
+            ->select('vehicles.company_id, companies.name AS company_name, locations.source_text, locations.location_class')
+            ->select('COUNT(*) AS occurrence_count, MIN(CASE WHEN trips.starts_at >= CURRENT_TIMESTAMP THEN trips.starts_at END) AS next_occurrence', false)
+            ->join('turo_trips_normalized trips', 'trips.id = locations.turo_trip_normalized_id')
+            ->join('fleet_vehicles vehicles', 'vehicles.id = trips.fleet_vehicle_id')
+            ->join('companies', 'companies.id = vehicles.company_id', 'left')
+            ->where('locations.source_text IS NOT NULL')
+            ->where('locations.location_class', 'unknown')
+            ->groupBy('vehicles.company_id, companies.name, locations.source_text, locations.location_class')
+            ->orderBy('occurrence_count', 'DESC')
+            ->orderBy('locations.source_text', 'ASC')
+            ->get()
+            ->getResultArray();
+    }
+
+    public function saveLocationAlias(int $companyId, string $sourceText, string $normalizedSourceKey, string $locationClass, ?string $note, int $actorUserId): int
+    {
+        $this->db->transBegin();
+        try {
+            $now = date('Y-m-d H:i:s');
+            $existing = $this->locationAlias($companyId, $normalizedSourceKey);
+            $data = [
+                'company_id' => $companyId,
+                'source_text' => $sourceText,
+                'normalized_source_key' => $normalizedSourceKey,
+                'location_class' => $locationClass,
+                'note' => $note,
+                'updated_by' => $actorUserId,
+                'updated_at' => $now,
+            ];
+            if ($existing === null) {
+                $this->db->table('movement_location_aliases')->insert(array_merge($data, ['created_by' => $actorUserId, 'created_at' => $now]));
+                $aliasId = (int) $this->db->insertID();
+            } else {
+                $aliasId = (int) $existing['id'];
+                $this->db->table('movement_location_aliases')->where('id', $aliasId)->update($data);
+            }
+
+            $matching = $this->db->table('scheduled_movement_locations locations')
+                ->select('locations.id, locations.source_text')
+                ->join('turo_trips_normalized trips', 'trips.id = locations.turo_trip_normalized_id')
+                ->join('fleet_vehicles vehicles', 'vehicles.id = trips.fleet_vehicle_id')
+                ->where('vehicles.company_id', $companyId)
+                ->get()
+                ->getResultArray();
+            foreach ($matching as $location) {
+                if ($this->normalizeLocationKey((string) ($location['source_text'] ?? '')) !== $normalizedSourceKey) {
+                    continue;
+                }
+                $this->db->table('scheduled_movement_locations')->where('id', $location['id'])->update([
+                    'location_class' => $locationClass,
+                    'classification_source' => 'company_alias',
+                    'classification_status' => 'classified',
+                    'updated_at' => $now,
+                ]);
+            }
+            $new = $this->locationAlias($companyId, $normalizedSourceKey);
+            $this->audit($companyId, 'movement_location_aliases', $aliasId, $existing === null ? 'created' : 'updated', $existing, $new, $actorUserId);
+            if ($this->db->transStatus() === false) {
+                throw new RuntimeException('Location alias transaction failed.');
+            }
+            $this->db->transCommit();
+
+            return $aliasId;
+        } catch (\Throwable $exception) {
+            $this->db->transRollback();
+            throw $exception;
+        }
+    }
+
+    /** @return array<string, mixed>|null */
+    public function activePositioningPlan(int $vehicleId, string $asOf): ?array
+    {
+        $builder = $this->db->table('vehicle_positioning_plans plans')->select('plans.*');
+        if ($this->db->tableExists('users')) {
+            $builder->select('users.username AS actor_username')->join('users', 'users.id = plans.created_by', 'left');
+        }
+        $row = $builder
+            ->where('plans.fleet_vehicle_id', $vehicleId)
+            ->where('plans.invalidated_at', null)
+            ->groupStart()->where('plans.expires_at', null)->orWhere('plans.expires_at >', $asOf)->groupEnd()
+            ->orderBy('plans.created_at', 'DESC')->orderBy('plans.id', 'DESC')->get(1)->getRowArray();
+
+        return $row === null ? null : $row;
+    }
+
+    public function replacePositioningPlan(array $data): int
+    {
+        $this->db->transBegin();
+        try {
+            $this->invalidatePositioningPlans((int) $data['fleet_vehicle_id'], 'superseded_by_operator_plan', (int) $data['created_by']);
+            $this->db->table('vehicle_positioning_plans')->insert($data);
+            $id = (int) $this->db->insertID();
+            $this->audit((int) $data['company_id'], 'vehicle_positioning_plans', $id, 'created', null, $data, (int) $data['created_by']);
+            if ($this->db->transStatus() === false) {
+                throw new RuntimeException('Positioning plan transaction failed.');
+            }
+            $this->db->transCommit();
+
+            return $id;
+        } catch (\Throwable $exception) {
+            $this->db->transRollback();
+            throw $exception;
+        }
+    }
+
+    public function invalidatePositioningPlans(int $vehicleId, string $reason, ?int $actorUserId): int
+    {
+        if (! $this->db->tableExists('vehicle_positioning_plans')) {
+            return 0;
+        }
+
+        $now = date('Y-m-d H:i:s');
+        $plans = $this->db->table('vehicle_positioning_plans')->where('fleet_vehicle_id', $vehicleId)->where('invalidated_at', null)->get()->getResultArray();
+        foreach ($plans as $plan) {
+            $new = ['invalidated_at' => $now, 'invalidation_reason' => $reason, 'invalidated_by_user_id' => $actorUserId];
+            $this->db->table('vehicle_positioning_plans')->where('id', $plan['id'])->update($new);
+            if ($actorUserId !== null) {
+                $this->audit((int) $plan['company_id'], 'vehicle_positioning_plans', (int) $plan['id'], 'invalidated', $plan, $new, $actorUserId);
+            }
+        }
+
+        return count($plans);
+    }
+
     /** @return array<int, array<string, mixed>> */
     public function locationBackfillCandidates(): array
     {
@@ -71,12 +211,14 @@ class OperationalFactsRepository
         $row = $this->db->table('turo_trips_normalized trips')
             ->select('trips.*, trip_statuses.code AS trip_status_code')
             ->select('import_statuses.code AS import_status_code, batches.completed_at AS import_completed_at, batches.source_filename AS import_source_filename')
+            ->select('pickup.location_class AS pickup_location_class, pickup.source_text AS pickup_location_source_text')
             ->join('lookup_values trip_statuses', 'trip_statuses.id = trips.trip_status_lookup_value_id')
             ->join('turo_trip_raw raw', 'raw.id = trips.turo_trip_raw_id', 'left')
             ->join('turo_import_batches batches', 'batches.id = raw.turo_import_batch_id', 'left')
             ->join('lookup_values import_statuses', 'import_statuses.id = batches.import_status_lookup_value_id', 'left')
+            ->join('scheduled_movement_locations pickup', 'pickup.turo_trip_normalized_id = trips.id AND pickup.movement_type = \'pickup\'', 'left')
             ->where('trips.fleet_vehicle_id', $vehicleId)->where('trips.starts_at >', $after)->where('trips.deleted_at', null)
-            ->whereNotIn('trip_statuses.code', ['completed', 'canceled_zero_payout', 'canceled_host_payout'])
+            ->where('trip_statuses.code', 'booked')
             ->orderBy('trips.starts_at', 'ASC')->orderBy('trips.id', 'ASC')->get(1)->getRowArray();
         return $row === null ? null : $row;
     }
@@ -94,14 +236,15 @@ class OperationalFactsRepository
     /** @return array<string, mixed>|null */
     public function vehicle(int $vehicleId): ?array
     {
-        $row = $this->db->table('fleet_vehicles')->select('id, company_id')->where('id', $vehicleId)->where('deleted_at', null)->get()->getRowArray();
+        $row = $this->db->table('fleet_vehicles')->where('id', $vehicleId)->where('deleted_at', null)->get()->getRowArray();
         return $row === null ? null : $row;
     }
 
     public function createEvent(array $data): int
     {
         $now = date('Y-m-d H:i:s');
-        $this->db->table('trip_movement_events')->insert(array_merge($data, ['created_at' => $now, 'updated_at' => $now]));
+        $fields = array_flip($this->db->getFieldNames('trip_movement_events'));
+        $this->db->table('trip_movement_events')->insert(array_intersect_key(array_merge($data, ['created_at' => $now, 'updated_at' => $now]), $fields));
         return (int) $this->db->insertID();
     }
 
@@ -112,25 +255,31 @@ class OperationalFactsRepository
         return $row === null ? null : $row;
     }
 
-    public function correctEvent(int $eventId, array $replacement, int $actorUserId, string $reason): int
+    public function correctEvent(int $eventId, array $replacement, int $actorUserId, string $reason, bool $manageTransaction = true): int
     {
         $original = $this->event($eventId);
         if ($original === null || $original['voided_at'] !== null) {
             throw new RuntimeException('The event cannot be corrected.');
         }
-        $this->db->transBegin();
+        if ($manageTransaction) {
+            $this->db->transBegin();
+        }
         try {
             $replacementId = $this->createEvent(array_merge($replacement, ['supersedes_event_id' => $eventId]));
             $now = date('Y-m-d H:i:s');
             $this->db->table('trip_movement_events')->where('id', $eventId)->update(['voided_at' => $now, 'voided_by_user_id' => $actorUserId, 'void_reason' => $reason, 'updated_at' => $now]);
             $this->audit((int) $original['company_id'], 'trip_movement_events', $eventId, 'superseded', $original, ['replacement_id' => $replacementId, 'reason' => $reason], $actorUserId);
-            if ($this->db->transStatus() === false) {
-                throw new RuntimeException('Event correction transaction failed.');
+            if ($manageTransaction) {
+                if ($this->db->transStatus() === false) {
+                    throw new RuntimeException('Event correction transaction failed.');
+                }
+                $this->db->transCommit();
             }
-            $this->db->transCommit();
             return $replacementId;
         } catch (\Throwable $exception) {
-            $this->db->transRollback();
+            if ($manageTransaction) {
+                $this->db->transRollback();
+            }
             throw $exception;
         }
     }
@@ -160,9 +309,82 @@ class OperationalFactsRepository
     }
 
     /** @return array<string, mixed>|null */
+    public function latestActiveMovementEvent(int $vehicleId, ?string $asOf = null): ?array
+    {
+        $builder = $this->db->table('trip_movement_events')
+            ->select($this->movementEventSelect())
+            ->where('fleet_vehicle_id', $vehicleId)
+            ->where('voided_at', null);
+        if ($asOf !== null) {
+            $builder->where('occurred_at <=', $asOf);
+        }
+        $row = $builder->orderBy('occurred_at', 'DESC')->orderBy('id', 'DESC')->get(1)->getRowArray();
+
+        return $row === null ? null : $row;
+    }
+
+    /** @return array<string, mixed>|null */
+    public function latestActiveLifecycleEvent(int $vehicleId, ?string $asOf = null): ?array
+    {
+        $builder = $this->db->table('trip_movement_events')
+            ->select($this->movementEventSelect())
+            ->where('fleet_vehicle_id', $vehicleId)
+            ->whereIn('event_code', ['actual_handoff', 'actual_return'])
+            ->where('voided_at', null);
+        if ($asOf !== null) {
+            $builder->where('occurred_at <=', $asOf);
+        }
+        $row = $builder->orderBy('occurred_at', 'DESC')->orderBy('id', 'DESC')->get(1)->getRowArray();
+
+        return $row === null ? null : $row;
+    }
+
+    /** @return array<string, mixed>|null */
+    public function assessmentForEventOrTrip(?int $eventId, ?int $tripId): ?array
+    {
+        if ($eventId !== null) {
+            $row = $this->db->table('movement_assessments')
+                ->where('trip_movement_event_id', $eventId)
+                ->where('voided_at', null)
+                ->orderBy('captured_at', 'DESC')->orderBy('id', 'DESC')->get(1)->getRowArray();
+            if ($row !== null) {
+                return $row;
+            }
+        }
+        if ($tripId === null) {
+            return null;
+        }
+        $row = $this->db->table('movement_assessments')
+            ->where('turo_trip_normalized_id', $tripId)
+            ->where('voided_at', null)
+            ->orderBy('captured_at', 'DESC')->orderBy('id', 'DESC')->get(1)->getRowArray();
+
+        return $row === null ? null : $row;
+    }
+
+    /** @return array<string, mixed>|null */
+    public function tripSchedule(int $tripId): ?array
+    {
+        $row = $this->db->table('turo_trips_normalized trips')
+            ->select('trips.*, trip_statuses.code AS trip_status_code')
+            ->select('import_statuses.code AS import_status_code, batches.completed_at AS import_completed_at, batches.source_filename AS import_source_filename')
+            ->select('pickup.location_class AS pickup_location_class, pickup.source_text AS pickup_location_source_text')
+            ->select('return_location.location_class AS return_location_class, return_location.source_text AS return_location_source_text')
+            ->join('lookup_values trip_statuses', 'trip_statuses.id = trips.trip_status_lookup_value_id', 'left')
+            ->join('turo_trip_raw raw', 'raw.id = trips.turo_trip_raw_id', 'left')
+            ->join('turo_import_batches batches', 'batches.id = raw.turo_import_batch_id', 'left')
+            ->join('lookup_values import_statuses', 'import_statuses.id = batches.import_status_lookup_value_id', 'left')
+            ->join('scheduled_movement_locations pickup', 'pickup.turo_trip_normalized_id = trips.id AND pickup.movement_type = \'pickup\'', 'left')
+            ->join('scheduled_movement_locations return_location', 'return_location.turo_trip_normalized_id = trips.id AND return_location.movement_type = \'return\'', 'left')
+            ->where('trips.id', $tripId)->where('trips.deleted_at', null)->get(1)->getRowArray();
+
+        return $row === null ? null : $row;
+    }
+
+    /** @return array<string, mixed>|null */
     public function latestActiveFactsForTrip(int $tripId): ?array
     {
-        $row = $this->db->table('movement_assessments assessments')
+        $builder = $this->db->table('movement_assessments assessments')
             ->select('assessments.id AS assessment_id, assessments.movement_type, assessments.cleanliness, assessments.energy_percent, assessments.captured_at, assessments.source, assessments.actor_user_id, assessments.note')
             ->select('events.id AS event_id, events.event_code, events.occurred_at, events.location_class, events.location_detail')
             ->select('profiles.energy_kind, users.username AS actor_username')
@@ -171,10 +393,27 @@ class OperationalFactsRepository
             ->join('users', 'users.id = assessments.actor_user_id', 'left')
             ->where('assessments.turo_trip_normalized_id', $tripId)
             ->where('assessments.voided_at', null)
-            ->where('events.voided_at', null)
-            ->orderBy('assessments.captured_at', 'DESC')->orderBy('assessments.id', 'DESC')->get(1)->getRowArray();
+            ->where('events.voided_at', null);
+        if ($this->hasStructuredAirportParking()) {
+            $builder->select('events.airport_garage_code, events.airport_parking_level, events.airport_parking_row');
+        }
+        $row = $builder->orderBy('assessments.captured_at', 'DESC')->orderBy('assessments.id', 'DESC')->get(1)->getRowArray();
 
         return $row === null ? null : $row;
+    }
+
+    private function movementEventSelect(): string
+    {
+        $columns = 'id, fleet_vehicle_id, turo_trip_normalized_id, event_code, movement_type, occurred_at, location_class, location_detail, source, note';
+
+        return $this->hasStructuredAirportParking()
+            ? $columns . ', airport_garage_code, airport_parking_level, airport_parking_row'
+            : $columns;
+    }
+
+    private function hasStructuredAirportParking(): bool
+    {
+        return in_array('airport_garage_code', $this->db->getFieldNames('trip_movement_events'), true);
     }
 
     public function createAssessment(array $data): int
@@ -197,25 +436,31 @@ class OperationalFactsRepository
         return $this->db->table('movement_assessments')->where('turo_trip_normalized_id', $tripId)->where('voided_at', null)->orderBy('captured_at', 'DESC')->get()->getResultArray();
     }
 
-    public function correctAssessment(int $assessmentId, array $replacement, int $actorUserId, string $reason): int
+    public function correctAssessment(int $assessmentId, array $replacement, int $actorUserId, string $reason, bool $manageTransaction = true): int
     {
         $original = $this->assessment($assessmentId);
         if ($original === null || $original['voided_at'] !== null) {
             throw new RuntimeException('The assessment cannot be corrected.');
         }
-        $this->db->transBegin();
+        if ($manageTransaction) {
+            $this->db->transBegin();
+        }
         try {
             $replacementId = $this->createAssessment(array_merge($replacement, ['supersedes_assessment_id' => $assessmentId]));
             $now = date('Y-m-d H:i:s');
             $this->db->table('movement_assessments')->where('id', $assessmentId)->update(['voided_at' => $now, 'voided_by_user_id' => $actorUserId, 'void_reason' => $reason, 'updated_at' => $now]);
             $this->audit((int) $original['company_id'], 'movement_assessments', $assessmentId, 'superseded', $original, ['replacement_id' => $replacementId, 'reason' => $reason], $actorUserId);
-            if ($this->db->transStatus() === false) {
-                throw new RuntimeException('Assessment correction transaction failed.');
+            if ($manageTransaction) {
+                if ($this->db->transStatus() === false) {
+                    throw new RuntimeException('Assessment correction transaction failed.');
+                }
+                $this->db->transCommit();
             }
-            $this->db->transCommit();
             return $replacementId;
         } catch (\Throwable $exception) {
-            $this->db->transRollback();
+            if ($manageTransaction) {
+                $this->db->transRollback();
+            }
             throw $exception;
         }
     }
@@ -286,5 +531,10 @@ class OperationalFactsRepository
             'new_values' => $new === null ? null : json_encode($new, JSON_THROW_ON_ERROR),
             'actor_user_id' => $actorUserId, 'created_at' => date('Y-m-d H:i:s'),
         ]);
+    }
+
+    private function normalizeLocationKey(string $sourceText): string
+    {
+        return mb_strtolower(trim(preg_replace('/\s+/', ' ', $sourceText) ?? $sourceText));
     }
 }

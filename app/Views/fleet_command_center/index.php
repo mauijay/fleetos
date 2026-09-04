@@ -48,31 +48,7 @@
                 </div>
                 <div class="movement-board-grid">
                     <?php foreach ($commandCenter['daily_operations']['movement_board'] as $vehicle): ?>
-                        <article class="movement-card tone-<?= esc($vehicle['status_tone'], 'attr') ?>">
-                            <div class="card-row">
-                                <div>
-                                    <h3><?= esc($vehicle['fleet_code']) ?></h3>
-                                    <p><?= esc($vehicle['model'] === '' ? 'Model not captured' : $vehicle['model']) ?></p>
-                                </div>
-                                <span class="status-badge tone-<?= esc($vehicle['status_tone'], 'attr') ?>"><?= esc($vehicle['primary_status_label']) ?></span>
-                            </div>
-                            <dl class="vehicle-facts">
-                                <div><dt>Return</dt><dd><?= esc($vehicle['return'] === null ? 'None today' : (new DateTimeImmutable($vehicle['return']['ends_at']))->format('g:i A')) ?></dd></div>
-                                <div><dt>Next pickup</dt><dd><?= esc($vehicle['pickup'] === null ? 'None today' : (new DateTimeImmutable($vehicle['pickup']['starts_at']))->format('g:i A')) ?></dd></div>
-                                <div><dt>Turnaround</dt><dd><?= esc($vehicle['turnaround']['label'] ?? 'None') ?></dd></div>
-                                <div><dt>Location</dt><dd><?= esc($vehicle['location_label']) ?></dd></div>
-                                <div><dt>Cleaning</dt><dd><?= esc($vehicle['cleaning_status_label']) ?></dd></div>
-                                <div><dt>Charge</dt><dd><?= esc($vehicle['charging_status_label']) ?></dd></div>
-                            </dl>
-                            <ul class="issue-list">
-                                <?php if ($vehicle['checklist_href'] !== null): ?>
-                                    <li><a class="text-link" href="<?= esc($vehicle['checklist_href'], 'attr') ?>"><?= esc($vehicle['checklist_progress_label']) ?></a></li>
-                                <?php endif; ?>
-                                <?php foreach ($vehicle['actions'] as $action): ?>
-                                    <li><?= esc($action) ?></li>
-                                <?php endforeach; ?>
-                            </ul>
-                        </article>
+                        <?= view('fleet_command_center/components/movement_card', ['vehicle' => $vehicle]) ?>
                     <?php endforeach; ?>
                 </div>
             </section>

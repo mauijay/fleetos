@@ -5,6 +5,7 @@ use App\Services\Fleet\DailyOperationsDashboardService;
 use App\Services\Fleet\FleetHealthService;
 use App\Services\Fleet\FleetStatisticsService;
 use App\Services\Fleet\MorningBriefingService;
+use App\Services\Fleet\MovementBoardIntelligenceService;
 use App\Services\Fleet\RevenueService;
 use App\Services\Fleet\TaskService;
 use App\Services\Fleet\TripMovementChecklistService;
@@ -164,25 +165,32 @@ final class DailyOperationsDashboardServiceTest extends CIUnitTestCase
 
     public function testOperationalQueueAlwaysLinksAirportReceiptInbox(): void
     {
-        $tasks = $this->getMockBuilder(TaskService::class)->disableOriginalConstructor()->onlyMethods(['today'])->getMock();
-        $availability = $this->getMockBuilder(VehicleAvailabilityService::class)->disableOriginalConstructor()->onlyMethods(['vehicleStatus'])->getMock();
-        $health = $this->getMockBuilder(FleetHealthService::class)->disableOriginalConstructor()->onlyMethods(['summary'])->getMock();
-        $statistics = $this->getMockBuilder(FleetStatisticsService::class)->disableOriginalConstructor()->onlyMethods(['currentMonth'])->getMock();
-        $importIssues = $this->getMockBuilder(TuroImportIssueService::class)->disableOriginalConstructor()->onlyMethods(['attentionSummary'])->getMock();
-        $vehicleMappings = $this->getMockBuilder(TuroVehicleMappingService::class)->disableOriginalConstructor()->onlyMethods(['attentionSummary'])->getMock();
-        $reconciliation = $this->getMockBuilder(TuroTripReconciliationService::class)->disableOriginalConstructor()->onlyMethods(['attentionSummary'])->getMock();
+        $tasks = $this->createStub(TaskService::class);
+        $availability = $this->createStub(VehicleAvailabilityService::class);
+        $health = $this->createStub(FleetHealthService::class);
+        $statistics = $this->createStub(FleetStatisticsService::class);
+        $importIssues = $this->createStub(TuroImportIssueService::class);
+        $vehicleMappings = $this->createStub(TuroVehicleMappingService::class);
+        $reconciliation = $this->createStub(TuroTripReconciliationService::class);
         $checklists = $this->getMockBuilder(TripMovementChecklistService::class)->disableOriginalConstructor()->onlyMethods(['ensureForDay', 'summariesForDay'])->getMock();
-        $airport = $this->getMockBuilder(AirportMovementWorkflowService::class)->disableOriginalConstructor()->onlyMethods(['attentionSummary'])->getMock();
-        $reimbursements = $this->getMockBuilder(TuroAccessReimbursementService::class)->disableOriginalConstructor()->onlyMethods(['attentionSummary'])->getMock();
+        $airport = $this->createStub(AirportMovementWorkflowService::class);
+        $reimbursements = $this->createStub(TuroAccessReimbursementService::class);
 
         $tasks->method('today')->willReturn(['todays_pickups' => [], 'todays_returns' => [], 'airport_deliveries' => []]);
-        $availability->method('vehicleStatus')->willReturn([]);
+        $availability->method('vehicleStatus')->willReturn([$this->vehicle(1)]);
         $health->method('summary')->willReturn($this->emptyHealth());
         $statistics->method('currentMonth')->willReturn(['fleet_utilization' => 0.0, 'completed_revenue' => 0.0, 'forecast_revenue' => 0.0, 'average_daily_rate' => 0.0]);
         $importIssues->method('attentionSummary')->willReturn(['total_unresolved' => 0, 'href' => '/turo/import-issues']);
         $vehicleMappings->method('attentionSummary')->willReturn(['unique_unmatched_vehicles' => 0, 'affected_issues' => 0, 'href' => '/turo/vehicle-matches']);
         $reconciliation->method('attentionSummary')->willReturn(['awaiting_reconciliation' => 0, 'href' => '/turo/vehicle-matches']);
-        $checklists->method('summariesForDay')->willReturn([]);
+        $checklists->expects($this->never())->method('ensureForDay');
+        $checklists->method('summariesForDay')->willReturn([[
+            'fleet_vehicle_id' => 1,
+            'movement_type' => 'pickup',
+            'required_remaining_count' => 4,
+            'critical_open_count' => 1,
+            'href' => '/operations/checklists/41',
+        ]]);
         $airport->method('attentionSummary')->willReturn(['airport_workflows_requiring_action' => 0, 'href' => '/operations/airport']);
         $reimbursements->method('attentionSummary')->willReturn([
             'needs_classification' => 0,
@@ -194,10 +202,32 @@ final class DailyOperationsDashboardServiceTest extends CIUnitTestCase
             'href' => '/operations/airport/reimbursements',
         ]);
 
-        $dashboard = new DailyOperationsDashboardService($tasks, $availability, $health, $statistics, $this->getMockBuilder(RevenueService::class)->disableOriginalConstructor()->getMock(), $importIssues, $vehicleMappings, $reconciliation, $checklists, $airport, $reimbursements);
-        $queue = $dashboard->forToday(new DateTimeImmutable('2026-07-19 08:00:00'))['operational_queue'];
+        $intelligence = $this->createMock(MovementBoardIntelligenceService::class);
+        $intelligence->expects($this->once())->method('enrich')->with(
+            $this->callback(static fn (array $board): bool => ($board[0]['checklist_critical_open'] ?? null) === 1
+                && ($board[0]['checklist_href'] ?? null) === '/operations/checklists/41'),
+            $this->isInstanceOf(DateTimeImmutable::class),
+        )->willReturnArgument(0);
+
+        $dashboard = new DailyOperationsDashboardService(
+            $tasks,
+            $availability,
+            $health,
+            $statistics,
+            $this->createStub(RevenueService::class),
+            $importIssues,
+            $vehicleMappings,
+            $reconciliation,
+            $checklists,
+            $airport,
+            $reimbursements,
+            $intelligence,
+        );
+        $result = $dashboard->forToday(new DateTimeImmutable('2026-07-19 08:00:00'));
+        $queue = $result['operational_queue'];
 
         $this->assertContains(['label' => 'Airport Receipt Inbox', 'count' => 0, 'href' => '/operations/airport/reimbursements'], $queue);
+        $this->assertStringContainsString('latest recorded movement assessment', $result['data_honesty'][0]);
     }
 
     private function board(): array

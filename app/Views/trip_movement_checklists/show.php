@@ -7,6 +7,7 @@
 /** @var array<string, mixed>|null $latestFacts */
 /** @var bool $correctingFacts */
 /** @var array<string, mixed> $factFormData */
+$hnlGarages ??= (new \App\Services\Fleet\HnlGarageCatalog())->definitions();
 ?>
 <!doctype html>
 <html lang="en">
@@ -46,14 +47,14 @@
                 <section class="section">
                     <form class="issue-filters" action="/operations/checklists/<?= esc((string) $checklist['id'], 'attr') ?>/disposition" method="post">
                         <?= csrf_field() ?>
-                        <label>Vehicle disposition
+                        <label>Vehicle availability
                             <select name="vehicle_disposition" required>
                                 <?php foreach (['available', 'needs_cleaning', 'needs_charging', 'maintenance_required', 'claim_review_required', 'offline'] as $disposition): ?>
                                     <option value="<?= esc($disposition, 'attr') ?>" <?= ($checklist['vehicle_disposition'] ?? '') === $disposition ? 'selected' : '' ?>><?= esc(ucwords(str_replace('_', ' ', $disposition))) ?></option>
                                 <?php endforeach; ?>
                             </select>
                         </label>
-                        <button class="primary-action" type="submit">Save Disposition</button>
+                        <button class="primary-action" type="submit">Save Availability</button>
                     </form>
                 </section>
             <?php endif; ?>
@@ -68,7 +69,7 @@
                         </div>
                         <p class="briefing-copy"><?= esc((string) $latestFacts['occurred_at_label']) ?></p>
                         <dl class="movement-fact-summary">
-                            <div><dt><?= esc((string) $latestFacts['location_label']) ?></dt><dd><?= esc((string) $latestFacts['location_class_label']) ?><?php if ($latestFacts['location_detail_value'] !== null): ?><span class="movement-fact-detail"><?= esc((string) $latestFacts['location_detail_value']) ?></span><?php endif; ?></dd></div>
+                            <div><dt><?= esc((string) $latestFacts['location_label']) ?></dt><dd><?= esc((string) $latestFacts['location_class_label']) ?><?php if (($latestFacts['airport_garage_line'] ?? null) !== null): ?><span class="movement-fact-detail movement-fact-garage"><?= esc((string) $latestFacts['airport_garage_line']) ?></span><span class="movement-fact-detail"><?= esc((string) $latestFacts['airport_position_line']) ?></span><?php elseif ($latestFacts['location_detail_value'] !== null): ?><span class="movement-fact-detail"><?= esc((string) $latestFacts['location_detail_value']) ?></span><?php endif; ?></dd></div>
                             <div><dt>Cleanliness</dt><dd><?= esc((string) $latestFacts['cleanliness_label']) ?></dd></div>
                             <div><dt><?= esc((string) $latestFacts['energy_label']) ?></dt><dd><?= esc((string) $latestFacts['energy_value']) ?></dd></div>
                             <div><dt>Provenance</dt><dd><?= esc((string) $latestFacts['source_label']) ?> · <?= esc((string) $latestFacts['actor_label']) ?></dd></div>
@@ -82,6 +83,9 @@
 $formAction = $correctingFacts ? '/operations/checklists/' . (int) $checklist['id'] . '/facts/correct' : '/operations/checklists/' . (int) $checklist['id'] . '/facts';
 $occurredAt = (string) ($factFormData['occurred_at'] ?? date('Y-m-d\TH:i'));
 $selectedLocation = (string) ($factFormData['location_class'] ?? 'unknown');
+$selectedGarage = (string) ($factFormData['airport_garage_code'] ?? '');
+$selectedLevel = (string) ($factFormData['airport_parking_level'] ?? '');
+$selectedRow = (string) ($factFormData['airport_parking_row'] ?? '');
 $selectedCleanliness = (string) ($factFormData['cleanliness'] ?? '');
 $energyPercent = $factFormData['energy_percent'] ?? '';
 ?>
@@ -92,8 +96,14 @@ $energyPercent = $factFormData['energy_percent'] ?? '';
                         <input type="hidden" name="assessment_id" value="<?= (int) ($factFormData['assessment_id'] ?? 0) ?>">
                     <?php endif; ?>
                     <label>Actual time<input type="datetime-local" name="occurred_at" required value="<?= esc($occurredAt, 'attr') ?>"></label>
-                    <label><?= $movementType === 'pickup' ? 'Handoff location' : 'Current location' ?><select name="location_class" required><?php foreach (['unknown', 'home', 'airport_hnl', 'waikiki_hotel', 'other_delivery'] as $location): ?><option value="<?= esc($location, 'attr') ?>" <?= $selectedLocation === $location ? 'selected' : '' ?>><?= esc(ucwords(str_replace('_', ' ', $location))) ?></option><?php endforeach; ?></select></label>
-                    <label>Location detail<input name="location_detail" maxlength="500" value="<?= esc((string) ($factFormData['location_detail'] ?? ''), 'attr') ?>"></label>
+                    <label><?= $movementType === 'pickup' ? 'Handoff location' : 'Current location' ?><select id="movement-location-class" name="location_class" required><?php foreach (['unknown', 'home', 'airport_hnl', 'waikiki_hotel', 'other_delivery'] as $location): ?><option value="<?= esc($location, 'attr') ?>" <?= $selectedLocation === $location ? 'selected' : '' ?>><?= esc(ucwords(str_replace('_', ' ', $location))) ?></option><?php endforeach; ?></select></label>
+                    <label data-location-detail <?= $selectedLocation === 'airport_hnl' ? 'hidden' : '' ?>>Location detail<input name="location_detail" maxlength="500" value="<?= esc((string) ($factFormData['location_detail'] ?? ''), 'attr') ?>" <?= $selectedLocation === 'airport_hnl' ? 'disabled' : '' ?>></label>
+                    <fieldset class="hnl-parking-fields" data-hnl-parking data-location-select="movement-location-class">
+                        <legend>HNL parking</legend>
+                        <label>Row<select name="airport_parking_row" data-hnl-row><option value="">Choose row</option><?php foreach ($hnlGarages as $code => $garage): ?><?php foreach ($garage['rows'] as $row): ?><option value="<?= esc($row, 'attr') ?>" data-garage="<?= esc($code, 'attr') ?>" <?= $selectedRow === $row ? 'selected' : '' ?>><?= esc($row) ?></option><?php endforeach; ?><?php endforeach; ?></select></label>
+                        <label>Garage<select name="airport_garage_code" data-hnl-garage><option value="">Derived from row</option><?php foreach ($hnlGarages as $code => $garage): ?><option value="<?= esc($code, 'attr') ?>" data-max-level="<?= (int) $garage['levels'] ?>" <?= $selectedGarage === $code ? 'selected' : '' ?>><?= esc($garage['name']) ?> · <?= esc($garage['color']) ?></option><?php endforeach; ?></select></label>
+                        <label>Level<select name="airport_parking_level" data-hnl-level><option value="">Choose level</option><?php for ($level = 1; $level <= 8; $level++): ?><option value="<?= $level ?>" <?= $selectedLevel === (string) $level ? 'selected' : '' ?>><?= $level ?></option><?php endfor; ?></select></label>
+                    </fieldset>
                     <label>Cleanliness<select name="cleanliness"><option value="" <?= $selectedCleanliness === '' ? 'selected' : '' ?>>Not captured</option><option value="clean" <?= $selectedCleanliness === 'clean' ? 'selected' : '' ?>>Clean</option><option value="dirty" <?= $selectedCleanliness === 'dirty' ? 'selected' : '' ?>>Dirty</option></select></label>
                     <label>Energy percent<input name="energy_percent" type="number" min="0" max="100" value="<?= esc((string) $energyPercent, 'attr') ?>"></label>
                     <label>Note<textarea name="note" rows="2"><?= esc((string) ($factFormData['note'] ?? '')) ?></textarea></label>
@@ -141,5 +151,6 @@ $energyPercent = $factFormData['energy_percent'] ?? '';
 
         <?= view('fleet_command_center/components/footer') ?>
     </main>
+    <?php if ($assets['js'] !== null): ?><script type="module" src="/build/<?= esc($assets['js'], 'attr') ?>"></script><?php endif; ?>
 </body>
 </html>

@@ -74,6 +74,7 @@ class FleetCommandCenterViewModelService
             ['label' => 'Fleet Command Center', 'href' => '/', 'active' => 'true'],
             ['label' => 'Fleet Activity', 'href' => '#fleet-activity', 'active' => 'false'],
             ['label' => 'Vehicles', 'href' => '/fleet/vehicles', 'active' => 'false'],
+            ['label' => 'Location Aliases', 'href' => '/operations/movement-locations', 'active' => 'false'],
             ['label' => 'Turo Import', 'href' => '/turo/imports', 'active' => 'false'],
             ['label' => 'Import Issues', 'href' => '/turo/import-issues', 'active' => 'false'],
             ['label' => 'Vehicle Matching', 'href' => '/turo/vehicle-matches', 'active' => 'false'],

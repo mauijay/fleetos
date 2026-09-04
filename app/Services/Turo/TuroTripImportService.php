@@ -12,7 +12,9 @@ use App\Repositories\TuroImportBatchRepository;
 use App\Repositories\TuroImportErrorRepository;
 use App\Repositories\TuroNormalizedTripRepository;
 use App\Repositories\TuroRawTripRepository;
+use App\Services\Fleet\MovementProjectionService;
 use App\Services\Fleet\ScheduledMovementLocationService;
+use App\Services\Fleet\VehiclePositioningPlanService;
 use App\Validation\Turo\TuroTripCsvValidator;
 use CodeIgniter\Database\BaseConnection;
 use Config\Database;
@@ -38,6 +40,8 @@ class TuroTripImportService
         private readonly TuroImportErrorRepository $errors = new TuroImportErrorRepository(),
         private readonly TuroImportAuditService $audit = new TuroImportAuditService(),
         private readonly ScheduledMovementLocationService $scheduledLocations = new ScheduledMovementLocationService(),
+        private readonly ?MovementProjectionService $movementProjection = null,
+        private readonly ?VehiclePositioningPlanService $positioningPlans = null,
     ) {
         $this->db = $db ?? Database::connect();
     }
@@ -204,7 +208,7 @@ class TuroTripImportService
 
         $normalizedTrip = $this->normalizer->normalize($rawTripRow, $rawTripId);
         $upsert = $this->normalizedTrips->upsert($normalizedTrip);
-        $this->scheduledLocations->retainForTrip(
+        $retainedLocations = $this->scheduledLocations->retainForTrip(
             (int) $upsert['id'],
             $normalizedTrip->fleetVehicleId,
             $this->normalizer->scheduledLocationText($rawTripRow->payload, 'pickup'),
@@ -220,11 +224,22 @@ class TuroTripImportService
         }
 
         $this->audit->imported($actorUserId, 'trip_month_allocations', $upsert['id'], ['allocation_count' => count($tripAllocations)]);
+        if ((bool) $upsert['materially_changed'] || $retainedLocations['material_changed']) {
+            $affectedVehicleIds = array_unique(array_filter([
+                $normalizedTrip->fleetVehicleId,
+                isset($upsert['old']['fleet_vehicle_id']) ? (int) $upsert['old']['fleet_vehicle_id'] : null,
+            ], static fn (?int $vehicleId): bool => $vehicleId !== null && $vehicleId > 0));
+            foreach ($affectedVehicleIds as $vehicleId) {
+                $this->plans()->invalidateForWrite($vehicleId, 'material_trip_reconciliation', $actorUserId);
+            }
+        }
         $this->db->transComplete();
 
         if ($this->db->transStatus() === false) {
             throw new RuntimeException("Database transaction failed for CSV row {$rawTripRow->rowNumber}.");
         }
+
+        $this->projection()->projectTrip((int) $upsert['id'], true, 'import');
 
         $issues = [];
         if ($normalizedTrip->fleetVehicleId === null) {
@@ -232,6 +247,16 @@ class TuroTripImportService
         }
 
         return new RowImportResult(true, (int) $upsert['id'], (bool) $upsert['created'], count($tripAllocations), $issues);
+    }
+
+    private function projection(): MovementProjectionService
+    {
+        return $this->movementProjection ?? \Config\Services::movementProjectionService();
+    }
+
+    private function plans(): VehiclePositioningPlanService
+    {
+        return $this->positioningPlans ?? \Config\Services::vehiclePositioningPlanService();
     }
 
     private function recordIssue(int $batchId, int $rowNumber, ValidationIssue $issue, array $row, ?string $rawTable = null, ?int $rawRowId = null): void

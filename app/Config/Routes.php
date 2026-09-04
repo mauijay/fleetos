@@ -15,6 +15,8 @@ $routes->group('', ['filter' => 'session'], static function (RouteCollection $ro
 	$routes->post('turo/vehicle-matches/map', 'TuroVehicleMatches::map', ['filter' => ['permission:admin.access', 'csrf']]);
 	$routes->get('turo/vehicle-matches/reprocess', 'TuroVehicleMatches::reprocessPreview', ['filter' => 'permission:admin.access']);
 	$routes->post('turo/vehicle-matches/reprocess', 'TuroVehicleMatches::reprocess', ['filter' => ['permission:admin.access', 'csrf']]);
+	$routes->get('fleet/vehicles/(:num)/positioning-plan', 'VehiclePositioningPlans::show/$1', ['filter' => 'permission:admin.access']);
+	$routes->post('fleet/vehicles/(:num)/positioning-plan', 'VehiclePositioningPlans::create/$1', ['filter' => ['permission:admin.access', 'csrf']]);
 	$routes->group('fleet/vehicles', ['filter' => 'permission:admin.access'], static function (RouteCollection $routes): void {
 		$routes->get('', 'FleetVehicles::index');
 		$routes->get('new', 'FleetVehicles::new');
@@ -37,6 +39,8 @@ $routes->group('', ['filter' => 'session'], static function (RouteCollection $ro
 	$routes->post('operations/checklist-items/(:num)/undo', 'TripMovementChecklists::undoItem/$1', ['filter' => ['permission:admin.access', 'csrf']]);
 	$routes->post('operations/checklist-items/(:num)/not-applicable', 'TripMovementChecklists::markNotApplicable/$1', ['filter' => ['permission:admin.access', 'csrf']]);
 	$routes->post('operations/checklists/(:num)/disposition', 'TripMovementChecklists::setDisposition/$1', ['filter' => ['permission:admin.access', 'csrf']]);
+	$routes->get('operations/movement-locations', 'MovementLocationAliases::index', ['filter' => 'permission:admin.access']);
+	$routes->post('operations/movement-locations', 'MovementLocationAliases::save', ['filter' => ['permission:admin.access', 'csrf']]);
 	$routes->get('operations/airport', 'AirportOperations::index');
 	$routes->get('operations/airport/(:num)', 'AirportOperations::show/$1');
 	$routes->post('operations/airport/(:num)/staging', 'AirportOperations::recordStaging/$1');
