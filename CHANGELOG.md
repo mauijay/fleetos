@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.9.0 - Movement Intelligence & Positioning
+
+Release date: 2026-09-04
+
+### Movement Operational Facts
+
+- Record explicit guest handoffs and actual returns, distinguish actual movement from scheduled expectations, and track current and handoff locations.
+- Capture Clean/Dirty and Charge/Fuel observations against vehicle energy profiles and operational capabilities, with append-only corrections and audit history.
+
+### Movement Board Intelligence
+
+- Show authoritative states including Currently Rented, turnaround attention, and overdue confirmations, with meaningful operational blockers instead of ceremonial checklist totals.
+- Surface the next confirmed trip beyond today's calendar, planning horizons, Turo import freshness, and stale-data warnings.
+
+### Location Intelligence
+
+- Add exact operator-managed aliases using the Home, Airport HNL, Waikiki Hotel, and Other Delivery taxonomy while preserving original imported location text.
+
+### HNL Airport Operations
+
+- Record structured HNL garage, level, and row facts with row-first deterministic garage identification and no parking-stall concept.
+- Treat International Garage / Blue as the approved Turo garage and call attention to Terminal 1 / Green or Terminal 2 / Red positioning.
+
+### Vehicle Positioning
+
+- Provide deterministic FleetOS recommendations for HNL-to-HNL airport stays and Waikiki transportation dependencies, expressed as Recommended, Consider, or Flexible.
+- Keep operator positioning plans separate from FleetOS recommendations, with audited basis snapshots and invalidation when underlying facts change.
+
+### Architecture & Reliability
+
+- Keep Command Center GET requests read-only and create checklists and workflows only through intentional write paths.
+- Centralize projection eligibility within a 30-day operational horizon, prevent completed or canceled history from generating new work, and preserve legacy checklist history.
+- Add migration `000015` for Movement Operational Facts and migration `000016` for Movement Planning Controls.
+
 ## v0.8.1 - Vehicle Registration & Desktop Productivity
 
 ### Desktop Productivity
