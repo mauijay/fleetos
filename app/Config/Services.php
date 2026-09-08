@@ -6,6 +6,7 @@ use App\Repositories\AirportMovementRepository;
 use App\Repositories\FileRepository;
 use App\Repositories\FleetIntelligenceRepository;
 use App\Repositories\MovementChecklistRepository;
+use App\Repositories\MovementReadinessReadModelRepository;
 use App\Repositories\OperationalFactsRepository;
 use App\Repositories\TuroAccessReimbursementRepository;
 use App\Repositories\TuroImportErrorRepository;
@@ -39,6 +40,8 @@ use App\Services\Fleet\MovementLocationAliasService;
 use App\Services\Fleet\MovementOperationalFactPresentationService;
 use App\Services\Fleet\MovementOperationalFactService;
 use App\Services\Fleet\MovementProjectionService;
+use App\Services\Fleet\MovementReadinessProjectionService;
+use App\Services\Fleet\MovementReadinessReadService;
 use App\Services\Fleet\MovementStateResolver;
 use App\Services\Fleet\NextConfirmedTripService;
 use App\Services\Fleet\PlanningHorizonService;
@@ -155,6 +158,36 @@ class Services extends BaseService
         }
 
         return new OperationalFactsRepository();
+    }
+
+    public static function movementReadinessReadModelRepository(bool $getShared = true): MovementReadinessReadModelRepository
+    {
+        if ($getShared) {
+            return static::getSharedInstance('movementReadinessReadModelRepository');
+        }
+
+        return new MovementReadinessReadModelRepository();
+    }
+
+    public static function movementReadinessProjectionService(bool $getShared = true): MovementReadinessProjectionService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('movementReadinessProjectionService');
+        }
+
+        return new MovementReadinessProjectionService();
+    }
+
+    public static function movementReadinessReadService(bool $getShared = true): MovementReadinessReadService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('movementReadinessReadService');
+        }
+
+        return new MovementReadinessReadService(
+            static::movementReadinessReadModelRepository(),
+            static::movementReadinessProjectionService(),
+        );
     }
 
     public static function movementEventService(bool $getShared = true): MovementEventService
