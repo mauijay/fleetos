@@ -91,6 +91,20 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
         $this->assertStringNotContainsString('<strong>Guest pickup confirmed</strong>', $html);
     }
 
+    public function testRepairModeShowsActiveHandoffConflictWithoutOfferingTarget(): void
+    {
+        $conflict = ['id' => 90, 'turo_trip_id' => 900090, 'guest_name' => 'Historical Guest', 'conflict_label' => 'an active guest handoff'];
+        $html = $this->render('pickup', $this->facts(), false, [], [
+            'repairingFacts' => true,
+            'repairCandidates' => [],
+            'repairConflicts' => [$conflict],
+        ]);
+
+        $this->assertStringContainsString('Conflicting movement facts', $html);
+        $this->assertStringContainsString('Historical Guest · Trip 900090 already has an active guest handoff.', $html);
+        $this->assertStringNotContainsString('<option value="90"', $html);
+    }
+
     public function testTripContextLabelsAndLinksTheSelectedReservation(): void
     {
         $trip = ['id' => 100, 'turo_trip_id' => 900100, 'guest_name' => 'Guest', 'starts_at' => '2026-10-06 21:30:00', 'ends_at' => '2026-10-12 06:00:00', 'pickup_location_class' => 'airport_hnl', 'return_location_class' => 'home', 'trip_status_code' => 'booked'];

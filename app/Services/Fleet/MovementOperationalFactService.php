@@ -231,24 +231,48 @@ class MovementOperationalFactService
             return [];
         }
         $movementType = (string) $event['movement_type'];
+        $eventCode = (string) $event['event_code'];
+        if (! in_array($eventCode, $this->compatibleEventCodes($movementType), true)) {
+            return [];
+        }
         $scheduleField = $movementType === 'pickup' ? 'starts_at' : 'ends_at';
         $occurredAt = new \DateTimeImmutable((string) $event['occurred_at']);
         $windowHours = $this->movementConfig->repairCandidateWindowHours;
 
         return array_values(array_filter(
             $this->repo()->vehicleTripHistory((int) $event['fleet_vehicle_id'], 100),
-            function (array $trip) use ($checklist, $movementType, $scheduleField, $occurredAt, $windowHours): bool {
-                if ((int) $trip['id'] === (int) $checklist['turo_trip_normalized_id'] || empty($trip[$scheduleField])) {
-                    return false;
-                }
-                if (str_starts_with((string) ($trip['trip_status_code'] ?? ''), 'canceled')) {
-                    return false;
-                }
-                $distance = abs((new \DateTimeImmutable((string) $trip[$scheduleField]))->getTimestamp() - $occurredAt->getTimestamp());
-
-                return $distance <= $windowHours * 3600 && ! $this->repo()->hasActiveMovementFact((int) $trip['id'], $movementType);
-            },
+            fn (array $trip): bool => $this->isPlausibleRepairTarget($trip, (int) $checklist['turo_trip_normalized_id'], $scheduleField, $occurredAt, $windowHours)
+                && $this->repo()->activeMovementConflict((int) $trip['id'], $this->conflictingEventCodes($eventCode)) === null,
         ));
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    public function wrongTripConflicts(array $checklist, int $eventId): array
+    {
+        $event = $this->events->find($eventId);
+        if (! ($checklist['exists'] ?? false) || $event === null || (int) $event['turo_trip_normalized_id'] !== (int) $checklist['turo_trip_normalized_id']) {
+            return [];
+        }
+        $movementType = (string) $event['movement_type'];
+        $eventCode = (string) $event['event_code'];
+        if (! in_array($eventCode, $this->compatibleEventCodes($movementType), true)) {
+            return [];
+        }
+        $scheduleField = $movementType === 'pickup' ? 'starts_at' : 'ends_at';
+        $occurredAt = new \DateTimeImmutable((string) $event['occurred_at']);
+        $windowHours = $this->movementConfig->repairCandidateWindowHours;
+        $conflicts = [];
+        foreach ($this->repo()->vehicleTripHistory((int) $event['fleet_vehicle_id'], 100) as $trip) {
+            if (! $this->isPlausibleRepairTarget($trip, (int) $checklist['turo_trip_normalized_id'], $scheduleField, $occurredAt, $windowHours)) {
+                continue;
+            }
+            $conflict = $this->repo()->activeMovementConflict((int) $trip['id'], $this->conflictingEventCodes($eventCode));
+            if ($conflict !== null) {
+                $conflicts[] = array_merge($trip, ['conflict_label' => $this->movementConflictLabel((string) $conflict['event_code'])]);
+            }
+        }
+
+        return $conflicts;
     }
 
     public function repairWrongTrip(array $checklist, array $data, int $actorUserId): bool
@@ -270,9 +294,26 @@ class MovementOperationalFactService
             || (int) $assessment['trip_movement_event_id'] !== $eventId) {
             throw new \InvalidArgumentException('The recorded facts do not belong to this movement.');
         }
-        $compatibleEvents = (string) $event['movement_type'] === 'pickup' ? ['vehicle_staged', 'actual_handoff'] : ['actual_return', 'vehicle_recovered'];
+        $compatibleEvents = $this->compatibleEventCodes((string) $event['movement_type']);
         if (! in_array($event['event_code'], $compatibleEvents, true)) {
             throw new \InvalidArgumentException('This fact is not compatible with a reservation movement repair.');
+        }
+        $targetTrip = $this->repo()->tripSchedule($targetTripId);
+        $scheduleField = (string) $event['movement_type'] === 'pickup' ? 'starts_at' : 'ends_at';
+        $isPlausibleTarget = $targetTrip !== null
+            && (int) $targetTrip['fleet_vehicle_id'] === (int) $event['fleet_vehicle_id']
+            && $this->isPlausibleRepairTarget(
+                $targetTrip,
+                (int) $checklist['turo_trip_normalized_id'],
+                $scheduleField,
+                new \DateTimeImmutable((string) $event['occurred_at']),
+                $this->movementConfig->repairCandidateWindowHours,
+            );
+        if ($isPlausibleTarget) {
+            $conflict = $this->repo()->activeMovementConflict($targetTripId, $this->conflictingEventCodes((string) $event['event_code']));
+            if ($conflict !== null) {
+                throw new \InvalidArgumentException('The selected trip already has ' . $this->movementConflictLabel((string) $conflict['event_code']) . '. Resolve that active movement fact before repairing this observation.');
+            }
         }
         $candidateIds = array_map(static fn (array $trip): int => (int) $trip['id'], $this->wrongTripCandidates($checklist, $eventId));
         if (! in_array($targetTripId, $candidateIds, true)) {
@@ -304,6 +345,53 @@ class MovementOperationalFactService
             $this->db->transRollback();
             throw $exception;
         }
+    }
+
+    /** @param array<string, mixed> $trip */
+    private function isPlausibleRepairTarget(array $trip, int $sourceTripId, string $scheduleField, \DateTimeImmutable $occurredAt, int $windowHours): bool
+    {
+        if ((int) $trip['id'] === $sourceTripId || empty($trip[$scheduleField])) {
+            return false;
+        }
+        $status = (string) ($trip['trip_status_code'] ?? '');
+        if (str_starts_with($status, 'canceled') || $status === 'invalid') {
+            return false;
+        }
+        $distance = abs((new \DateTimeImmutable((string) $trip[$scheduleField]))->getTimestamp() - $occurredAt->getTimestamp());
+
+        return $distance <= $windowHours * 3600;
+    }
+
+    /** @return list<string> */
+    private function conflictingEventCodes(string $eventCode): array
+    {
+        return match ($eventCode) {
+            'actual_handoff' => ['actual_handoff'],
+            'vehicle_staged' => ['vehicle_staged', 'actual_handoff'],
+            'actual_return', 'vehicle_recovered' => ['actual_return', 'vehicle_recovered'],
+            default => [],
+        };
+    }
+
+    /** @return list<string> */
+    private function compatibleEventCodes(string $movementType): array
+    {
+        return match ($movementType) {
+            'pickup' => ['vehicle_staged', 'actual_handoff'],
+            'return' => ['actual_return', 'vehicle_recovered'],
+            default => [],
+        };
+    }
+
+    private function movementConflictLabel(string $eventCode): string
+    {
+        return match ($eventCode) {
+            'actual_handoff' => 'an active guest handoff',
+            'vehicle_staged' => 'an active staging fact',
+            'actual_return' => 'an active return fact',
+            'vehicle_recovered' => 'an active vehicle recovery fact',
+            default => 'an active movement fact',
+        };
     }
 
     private function presentValue(array $data, string $key, mixed $fallback): mixed

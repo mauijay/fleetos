@@ -10,6 +10,7 @@
 /** @var bool $isPickupConfirmed */
 /** @var bool $repairingFacts */
 /** @var array<int, array<string, mixed>> $repairCandidates */
+/** @var array<int, array<string, mixed>> $repairConflicts */
 /** @var array<string, mixed> $factFormData */
 /** @var bool $isEarlyHandoffWarning */
 /** @var array<string, array<string, mixed>|null>|null $tripContext */
@@ -18,6 +19,7 @@ $isStagedPickup ??= false;
 $isPickupConfirmed ??= false;
 $repairingFacts ??= false;
 $repairCandidates ??= [];
+$repairConflicts ??= [];
 $tripContext ??= null;
 $isEarlyHandoffWarning ??= false;
 ?>
@@ -155,6 +157,14 @@ $energyPercent = $factFormData['energy_percent'] ?? '';
                             <div><span>To</span><strong data-repair-preview-target>Choose a nearby trip</strong></div>
                         </div>
                         <?php if ($repairCandidates === []): ?><p class="muted">No compatible same-vehicle trip is nearby and free of conflicting facts.</p><?php endif; ?>
+                        <?php if ($repairConflicts !== []): ?>
+                            <div class="import-message tone-danger">
+                                <strong>Conflicting movement facts</strong>
+                                <?php foreach ($repairConflicts as $conflict): ?>
+                                    <span><?= esc((string) ($conflict['guest_name'] ?? 'Guest not captured')) ?> · Trip <?= esc((string) ($conflict['turo_trip_id'] ?? $conflict['id'])) ?> already has <?= esc((string) $conflict['conflict_label']) ?>.</span>
+                                <?php endforeach; ?>
+                            </div>
+                        <?php endif; ?>
                         <label>Repair reason<textarea name="repair_reason" rows="2" required></textarea></label>
                         <label class="checkbox-row"><input type="checkbox" required><span>Confirm these facts were recorded on the wrong trip.</span></label>
                         <button class="primary-action" type="submit" <?= $repairCandidates === [] ? 'disabled' : '' ?>>Move Recorded Facts</button>

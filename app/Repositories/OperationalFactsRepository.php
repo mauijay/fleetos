@@ -355,13 +355,23 @@ class OperationalFactsRepository
         return $row === null ? null : $row;
     }
 
-    public function hasActiveMovementFact(int $tripId, string $movementType): bool
+    /** @param list<string> $eventCodes @return array<string, mixed>|null */
+    public function activeMovementConflict(int $tripId, array $eventCodes): ?array
     {
-        return $this->db->table('trip_movement_events')
+        if ($eventCodes === []) {
+            return null;
+        }
+
+        $row = $this->db->table('trip_movement_events')
             ->where('turo_trip_normalized_id', $tripId)
-            ->where('movement_type', $movementType)
+            ->whereIn('event_code', $eventCodes)
             ->where('voided_at', null)
-            ->countAllResults() > 0;
+            ->orderBy('occurred_at', 'DESC')
+            ->orderBy('id', 'DESC')
+            ->get(1)
+            ->getRowArray();
+
+        return $row === null ? null : $row;
     }
 
     public function correctEvent(int $eventId, array $replacement, int $actorUserId, string $reason, bool $manageTransaction = true): int

@@ -268,6 +268,71 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
         $this->assertSame(2, $this->connection->table('operational_fact_audits')->where(['action' => 'superseded', 'actor_user_id' => 8])->countAllResults());
     }
 
+    public function testCompletedHistoricalTripWithStagingButNoHandoffIsRepairCandidateAndPreservesFacts(): void
+    {
+        $this->connection->table('lookup_values')->insertBatch([
+            ['id' => 1, 'code' => 'completed'],
+            ['id' => 2, 'code' => 'booked'],
+        ]);
+        $this->connection->table('turo_trips_normalized')->where('id', 100)->update([
+            'trip_status_lookup_value_id' => 2,
+            'guest_name' => 'Later Guest',
+            'starts_at' => '2026-10-06 21:30:00',
+            'ends_at' => '2026-10-12 06:00:00',
+        ]);
+        $this->connection->table('turo_trips_normalized')->insert([
+            'id' => 101,
+            'fleet_vehicle_id' => 10,
+            'trip_status_lookup_value_id' => 1,
+            'guest_name' => 'Historical Guest',
+            'starts_at' => '2026-10-05 08:00:00',
+            'ends_at' => '2026-10-05 21:30:00',
+            'deleted_at' => null,
+        ]);
+        $stagingEventId = $this->events->record(10, 101, 'vehicle_staged', 'pickup', '2026-10-05 07:45:00', 'airport_hnl', 'Garage staging', 'checklist_operator', 7);
+        $this->assessments->record(10, 101, $stagingEventId, 'pickup', 'clean', 90, '2026-10-05 07:45:00', 'checklist_operator', 7);
+        $this->connection->query('CREATE TABLE ' . $this->table('trip_movement_checklists') . ' (id INTEGER PRIMARY KEY, turo_trip_normalized_id INTEGER, movement_type VARCHAR(20), scheduled_at DATETIME, completed_at DATETIME NULL)');
+        $this->connection->table('trip_movement_checklists')->insertBatch([
+            ['id' => 501, 'turo_trip_normalized_id' => 101, 'movement_type' => 'pickup', 'scheduled_at' => '2026-10-05 08:00:00', 'completed_at' => '2026-10-05 08:55:00'],
+            ['id' => 502, 'turo_trip_normalized_id' => 101, 'movement_type' => 'return', 'scheduled_at' => '2026-10-05 21:30:00', 'completed_at' => '2026-10-05 21:40:00'],
+        ]);
+        $service = new MovementOperationalFactService($this->connection, $this->events, $this->assessments);
+        $checklist = ['exists' => true, 'fleet_vehicle_id' => 10, 'turo_trip_normalized_id' => 100, 'movement_type' => 'pickup', 'scheduled_at' => '2026-10-06 21:30:00'];
+        $service->recordForChecklist($checklist, [
+            'occurred_at' => '2026-10-05 08:50:00',
+            'location_class' => 'home',
+            'cleanliness' => 'clean',
+            'energy_percent' => 80,
+            'note' => 'Observed handoff.',
+            'confirm_early_handoff' => '1',
+        ], 7);
+        $event = $this->repository->latestActiveEventForTrip(100);
+        $assessment = $this->repository->assessmentForEventOrTrip((int) $event['id'], 100);
+
+        $this->assertSame([101], array_map(static fn (array $trip): int => (int) $trip['id'], $service->wrongTripCandidates($checklist, (int) $event['id'])));
+        $this->assertTrue($service->repairWrongTrip($checklist, [
+            'event_id' => $event['id'],
+            'assessment_id' => $assessment['id'],
+            'target_trip_id' => 101,
+            'repair_reason' => 'Selected the adjacent historical reservation.',
+        ], 8));
+
+        $replacementEvent = $this->connection->table('trip_movement_events')->where(['turo_trip_normalized_id' => 101, 'event_code' => 'actual_handoff', 'voided_at' => null])->get()->getRowArray();
+        $replacementAssessment = $this->connection->table('movement_assessments')->where(['trip_movement_event_id' => $replacementEvent['id'], 'voided_at' => null])->get()->getRowArray();
+        $this->assertSame('2026-10-05 08:50:00', $replacementEvent['occurred_at']);
+        $this->assertSame('home', $replacementEvent['location_class']);
+        $this->assertSame('clean', $replacementAssessment['cleanliness']);
+        $this->assertSame(80, (int) $replacementAssessment['energy_percent']);
+        $this->assertSame('checklist_operator', $replacementEvent['source']);
+        $this->assertSame(7, (int) $replacementEvent['actor_user_id']);
+        $this->assertSame(7, (int) $replacementAssessment['actor_user_id']);
+        $this->assertSame((int) $event['id'], (int) $replacementEvent['supersedes_event_id']);
+        $this->assertSame((int) $assessment['id'], (int) $replacementAssessment['supersedes_assessment_id']);
+        $this->assertNotNull($this->repository->event((int) $event['id'])['voided_at']);
+        $this->assertNotNull($this->repository->assessment((int) $assessment['id'])['voided_at']);
+        $this->assertSame(2, $this->connection->table('operational_fact_audits')->where(['action' => 'superseded', 'actor_user_id' => 8])->countAllResults());
+    }
+
     public function testWrongTripHandoffRepairRecomputesActiveAndNextTripPresentation(): void
     {
         $this->connection->table('lookup_values')->insert(['id' => 1, 'code' => 'booked']);
@@ -331,35 +396,49 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
 
     public function testWrongTripRepairRejectsConflictingTarget(): void
     {
+        $this->connection->table('lookup_values')->insert(['id' => 1, 'code' => 'completed']);
         $this->connection->table('turo_trips_normalized')->where('id', 100)->update(['starts_at' => '2026-09-03 08:00:00']);
-        $this->connection->table('turo_trips_normalized')->insert(['id' => 101, 'fleet_vehicle_id' => 10, 'starts_at' => '2026-09-03 09:00:00', 'deleted_at' => null]);
+        $this->connection->table('turo_trips_normalized')->insert(['id' => 101, 'fleet_vehicle_id' => 10, 'trip_status_lookup_value_id' => 1, 'starts_at' => '2026-09-03 09:00:00', 'ends_at' => '2026-09-03 21:00:00', 'deleted_at' => null]);
         $service = new MovementOperationalFactService($this->connection, $this->events, $this->assessments);
         $checklist = ['exists' => true, 'fleet_vehicle_id' => 10, 'turo_trip_normalized_id' => 100, 'movement_type' => 'pickup'];
         $service->recordForChecklist($checklist, ['occurred_at' => '2026-09-03 09:02:00', 'location_class' => 'home'], 7);
         [$event, $assessment] = $this->activeObservation();
         $this->events->record(10, 101, 'actual_handoff', 'pickup', '2026-09-03 09:01:00', 'home', null, 'checklist_operator', 7);
 
+        $this->assertSame([], $service->wrongTripCandidates($checklist, (int) $event['id']));
+        $conflicts = $service->wrongTripConflicts($checklist, (int) $event['id']);
+        $this->assertSame([101], array_map(static fn (array $trip): int => (int) $trip['id'], $conflicts));
+        $this->assertSame('an active guest handoff', $conflicts[0]['conflict_label']);
+
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Choose a plausible nearby trip');
+        $this->expectExceptionMessage('already has an active guest handoff');
         $service->repairWrongTrip($checklist, ['event_id' => $event['id'], 'assessment_id' => $assessment['id'], 'target_trip_id' => 101, 'repair_reason' => 'Wrong reservation.'], 8);
     }
 
     public function testWrongTripCandidatesExcludeOtherVehiclesAndDistantTrips(): void
     {
         $this->connection->table('turo_trips_normalized')->where('id', 100)->update(['starts_at' => '2026-09-03 08:00:00']);
-        $this->connection->table('lookup_values')->insert(['id' => 1, 'code' => 'canceled_zero_payout']);
+        $this->connection->table('lookup_values')->insertBatch([
+            ['id' => 1, 'code' => 'canceled_zero_payout'],
+            ['id' => 2, 'code' => 'completed'],
+            ['id' => 3, 'code' => 'booked'],
+            ['id' => 4, 'code' => 'invalid'],
+        ]);
         $this->connection->table('turo_trips_normalized')->insertBatch([
-            ['id' => 101, 'fleet_vehicle_id' => 10, 'trip_status_lookup_value_id' => null, 'starts_at' => '2026-09-03 09:00:00', 'deleted_at' => null],
-            ['id' => 102, 'fleet_vehicle_id' => 10, 'trip_status_lookup_value_id' => null, 'starts_at' => '2026-09-08 09:00:00', 'deleted_at' => null],
+            ['id' => 101, 'fleet_vehicle_id' => 10, 'trip_status_lookup_value_id' => 2, 'starts_at' => '2026-09-03 09:00:00', 'deleted_at' => null],
+            ['id' => 102, 'fleet_vehicle_id' => 10, 'trip_status_lookup_value_id' => 2, 'starts_at' => '2026-09-08 09:00:00', 'deleted_at' => null],
             ['id' => 103, 'fleet_vehicle_id' => 10, 'trip_status_lookup_value_id' => 1, 'starts_at' => '2026-09-03 09:01:00', 'deleted_at' => null],
-            ['id' => 201, 'fleet_vehicle_id' => 20, 'trip_status_lookup_value_id' => null, 'starts_at' => '2026-09-03 09:00:00', 'deleted_at' => null],
+            ['id' => 104, 'fleet_vehicle_id' => 10, 'trip_status_lookup_value_id' => 3, 'starts_at' => '2026-09-03 09:03:00', 'deleted_at' => null],
+            ['id' => 105, 'fleet_vehicle_id' => 10, 'trip_status_lookup_value_id' => 2, 'starts_at' => '2026-09-03 09:04:00', 'deleted_at' => '2026-09-03 10:00:00'],
+            ['id' => 106, 'fleet_vehicle_id' => 10, 'trip_status_lookup_value_id' => 4, 'starts_at' => '2026-09-03 09:05:00', 'deleted_at' => null],
+            ['id' => 201, 'fleet_vehicle_id' => 20, 'trip_status_lookup_value_id' => 2, 'starts_at' => '2026-09-03 09:00:00', 'deleted_at' => null],
         ]);
         $service = new MovementOperationalFactService($this->connection, $this->events, $this->assessments);
         $checklist = ['exists' => true, 'fleet_vehicle_id' => 10, 'turo_trip_normalized_id' => 100, 'movement_type' => 'pickup'];
         $service->recordForChecklist($checklist, ['occurred_at' => '2026-09-03 09:02:00', 'location_class' => 'home'], 7);
         [$event, $assessment] = $this->activeObservation();
 
-        $this->assertSame([101], array_map(static fn (array $trip): int => (int) $trip['id'], $service->wrongTripCandidates($checklist, (int) $event['id'])));
+        $this->assertSame([104, 101], array_map(static fn (array $trip): int => (int) $trip['id'], $service->wrongTripCandidates($checklist, (int) $event['id'])));
 
         $this->expectException(InvalidArgumentException::class);
         $service->repairWrongTrip($checklist, ['event_id' => $event['id'], 'assessment_id' => $assessment['id'], 'target_trip_id' => 201, 'repair_reason' => 'Wrong vehicle.'], 8);

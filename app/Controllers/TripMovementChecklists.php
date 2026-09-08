@@ -36,6 +36,7 @@ class TripMovementChecklists extends BaseController
             'correctingFacts' => $correctingFacts,
             'repairingFacts' => $repairingFacts,
             'repairCandidates' => $repairingFacts ? Services::movementOperationalFactService()->wrongTripCandidates($checklist, (int) $latestFacts['event_id']) : [],
+            'repairConflicts' => $repairingFacts ? Services::movementOperationalFactService()->wrongTripConflicts($checklist, (int) $latestFacts['event_id']) : [],
             'factFormData' => $factFormData,
             'isEarlyHandoffWarning' => $isEarlyHandoffWarning,
             'hnlGarages' => (new \App\Services\Fleet\HnlGarageCatalog())->definitions(),
