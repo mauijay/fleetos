@@ -6,8 +6,20 @@
 /** @var array<string, mixed>|null $currentLocation */
 /** @var array<string, mixed>|null $latestFacts */
 /** @var bool $correctingFacts */
+/** @var bool $isStagedPickup */
+/** @var bool $isPickupConfirmed */
+/** @var bool $repairingFacts */
+/** @var array<int, array<string, mixed>> $repairCandidates */
 /** @var array<string, mixed> $factFormData */
+/** @var bool $isEarlyHandoffWarning */
+/** @var array<string, array<string, mixed>|null>|null $tripContext */
 $hnlGarages ??= (new \App\Services\Fleet\HnlGarageCatalog())->definitions();
+$isStagedPickup ??= false;
+$isPickupConfirmed ??= false;
+$repairingFacts ??= false;
+$repairCandidates ??= [];
+$tripContext ??= null;
+$isEarlyHandoffWarning ??= false;
 ?>
 <!doctype html>
 <html lang="en">
@@ -43,6 +55,40 @@ $hnlGarages ??= (new \App\Services\Fleet\HnlGarageCatalog())->definitions();
                 <p class="briefing-copy"><?= esc((string) $checklist['progress']['required_complete_count']) ?> of <?= esc((string) $checklist['progress']['required_count']) ?> required items complete. <?= esc((string) $checklist['progress']['required_remaining_count']) ?> remaining.</p>
             </section>
 
+            <?php if ($tripContext !== null): ?>
+                <section class="section trip-context">
+                    <div class="section-heading">
+                        <div><p class="eyebrow">Reservation context</p><h2>Previous, current, next</h2></div>
+                        <a class="action-link" href="/operations/vehicles/<?= (int) $checklist['fleet_vehicle_id'] ?>/trip-history?trip=<?= (int) $checklist['turo_trip_normalized_id'] ?>">Vehicle trip history</a>
+                    </div>
+                    <div class="trip-context-grid">
+                        <?php foreach (['previous' => 'Previous trip', 'current' => 'Selected trip', 'next' => 'Next trip'] as $position => $label): ?>
+                            <?php $trip = $tripContext[$position] ?? null; ?>
+                            <?php
+                            $isCurrentTrip = $position === 'current';
+                            $isCanceledTrip = $trip !== null && str_starts_with((string) ($trip['trip_status_code'] ?? ''), 'canceled');
+                            $contextHref = ! $isCurrentTrip && $trip !== null ? ($trip['movement_href'] ?? null) : null;
+                            $contextTag = $contextHref === null ? 'div' : 'a';
+                            ?>
+                            <<?= $contextTag ?> class="trip-context-item<?= $isCurrentTrip ? ' is-current' : '' ?><?= $isCanceledTrip ? ' is-canceled' : '' ?><?= $contextHref !== null ? ' is-linked' : '' ?>"<?= $contextHref === null ? '' : ' href="' . esc((string) $contextHref, 'attr') . '" aria-label="Open ' . esc(strtolower($label), 'attr') . ' movement"' ?>>
+                                <p class="eyebrow"><?= esc($label) ?></p>
+                                <?php if ($trip === null): ?>
+                                    <p class="muted">None</p>
+                                <?php else: ?>
+                                    <strong><?= esc((string) ($trip['guest_name'] ?? 'Guest not captured')) ?></strong>
+                                    <span>Trip <?= esc((string) ($trip['turo_trip_id'] ?? $trip['id'])) ?></span>
+                                    <span><?= esc((new DateTimeImmutable((string) $trip['starts_at']))->format('M j, g:i A')) ?> to <?= esc((new DateTimeImmutable((string) $trip['ends_at']))->format('M j, g:i A')) ?></span>
+                                    <?php if (($trip['pickup_location_class'] ?? null) !== null): ?><span>Pickup: <?= esc(ucwords(str_replace('_', ' ', (string) $trip['pickup_location_class']))) ?></span><?php endif; ?>
+                                    <?php if (($trip['return_location_class'] ?? null) !== null): ?><span>Return: <?= esc(ucwords(str_replace('_', ' ', (string) $trip['return_location_class']))) ?></span><?php endif; ?>
+                                    <span><?= esc(ucwords(str_replace('_', ' ', (string) ($trip['trip_status_code'] ?? 'status unknown')))) ?></span>
+                                    <?php if ($contextHref !== null): ?><span class="trip-context-action">Open movement</span><?php endif; ?>
+                                <?php endif; ?>
+                            </<?= $contextTag ?>>
+                        <?php endforeach; ?>
+                    </div>
+                </section>
+            <?php endif; ?>
+
             <?php if (($checklist['movement_type'] ?? '') === 'return'): ?>
                 <section class="section">
                     <form class="issue-filters" action="/operations/checklists/<?= esc((string) $checklist['id'], 'attr') ?>/disposition" method="post">
@@ -65,7 +111,7 @@ $hnlGarages ??= (new \App\Services\Fleet\HnlGarageCatalog())->definitions();
                     <div class="briefing-card">
                         <div class="section-heading">
                             <div><p class="eyebrow">Latest saved facts</p><h3><?= esc((string) $latestFacts['event_title']) ?></h3></div>
-                            <?php if (! $correctingFacts): ?><a class="action-link" href="/operations/checklists/<?= (int) $checklist['id'] ?>?correct=1">Correct recorded facts</a><?php endif; ?>
+                            <?php if (! $correctingFacts && ! $repairingFacts): ?><div class="fact-actions"><a class="action-link" href="/operations/checklists/<?= (int) $checklist['id'] ?>?correct=1">Correct recorded facts</a><a class="action-link" href="/operations/checklists/<?= (int) $checklist['id'] ?>?repair=1">Recorded on wrong trip</a></div><?php endif; ?>
                         </div>
                         <p class="briefing-copy"><?= esc((string) $latestFacts['occurred_at_label']) ?></p>
                         <dl class="movement-fact-summary">
@@ -89,7 +135,46 @@ $selectedRow = (string) ($factFormData['airport_parking_row'] ?? '');
 $selectedCleanliness = (string) ($factFormData['cleanliness'] ?? '');
 $energyPercent = $factFormData['energy_percent'] ?? '';
 ?>
-                <form class="issue-filters" action="<?= esc($formAction, 'attr') ?>" method="post">
+                <?php if ($repairingFacts): ?>
+                    <form class="issue-filters" action="/operations/checklists/<?= (int) $checklist['id'] ?>/facts/repair-trip" method="post">
+                        <?= csrf_field() ?>
+                        <input type="hidden" name="event_id" value="<?= (int) ($latestFacts['event_id'] ?? 0) ?>">
+                        <input type="hidden" name="assessment_id" value="<?= (int) ($latestFacts['assessment_id'] ?? 0) ?>">
+                        <label>Correct trip
+                            <select name="target_trip_id" required data-repair-target-select>
+                                <option value="">Choose a nearby trip</option>
+                                <?php foreach ($repairCandidates as $candidate): ?>
+                                    <?php $candidateLabel = (string) ($candidate['guest_name'] ?? 'Guest not captured') . ' · Trip ' . (string) ($candidate['turo_trip_id'] ?? $candidate['id']) . ' · ' . (new DateTimeImmutable((string) ($candidate[$movementType === 'pickup' ? 'starts_at' : 'ends_at'])))->format('M j, g:i A'); ?>
+                                    <option value="<?= (int) $candidate['id'] ?>" data-repair-preview="<?= esc($candidateLabel, 'attr') ?>"><?= esc($candidateLabel) ?> · <?= esc(ucwords(str_replace('_', ' ', (string) ($candidate['trip_status_code'] ?? 'status unknown')))) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </label>
+                        <div class="repair-preview" data-repair-preview>
+                            <div><span>From</span><strong><?= esc((string) ($checklist['guest_name'] ?? 'Guest not captured')) ?> · Trip <?= esc((string) ($checklist['turo_trip_id'] ?? $checklist['turo_trip_normalized_id'])) ?></strong></div>
+                            <span aria-hidden="true">→</span>
+                            <div><span>To</span><strong data-repair-preview-target>Choose a nearby trip</strong></div>
+                        </div>
+                        <?php if ($repairCandidates === []): ?><p class="muted">No compatible same-vehicle trip is nearby and free of conflicting facts.</p><?php endif; ?>
+                        <label>Repair reason<textarea name="repair_reason" rows="2" required></textarea></label>
+                        <label class="checkbox-row"><input type="checkbox" required><span>Confirm these facts were recorded on the wrong trip.</span></label>
+                        <button class="primary-action" type="submit" <?= $repairCandidates === [] ? 'disabled' : '' ?>>Move Recorded Facts</button>
+                        <a class="action-link" href="/operations/checklists/<?= (int) $checklist['id'] ?>">Cancel repair</a>
+                    </form>
+                <?php elseif ($isPickupConfirmed && ! $correctingFacts): ?>
+                    <div class="import-message tone-success">
+                        <strong>Guest pickup confirmed</strong>
+                        <span><?= esc((new DateTimeImmutable((string) ($latestEvent['occurred_at'] ?? 'now')))->format('M j, Y g:i A')) ?></span>
+                    </div>
+                <?php elseif ($isStagedPickup && ! $correctingFacts): ?>
+                    <form id="handoff-entry" class="issue-filters" action="/operations/checklists/<?= (int) $checklist['id'] ?>/confirm-guest-pickup" method="post">
+                        <?= csrf_field() ?>
+                        <label>Guest pickup time<input type="datetime-local" name="occurred_at" required value="<?= esc($occurredAt, 'attr') ?>"></label>
+                        <label>Note<textarea name="note" rows="2"><?= esc((string) ($factFormData['note'] ?? '')) ?></textarea></label>
+                        <?php if ($isEarlyHandoffWarning): ?><label class="checkbox-row"><input type="checkbox" name="confirm_early_handoff" value="1" required><span>I reviewed the selected reservation and confirm this early guest pickup time is correct.</span></label><?php endif; ?>
+                        <button class="primary-action" type="submit">Confirm Guest Pickup</button>
+                    </form>
+                <?php else: ?>
+                <form id="handoff-entry" class="issue-filters" action="<?= esc($formAction, 'attr') ?>" method="post">
                     <?= csrf_field() ?>
                     <?php if ($correctingFacts): ?>
                         <input type="hidden" name="event_id" value="<?= (int) ($factFormData['event_id'] ?? 0) ?>">
@@ -105,12 +190,20 @@ $energyPercent = $factFormData['energy_percent'] ?? '';
                         <label>Level<select name="airport_parking_level" data-hnl-level><option value="">Choose level</option><?php for ($level = 1; $level <= 8; $level++): ?><option value="<?= $level ?>" <?= $selectedLevel === (string) $level ? 'selected' : '' ?>><?= $level ?></option><?php endfor; ?></select></label>
                     </fieldset>
                     <label>Cleanliness<select name="cleanliness"><option value="" <?= $selectedCleanliness === '' ? 'selected' : '' ?>>Not captured</option><option value="clean" <?= $selectedCleanliness === 'clean' ? 'selected' : '' ?>>Clean</option><option value="dirty" <?= $selectedCleanliness === 'dirty' ? 'selected' : '' ?>>Dirty</option></select></label>
-                    <label>Energy percent<input name="energy_percent" type="number" min="0" max="100" value="<?= esc((string) $energyPercent, 'attr') ?>"></label>
+                    <label>Charge/Fuel percent<input name="energy_percent" type="number" min="0" max="100" value="<?= esc((string) $energyPercent, 'attr') ?>"></label>
                     <label>Note<textarea name="note" rows="2"><?= esc((string) ($factFormData['note'] ?? '')) ?></textarea></label>
                     <?php if ($correctingFacts): ?><label>Correction reason<textarea name="correction_reason" rows="2" required><?= esc((string) ($factFormData['correction_reason'] ?? '')) ?></textarea></label><?php endif; ?>
-                    <button class="primary-action" type="submit"><?= $correctingFacts ? 'Save Correction' : ($movementType === 'pickup' ? 'Record Guest Handoff' : 'Record Actual Return') ?></button>
+                    <?php if (! $correctingFacts && $movementType === 'pickup'): ?>
+                        <?php if ($isEarlyHandoffWarning): ?><label class="checkbox-row"><input type="checkbox" name="confirm_early_handoff" value="1" required><span>I reviewed the selected reservation and confirm this early guest handoff time is correct.</span></label><?php endif; ?>
+                        <button class="primary-action" type="submit" formaction="/operations/checklists/<?= (int) $checklist['id'] ?>/stage-at-hnl">Stage at HNL</button>
+                        <button class="secondary-action" type="submit">Record Guest Handoff</button>
+                        <p class="muted">For HNL, stage the vehicle first. Use guest handoff directly for Home, Waikiki, or Other delivery.</p>
+                    <?php else: ?>
+                        <button class="primary-action" type="submit"><?= $correctingFacts ? 'Save Correction' : 'Record Actual Return' ?></button>
+                    <?php endif; ?>
                     <?php if ($correctingFacts): ?><a class="action-link" href="/operations/checklists/<?= (int) $checklist['id'] ?>">Cancel correction</a><?php endif; ?>
                 </form>
+                <?php endif; ?>
             </section>
 
             <section class="section">

@@ -55,6 +55,111 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
         $this->assertStringContainsString('Record Actual Return', $html);
     }
 
+    public function testStagedPickupShowsSeparateConfirmationAndRepairActions(): void
+    {
+        $facts = $this->facts(['event_code' => 'vehicle_staged', 'event_title' => 'Staged for pickup', 'location_label' => 'Staging location']);
+        $html = $this->render('pickup', $facts, false, [], ['isStagedPickup' => true]);
+
+        $this->assertStringContainsString('Staged for pickup', $html);
+        $this->assertStringContainsString('Confirm Guest Pickup', $html);
+        $this->assertStringContainsString('Recorded on wrong trip', $html);
+        $this->assertStringNotContainsString('Record Guest Handoff', $html);
+    }
+
+    public function testConfirmedHandoffStillOffersWrongTripRepair(): void
+    {
+        $html = $this->render('pickup', $this->facts(), false, [], ['isPickupConfirmed' => true]);
+
+        $this->assertStringContainsString('Guest pickup confirmed', $html);
+        $this->assertStringContainsString('Recorded on wrong trip', $html);
+        $this->assertStringContainsString('/operations/checklists/4?repair=1', $html);
+    }
+
+    public function testConfirmedHandoffRepairModeShowsFromToPreview(): void
+    {
+        $candidate = ['id' => 90, 'turo_trip_id' => 900090, 'guest_name' => 'Prior Guest', 'starts_at' => '2026-10-02 08:00:00', 'trip_status_code' => 'booked'];
+        $html = $this->render('pickup', $this->facts(), false, [], [
+            'isPickupConfirmed' => true,
+            'repairingFacts' => true,
+            'repairCandidates' => [$candidate],
+        ]);
+
+        $this->assertStringContainsString('data-repair-target-select', $html);
+        $this->assertStringContainsString('<span>From</span><strong>Guest · Trip 100</strong>', $html);
+        $this->assertStringContainsString('<span>To</span><strong data-repair-preview-target>Choose a nearby trip</strong>', $html);
+        $this->assertStringContainsString('Prior Guest · Trip 900090', $html);
+        $this->assertStringNotContainsString('<strong>Guest pickup confirmed</strong>', $html);
+    }
+
+    public function testTripContextLabelsAndLinksTheSelectedReservation(): void
+    {
+        $trip = ['id' => 100, 'turo_trip_id' => 900100, 'guest_name' => 'Guest', 'starts_at' => '2026-10-06 21:30:00', 'ends_at' => '2026-10-12 06:00:00', 'pickup_location_class' => 'airport_hnl', 'return_location_class' => 'home', 'trip_status_code' => 'booked'];
+        $previous = array_merge($trip, ['id' => 90, 'turo_trip_id' => 900090, 'guest_name' => 'Previous Guest', 'starts_at' => '2026-10-01 08:00:00', 'ends_at' => '2026-10-02 08:00:00', 'movement_href' => '/operations/checklists/490']);
+        $next = array_merge($trip, ['id' => 110, 'turo_trip_id' => 900110, 'guest_name' => 'Next Guest', 'starts_at' => '2026-10-13 08:00:00', 'ends_at' => '2026-10-14 08:00:00', 'movement_href' => '/operations/checklists/510']);
+        $html = $this->render('pickup', $this->facts(), false, [], ['tripContext' => ['previous' => $previous, 'current' => $trip, 'next' => $next]]);
+
+        $this->assertStringContainsString('Selected trip', $html);
+        $this->assertStringContainsString('Trip 900100', $html);
+        $this->assertStringContainsString('Pickup: Airport Hnl', $html);
+        $this->assertStringContainsString('Return: Home', $html);
+        $this->assertStringContainsString('/operations/vehicles/10/trip-history?trip=100', $html);
+        $this->assertStringContainsString('href="&#x2F;operations&#x2F;checklists&#x2F;490" aria-label="Open previous&#x20;trip movement"', $html);
+        $this->assertStringContainsString('href="&#x2F;operations&#x2F;checklists&#x2F;510" aria-label="Open next&#x20;trip movement"', $html);
+        $this->assertStringContainsString('trip-context-item is-current', $html);
+    }
+
+    public function testDirectHandoffDefaultsEditableTimeWithoutWritingOrPrematureConfirmation(): void
+    {
+        $html = $this->render('pickup', $this->facts(), false, ['occurred_at' => '2026-09-07T16:27']);
+
+        $this->assertStringContainsString('id="handoff-entry"', $html);
+        $this->assertStringContainsString('name="occurred_at" required value="2026-09-07T16&#x3A;27"', $html);
+        $this->assertStringContainsString('Charge/Fuel percent', $html);
+        $this->assertStringContainsString('Record Guest Handoff', $html);
+        $this->assertStringNotContainsString('name="confirm_early_handoff"', $html);
+    }
+
+    public function testEarlyWarningRetainsSubmittedTimeSelectedTripAndRequiresConfirmation(): void
+    {
+        $trip = ['id' => 100, 'turo_trip_id' => 900100, 'guest_name' => 'Selected Guest', 'starts_at' => '2026-10-06 21:30:00', 'ends_at' => '2026-10-12 06:00:00', 'pickup_location_class' => 'home', 'return_location_class' => 'home', 'trip_status_code' => 'booked'];
+        $warning = 'This reservation does not begin until Oct 6, 2026 at 9:30 PM. The handoff time entered is more than 2 hours early. Are you sure this is the correct reservation?';
+        $html = $this->render('pickup', $this->facts(), false, ['occurred_at' => '2026-10-05T08:05', 'location_class' => 'home'], [
+            'tripContext' => ['previous' => null, 'current' => $trip, 'next' => null],
+            'isEarlyHandoffWarning' => true,
+            'error' => $warning,
+        ]);
+
+        $this->assertStringContainsString($warning, $html);
+        $this->assertStringContainsString('Selected trip', $html);
+        $this->assertStringContainsString('Selected Guest', $html);
+        $this->assertStringContainsString('value="2026-10-05T08&#x3A;05"', $html);
+        $this->assertStringContainsString('name="confirm_early_handoff" value="1" required', $html);
+    }
+
+    public function testVehicleHistoryEmphasizesSelectedTripWithLocations(): void
+    {
+        $html = CoreServices::renderer()->setData([
+            'assets' => ['css' => null, 'js' => null],
+            'vehicle' => ['id' => 10, 'fleet_code' => 'EV-10'],
+            'selectedTripId' => 100,
+            'trips' => [
+                ['id' => 100, 'turo_trip_id' => 900100, 'guest_name' => 'Guest', 'starts_at' => '2026-10-06 21:30:00', 'ends_at' => '2026-10-12 06:00:00', 'pickup_location_class' => 'airport_hnl', 'return_location_class' => 'home', 'trip_status_code' => 'booked', 'movement_href' => '/operations/checklists/500'],
+                ['id' => 90, 'turo_trip_id' => 900090, 'guest_name' => 'Canceled Guest', 'starts_at' => '2026-10-01 08:00:00', 'ends_at' => '2026-10-02 08:00:00', 'pickup_location_class' => 'home', 'return_location_class' => 'home', 'trip_status_code' => 'canceled_zero_payout', 'movement_href' => null],
+            ],
+        ])->render('trip_movement_checklists/history');
+
+        $this->assertStringContainsString('trip-history-row is-selected is-linked', $html);
+        $this->assertStringContainsString('href="&#x2F;operations&#x2F;checklists&#x2F;500" aria-label="Open movement for trip 900100"', $html);
+        $this->assertStringContainsString('<strong>Selected trip</strong>', $html);
+        $this->assertStringContainsString('Pickup: Airport Hnl', $html);
+        $this->assertStringContainsString('Return: Home', $html);
+        $this->assertStringContainsString('trip-history-row is-canceled', $html);
+        $this->assertStringContainsString('Canceled Zero Payout', $html);
+        $this->assertStringContainsString('No movement record', $html);
+        $this->assertStringContainsString('href="/fleet/vehicles/10"', $html);
+        $this->assertStringContainsString('href="/"', $html);
+    }
+
     public function testStructuredHnlParkingRendersWithoutAStallField(): void
     {
         $facts = $this->facts([
@@ -183,9 +288,9 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
     }
 
     /** @param array<string, mixed> $latestFacts @param array<string, mixed> $formData */
-    private function render(string $movementType, array $latestFacts, bool $correcting = false, array $formData = []): string
+    private function render(string $movementType, array $latestFacts, bool $correcting = false, array $formData = [], array $extra = []): string
     {
-        return CoreServices::renderer()->setData([
+        return CoreServices::renderer()->setData(array_merge([
             'assets' => ['css' => null, 'js' => null],
             'checklist' => ['exists' => true, 'id' => 4, 'fleet_vehicle_id' => 10, 'turo_trip_normalized_id' => 100, 'fleet_code' => 'EV-10', 'movement_type' => $movementType, 'scheduled_at' => '2026-09-03 08:00:00', 'guest_name' => 'Guest', 'readiness_status' => 'ready', 'progress' => ['required_complete_count' => 1, 'required_count' => 1, 'required_remaining_count' => 0], 'items' => [], 'vehicle_disposition' => 'available', 'completed_at' => null],
             'latestFacts' => $latestFacts,
@@ -193,7 +298,7 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
             'factFormData' => $formData,
             'notice' => null,
             'error' => null,
-        ])->render('trip_movement_checklists/show');
+        ], $extra))->render('trip_movement_checklists/show');
     }
 
     /** @param array<string, mixed> $overrides @return array<string, mixed> */

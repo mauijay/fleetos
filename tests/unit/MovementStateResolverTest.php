@@ -51,6 +51,29 @@ final class MovementStateResolverTest extends CIUnitTestCase
         $this->assertStringContainsString('due Sep 4, 5:00 PM', $state['primary_line']);
     }
 
+    public function testStagingRemainsDistinctFromGuestHandoff(): void
+    {
+        $resolver = new MovementStateResolver();
+        $staged = ['event_code' => 'vehicle_staged', 'location_class' => 'airport_hnl'];
+
+        $beforePickup = $resolver->resolve([
+            'latest_event' => $staged,
+            'trip_schedule' => ['starts_at' => '2026-09-03 14:00:00'],
+        ], new DateTimeImmutable('2026-09-03 12:00:00'));
+        $afterPickup = $resolver->resolve([
+            'latest_event' => $staged,
+            'trip_schedule' => ['starts_at' => '2026-09-03 11:00:00'],
+        ], new DateTimeImmutable('2026-09-03 12:00:00'));
+
+        $this->assertSame('staged_for_pickup', $beforePickup['code']);
+        $this->assertSame('Staged at HNL', $beforePickup['label']);
+        $this->assertSame('Confirm Guest Pickup', $beforePickup['primary_action']['label']);
+        $this->assertSame('staged_pickup_confirmation_needed', $afterPickup['code']);
+        $this->assertSame('Guest pickup confirmation needed', $afterPickup['label']);
+        $this->assertNotSame('on_trip', $beforePickup['code']);
+        $this->assertNotSame('on_trip', $afterPickup['code']);
+    }
+
     public function testOperatorFacingLabelsMatchAcceptedMovementLanguage(): void
     {
         $resolver = new MovementStateResolver();

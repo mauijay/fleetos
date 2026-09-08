@@ -14,14 +14,15 @@ class VehicleDailyStateService
     {
         $pickups = $this->byVehicle($today['todays_pickups'] ?? [], 'starts_at');
         $returns = $this->byVehicle($today['todays_returns'] ?? [], 'ends_at');
+        $turnarounds = $this->turnaroundsByVehicle($today);
         $cleaning = $this->ids($health['vehicles_needing_cleaning'] ?? []);
         $maintenance = $this->ids($health['vehicles_due_for_maintenance'] ?? []);
 
-        $board = array_map(function (array $vehicle) use ($pickups, $returns, $cleaning, $maintenance, $asOf): array {
+        $board = array_map(function (array $vehicle) use ($pickups, $returns, $turnarounds, $cleaning, $maintenance, $asOf): array {
             $vehicleId = (int) $vehicle['fleet_vehicle_id'];
             $return = $returns[$vehicleId][0] ?? null;
             $pickup = $pickups[$vehicleId][0] ?? null;
-            $turnaround = $this->turnaround($return, $pickup);
+            $turnaround = $turnarounds[$vehicleId] ?? null;
             $flags = $this->flags($vehicle, $return, $pickup, $turnaround, isset($cleaning[$vehicleId]), isset($maintenance[$vehicleId]), $asOf);
             $primaryStatus = $this->primaryStatus($flags, (string) ($vehicle['status'] ?? 'available'));
 
@@ -194,10 +195,64 @@ class VehicleDailyStateService
             return null;
         }
 
-        $minutes = max(0, (int) floor(((new DateTimeImmutable((string) $pickup['starts_at']))->getTimestamp() - (new DateTimeImmutable((string) $return['ends_at']))->getTimestamp()) / 60));
+        $returnEndsAt = new DateTimeImmutable((string) $return['ends_at']);
+        $pickupStartsAt = new DateTimeImmutable((string) $pickup['starts_at']);
+        if ($returnEndsAt > $pickupStartsAt || $returnEndsAt->format('Y-m-d') !== $pickupStartsAt->format('Y-m-d')) {
+            return null;
+        }
+
+        $minutes = (int) floor(($pickupStartsAt->getTimestamp() - $returnEndsAt->getTimestamp()) / 60);
         $severity = $minutes < self::CRITICAL_TURNAROUND_MINUTES ? 'critical' : ($minutes <= self::TIGHT_TURNAROUND_MINUTES ? 'tight' : 'comfortable');
 
         return ['minutes' => $minutes, 'severity' => $severity, 'label' => $this->durationLabel($minutes)];
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    private function turnaroundsByVehicle(array $today): array
+    {
+        $reservations = [];
+        $returnKeys = [];
+        $pickupKeys = [];
+        foreach ($today['todays_returns'] ?? [] as $return) {
+            $vehicleId = (int) ($return['fleet_vehicle_id'] ?? 0);
+            $key = $this->reservationKey($return);
+            $reservations[$vehicleId][$key] = $return;
+            $returnKeys[$vehicleId][$key] = true;
+        }
+        foreach ($today['todays_pickups'] ?? [] as $pickup) {
+            $vehicleId = (int) ($pickup['fleet_vehicle_id'] ?? 0);
+            $key = $this->reservationKey($pickup);
+            $reservations[$vehicleId][$key] = $pickup;
+            $pickupKeys[$vehicleId][$key] = true;
+        }
+
+        $turnarounds = [];
+        foreach ($reservations as $vehicleId => $byKey) {
+            uasort($byKey, static fn (array $left, array $right): int => strcmp((string) ($left['starts_at'] ?? ''), (string) ($right['starts_at'] ?? '')));
+            $keys = array_keys($byKey);
+            $rows = array_values($byKey);
+            for ($index = 0, $last = count($rows) - 1; $index < $last; $index++) {
+                if (! isset($returnKeys[$vehicleId][$keys[$index]]) || ! isset($pickupKeys[$vehicleId][$keys[$index + 1]])) {
+                    continue;
+                }
+                $turnaround = $this->turnaround($rows[$index], $rows[$index + 1]);
+                if ($turnaround !== null) {
+                    $turnarounds[$vehicleId] = $turnaround;
+                    break;
+                }
+            }
+        }
+
+        return $turnarounds;
+    }
+
+    private function reservationKey(array $reservation): string
+    {
+        if (isset($reservation['id'])) {
+            return 'id:' . (string) $reservation['id'];
+        }
+
+        return 'schedule:' . (string) ($reservation['starts_at'] ?? '') . '|' . (string) ($reservation['ends_at'] ?? '');
     }
 
     private function statusLabel(string $status, ?array $return, ?array $pickup): string

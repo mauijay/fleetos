@@ -14,12 +14,16 @@ final class MovementBoardCardViewTest extends CIUnitTestCase
         $this->assertStringContainsString('movement-card__facts', $html);
         $this->assertStringContainsString('Currently Rented', $html);
         $this->assertStringContainsString('On trip; due Sep 5, 5:00 PM.', $html);
+        $this->assertStringContainsString('movement-card__current-trip', $html);
+        $this->assertStringContainsString('<strong>Current Guest</strong>', $html);
+        $this->assertStringContainsString('<span>Due Sep 5, 5:00 PM</span>', $html);
         $this->assertStringNotContainsString('Starting at', $html);
         $this->assertStringContainsString('<dt>Planned return</dt>', $html);
         $this->assertStringContainsString('<strong>Airport HNL</strong>', $html);
         $this->assertStringContainsString('<span>Terminal 2 garage</span>', $html);
         $this->assertStringContainsString('<dt>Next confirmed trip</dt>', $html);
-        $this->assertStringContainsString('Sep 6, 8:00 AM', $html);
+        $this->assertStringContainsString('<strong>Guest Nine</strong>', $html);
+        $this->assertStringContainsString('<span>Sep 6, 8:00 AM · Airport HNL</span>', $html);
         $this->assertStringNotContainsString('None today', $html);
         $this->assertStringContainsString('<dt>Condition</dt>', $html);
         $this->assertStringContainsString('<dt>Charge</dt>', $html);
@@ -48,6 +52,7 @@ final class MovementBoardCardViewTest extends CIUnitTestCase
         $vehicle['location_heading'] = 'Current location';
         $vehicle['location_class_label'] = 'Home';
         $vehicle['location_detail'] = 'Fleet yard';
+        $vehicle['current_trip'] = null;
         $vehicle['next_trip'] = null;
         $vehicle['operator_plan'] = null;
         $vehicle['freshness'] = ['is_stale' => false, 'age_label' => '1h old', 'warning' => null];
@@ -57,10 +62,34 @@ final class MovementBoardCardViewTest extends CIUnitTestCase
         $this->assertStringContainsString('<dt>Current location</dt>', $html);
         $this->assertStringContainsString('<strong>Home</strong>', $html);
         $this->assertStringContainsString('No upcoming trip', $html);
+        $this->assertStringNotContainsString('movement-card__current-trip', $html);
         $this->assertStringNotContainsString('Refresh Turo data', $html);
 
         $vehicle['location_heading'] = 'Last known location';
         $this->assertStringContainsString('<dt>Last known location</dt>', $this->render($vehicle));
+    }
+
+    public function testRecordHandoffActionIsAReadOnlyNavigationLink(): void
+    {
+        $vehicle = $this->vehicle();
+        $vehicle['action'] = ['code' => 'monitor_pickup', 'label' => 'Record handoff', 'href' => '/operations/checklists/40?action=handoff'];
+
+        $html = $this->render($vehicle);
+
+        $this->assertStringContainsString('<a class="button-link movement-card__action" href="&#x2F;operations&#x2F;checklists&#x2F;40&#x3F;action&#x3D;handoff">Record handoff</a>', $html);
+        $this->assertStringNotContainsString('<form', $html);
+    }
+
+    public function testNextTripWithoutGuestKeepsTimeAndLocationWithoutAnEmptyGuestLine(): void
+    {
+        $vehicle = $this->vehicle();
+        $vehicle['next_trip']['guest_name'] = ' ';
+
+        $html = $this->render($vehicle);
+
+        $this->assertStringContainsString('<strong>Sep 6, 8:00 AM</strong>', $html);
+        $this->assertStringContainsString('<span>Airport HNL</span>', $html);
+        $this->assertStringNotContainsString('<strong></strong>', $html);
     }
 
     /** @param array<string, mixed> $vehicle */
@@ -77,6 +106,7 @@ final class MovementBoardCardViewTest extends CIUnitTestCase
             'model' => '2026 Tesla Model Y',
             'state' => ['tone' => 'info', 'label' => 'Currently Rented'],
             'primary_line' => 'On trip; due Sep 5, 5:00 PM.',
+            'current_trip' => ['id' => 90, 'guest_name' => 'Current Guest', 'timing_label' => 'Due Sep 5, 5:00 PM'],
             'location_heading' => 'Planned return',
             'location_class_label' => 'Airport HNL',
             'location_detail' => 'Terminal 2 garage',

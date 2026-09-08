@@ -58,6 +58,16 @@ class MovementStateResolver
             return $this->state('ready', 'Ready', 'success', 'Return confirmed and readiness facts are complete.', $event, $schedule, $missing, $blockers, 'none', 'No action required');
         }
 
+        if (($event['event_code'] ?? null) === 'vehicle_staged') {
+            $startsAt = $schedule['starts_at'] ?? null;
+            if ($startsAt !== null && new \DateTimeImmutable((string) $startsAt) <= $asOf) {
+                return $this->state('staged_pickup_confirmation_needed', 'Guest pickup confirmation needed', 'warning', 'Vehicle remains staged at HNL; confirm when the guest has possession.', $event, $schedule, $missing, $blockers, 'confirm_handoff', 'Confirm Guest Pickup');
+            }
+
+            $pickup = $startsAt === null ? 'pickup time pending' : 'pickup ' . $this->dateLabel((string) $startsAt);
+            return $this->state('staged_for_pickup', 'Staged at HNL', 'success', 'Staged at HNL; ' . $pickup . '.', $event, $schedule, $missing, $blockers, 'confirm_handoff', 'Confirm Guest Pickup');
+        }
+
         $endsAt = $schedule['ends_at'] ?? null;
         if ($status === 'in_progress' && $endsAt !== null && new \DateTimeImmutable((string) $endsAt) <= $asOf) {
             return $this->state('return_confirmation_overdue', 'Return confirmation overdue', 'danger', 'Scheduled return passed; confirm the vehicle return.', $event, $schedule, $missing, $blockers, 'confirm_return', 'Confirm return');

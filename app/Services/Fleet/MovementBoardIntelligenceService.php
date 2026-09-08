@@ -82,6 +82,7 @@ class MovementBoardIntelligenceService
             'airport_position_line' => $location['position_line'],
             'approved_turo_garage' => $location['approved_turo_garage'],
             'location_basis' => $location['basis'],
+            'current_trip' => $this->presentCurrentTrip($schedule, (string) $state['code']),
             'next_trip' => $this->presentNextTrip($nextTrip),
             'condition_label' => $assessment === null || ($assessment['cleanliness'] ?? null) === null ? 'Condition not captured' : ucfirst((string) $assessment['cleanliness']),
             'energy_label' => $energyKind === 'electric' ? 'Charge' : (in_array($energyKind, ['gasoline', 'diesel', 'hybrid'], true) ? 'Fuel' : 'Energy'),
@@ -185,6 +186,31 @@ class MovementBoardIntelligenceService
             $blockers[] = ['code' => 'maintenance_required', 'label' => 'Maintenance required', 'severity' => 'critical'];
         }
         return $blockers;
+    }
+
+    /** @return array{id:int,guest_name:string,timing_label:?string}|null */
+    private function presentCurrentTrip(?array $schedule, string $stateCode): ?array
+    {
+        $guestName = $this->nullableText($schedule['guest_name'] ?? null);
+        if ($schedule === null || $guestName === null) {
+            return null;
+        }
+
+        $timing = match ($stateCode) {
+            'on_trip', 'return_confirmation_overdue' => ['Due', $schedule['ends_at'] ?? null],
+            'staged_for_pickup' => ['Pickup', $schedule['starts_at'] ?? null],
+            'staged_pickup_confirmation_needed', 'pickup_confirmation_overdue' => ['Scheduled', $schedule['starts_at'] ?? null],
+            default => null,
+        };
+        if ($timing === null) {
+            return null;
+        }
+
+        return [
+            'id' => (int) ($schedule['id'] ?? 0),
+            'guest_name' => $guestName,
+            'timing_label' => $timing[1] === null ? null : $timing[0] . ' ' . (new \DateTimeImmutable((string) $timing[1]))->format('M j, g:i A'),
+        ];
     }
 
     /** @return array<string, mixed>|null */
@@ -321,7 +347,7 @@ class MovementBoardIntelligenceService
         }
         $checklistHref ??= $card['checklist_href'] ?? null;
         $checklistLabels = [
-            'confirm_handoff' => 'Record handoff',
+            'confirm_handoff' => in_array($state['code'] ?? null, ['staged_for_pickup', 'staged_pickup_confirmation_needed'], true) ? 'Confirm Guest Pickup' : 'Record handoff',
             'monitor_pickup' => 'Record handoff',
             'confirm_return' => 'Record return',
             'monitor_return' => 'Record return',
@@ -330,7 +356,10 @@ class MovementBoardIntelligenceService
             'clear_blockers' => 'Review blockers',
         ];
         if ($checklistHref !== null && isset($checklistLabels[$code])) {
-            return ['code' => $code, 'label' => $checklistLabels[$code], 'href' => (string) $checklistHref];
+            $action = in_array($state['code'] ?? null, ['staged_for_pickup', 'staged_pickup_confirmation_needed'], true) ? 'confirm-pickup' : 'handoff';
+            $href = in_array($code, ['confirm_handoff', 'monitor_pickup'], true) ? (string) $checklistHref . '?action=' . $action : (string) $checklistHref;
+
+            return ['code' => $code, 'label' => $checklistLabels[$code], 'href' => $href];
         }
 
         $isPositioningAction = in_array($code, ['none', 'review_vehicle_status'], true);

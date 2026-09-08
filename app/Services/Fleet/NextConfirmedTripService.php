@@ -14,7 +14,21 @@ class NextConfirmedTripService
     public function forVehicle(int $vehicleId, ?\DateTimeImmutable $asOf = null): ?array
     {
         $asOf ??= new \DateTimeImmutable();
-        $trip = $this->repo()->nextConfirmedTrip($vehicleId, $asOf->format('Y-m-d H:i:s'));
+        $after = $asOf;
+        $activeTripId = null;
+        $activeEvent = $this->repo()->latestActiveLifecycleEvent($vehicleId, $asOf->format('Y-m-d H:i:s'));
+        if (in_array($activeEvent['event_code'] ?? null, ['actual_handoff', 'vehicle_staged'], true) && isset($activeEvent['turo_trip_normalized_id'])) {
+            $activeTripId = (int) $activeEvent['turo_trip_normalized_id'];
+            $activeTrip = $this->repo()->tripSchedule($activeTripId);
+            if (! empty($activeTrip['starts_at'])) {
+                $activeStartsAt = new \DateTimeImmutable((string) $activeTrip['starts_at']);
+                if ($activeStartsAt > $after) {
+                    $after = $activeStartsAt;
+                }
+            }
+        }
+
+        $trip = $this->repo()->nextConfirmedTrip($vehicleId, $after->format('Y-m-d H:i:s'), $activeTripId);
         if ($trip === null) {
             return null;
         }

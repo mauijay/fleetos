@@ -102,6 +102,19 @@ final class DailyOperationsDashboardServiceTest extends CIUnitTestCase
         $this->assertSame('critical', $critical['turnaround']['severity']);
     }
 
+    public function testOneTripsOwnPickupAndReturnAreNotATurnaround(): void
+    {
+        $trip = ['id' => 701, ...$this->reservation(7, '2026-07-19 09:00:00', '2026-07-19 12:00:00')];
+
+        $vehicle = $this->states->movementBoard([$this->vehicle(7)], [
+            'todays_returns' => [$trip],
+            'todays_pickups' => [$trip],
+        ], $this->emptyHealth(), new DateTimeImmutable('2026-07-19 08:00:00'))[0];
+
+        $this->assertNull($vehicle['turnaround']);
+        $this->assertNotContains('same_day_turnaround', $vehicle['flags']);
+    }
+
     public function testTimelineEventsAppearInChronologicalOrder(): void
     {
         $timeline = $this->states->timeline($this->today(), new DateTimeImmutable('2026-07-19 08:00:00'));

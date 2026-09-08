@@ -1,6 +1,7 @@
 <?php
 /** @var array<string, mixed> $vehicle */
 $state = $vehicle['state'];
+$currentTrip = $vehicle['current_trip'] ?? null;
 $nextTrip = $vehicle['next_trip'];
 $recommendation = $vehicle['recommendation'];
 $operatorPlan = $vehicle['operator_plan'];
@@ -16,7 +17,17 @@ $blockers = $vehicle['blockers'];
         <span class="status-badge tone-<?= esc($state['tone'], 'attr') ?>"><?= esc($state['label']) ?></span>
     </header>
 
-    <p class="movement-card__primary"><?= esc($vehicle['primary_line']) ?></p>
+    <div class="movement-card__commitment">
+        <p class="movement-card__primary"><?= esc($vehicle['primary_line']) ?></p>
+        <?php if ($currentTrip !== null): ?>
+            <p class="movement-card__current-trip" aria-label="Current reservation">
+                <strong><?= esc($currentTrip['guest_name']) ?></strong>
+                <?php if ($currentTrip['timing_label'] !== null): ?>
+                    <span><?= esc($currentTrip['timing_label']) ?></span>
+                <?php endif; ?>
+            </p>
+        <?php endif; ?>
+    </div>
 
     <dl class="movement-card__facts">
         <div class="movement-card__fact movement-card__fact--location">
@@ -37,8 +48,9 @@ $blockers = $vehicle['blockers'];
                 <?php if ($nextTrip === null): ?>
                     <strong>No upcoming trip</strong>
                 <?php else: ?>
-                    <strong><?= esc($nextTrip['starts_at_label']) ?></strong>
-                    <span><?= esc($nextTrip['pickup_location_label']) ?><?= trim((string) ($nextTrip['guest_name'] ?? '')) === '' ? '' : ' · ' . esc($nextTrip['guest_name']) ?></span>
+                    <?php $nextGuestName = trim((string) ($nextTrip['guest_name'] ?? '')); ?>
+                    <strong><?= esc($nextGuestName === '' ? $nextTrip['starts_at_label'] : $nextGuestName) ?></strong>
+                    <span><?= $nextGuestName === '' ? '' : esc($nextTrip['starts_at_label']) . ' · ' ?><?= esc($nextTrip['pickup_location_label']) ?></span>
                 <?php endif; ?>
             </dd>
         </div>

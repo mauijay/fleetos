@@ -16,7 +16,7 @@ final class MovementBoardIntelligenceServiceTest extends CIUnitTestCase
     {
         $service = $this->service(
             ['id' => 90, 'turo_trip_normalized_id' => 900, 'event_code' => 'actual_handoff', 'occurred_at' => '2026-09-03 08:05:00', 'location_class' => 'waikiki_hotel', 'location_detail' => 'Guest handoff'],
-            ['id' => 900, 'starts_at' => '2026-09-03 08:00:00', 'ends_at' => '2026-09-05 17:00:00', 'return_location_class' => 'airport_hnl', 'return_location_source_text' => 'HNL Terminal 2'],
+            ['id' => 900, 'guest_name' => 'Current Guest', 'starts_at' => '2026-09-03 08:00:00', 'ends_at' => '2026-09-05 17:00:00', 'return_location_class' => 'airport_hnl', 'return_location_source_text' => 'HNL Terminal 2'],
             ['cleanliness' => 'dirty', 'energy_percent' => null],
             ['energy_kind' => 'electric', 'ready_energy_target_percent' => 80, 'capabilities' => ['key_card']],
             ['id' => 901, 'starts_at' => '2026-09-06 08:00:00', 'pickup_location_class' => 'airport_hnl', 'planning_horizon' => 'near_term', 'import_completed_at' => '2026-09-03 10:00:00'],
@@ -40,6 +40,7 @@ final class MovementBoardIntelligenceServiceTest extends CIUnitTestCase
         $this->assertSame('airport_hnl', $card['location_class']);
         $this->assertSame('Airport HNL', $card['location_class_label']);
         $this->assertSame('scheduled', $card['location_basis']);
+        $this->assertSame(['id' => 900, 'guest_name' => 'Current Guest', 'timing_label' => 'Due Sep 5, 5:00 PM'], $card['current_trip']);
         $this->assertSame('leave_at_airport', $card['recommendation']['code']);
         $this->assertSame('Recommended: Leave at HNL', $card['recommendation']['display_label']);
         $this->assertContains('Clean and charge on site.', $card['recommendation']['reason_labels']);
@@ -70,6 +71,88 @@ final class MovementBoardIntelligenceServiceTest extends CIUnitTestCase
         $this->assertSame('Fuel', $card['energy_label']);
         $this->assertSame('complete_return_assessment', $card['action']['code']);
         $this->assertSame([], $card['blockers']);
+    }
+
+    public function testStagedHnlPickupIsNotRentedAndLinksToGuestPickupConfirmation(): void
+    {
+        $service = $this->service(
+            ['id' => 95, 'turo_trip_normalized_id' => 900, 'event_code' => 'vehicle_staged', 'occurred_at' => '2026-09-03 10:00:00', 'location_class' => 'airport_hnl', 'airport_garage_code' => 'international', 'airport_parking_level' => 7, 'airport_parking_row' => 'F'],
+            ['id' => 900, 'guest_name' => 'Staged Guest', 'starts_at' => '2026-09-03 14:00:00', 'ends_at' => '2026-09-05 17:00:00'],
+            ['cleanliness' => 'clean', 'energy_percent' => 82],
+            ['energy_kind' => 'electric', 'ready_energy_target_percent' => 80, 'capabilities' => []],
+            null,
+        );
+
+        $card = $service->enrich([['fleet_vehicle_id' => 9, 'status' => 'available', 'checklists' => [['movement_type' => 'pickup', 'href' => '/operations/checklists/40']]]], new DateTimeImmutable('2026-09-03 12:00:00'))[0];
+
+        $this->assertSame('staged_for_pickup', $card['state']['code']);
+        $this->assertSame('Staged at HNL', $card['state']['label']);
+        $this->assertSame(['id' => 900, 'guest_name' => 'Staged Guest', 'timing_label' => 'Pickup Sep 3, 2:00 PM'], $card['current_trip']);
+        $this->assertSame('Confirm Guest Pickup', $card['action']['label']);
+        $this->assertSame('/operations/checklists/40?action=confirm-pickup', $card['action']['href']);
+        $this->assertSame('International Garage · Blue', $card['airport_garage_line']);
+    }
+
+    public function testRecordHandoffNavigatesToPickupEntryWithoutAWriteEndpoint(): void
+    {
+        $service = $this->service(
+            null,
+            ['id' => 900, 'guest_name' => 'Overdue Guest', 'starts_at' => '2026-09-02 21:30:00', 'ends_at' => '2026-09-08 06:00:00', 'pickup_location_class' => 'home'],
+            null,
+            ['energy_kind' => 'electric', 'ready_energy_target_percent' => 80, 'capabilities' => []],
+            null,
+        );
+
+        $card = $service->enrich([['fleet_vehicle_id' => 9, 'status' => 'available', 'pickup' => ['id' => 900], 'checklists' => [['movement_type' => 'pickup', 'href' => '/operations/checklists/40']]]], new DateTimeImmutable('2026-09-03 16:27:00'))[0];
+
+        $this->assertSame('Record handoff', $card['action']['label']);
+        $this->assertSame('/operations/checklists/40?action=handoff', $card['action']['href']);
+        $this->assertSame(['id' => 900, 'guest_name' => 'Overdue Guest', 'timing_label' => 'Scheduled Sep 2, 9:30 PM'], $card['current_trip']);
+    }
+
+    public function testCurrentGuestNeverFallsBackToCardOrNextTripGuest(): void
+    {
+        $service = $this->service(
+            ['id' => 90, 'turo_trip_normalized_id' => 900, 'event_code' => 'actual_handoff', 'occurred_at' => '2026-09-03 08:05:00'],
+            ['id' => 900, 'guest_name' => ' ', 'starts_at' => '2026-09-03 08:00:00', 'ends_at' => '2026-09-05 17:00:00'],
+            null,
+            ['energy_kind' => 'electric', 'ready_energy_target_percent' => 80, 'capabilities' => []],
+            ['id' => 901, 'guest_name' => 'Next Guest', 'starts_at' => '2026-09-06 08:00:00', 'pickup_location_class' => 'home'],
+        );
+
+        $card = $service->enrich([['fleet_vehicle_id' => 9, 'status' => 'available', 'guest_name' => 'Fallback Guest']], new DateTimeImmutable('2026-09-03 12:00:00'))[0];
+
+        $this->assertNull($card['current_trip']);
+        $this->assertSame('Next Guest', $card['next_trip']['guest_name']);
+    }
+
+    public function testStagedTripIsExcludedFromNextConfirmedTripLookup(): void
+    {
+        $repository = $this->createMock(OperationalFactsRepository::class);
+        $repository->method('latestActiveLifecycleEvent')->willReturn([
+            'event_code' => 'vehicle_staged',
+            'turo_trip_normalized_id' => 900,
+        ]);
+        $repository->expects($this->once())
+            ->method('tripSchedule')
+            ->with(900)
+            ->willReturn([
+                'id' => 900,
+                'starts_at' => '2026-09-03 14:00:00',
+            ]);
+        $repository->expects($this->once())
+            ->method('nextConfirmedTrip')
+            ->with(9, '2026-09-03 14:00:00', 900)
+            ->willReturn([
+                'id' => 901,
+                'guest_name' => 'Following Guest',
+                'starts_at' => '2026-09-06 08:00:00',
+            ]);
+
+        $trip = (new NextConfirmedTripService($repository))->forVehicle(9, new DateTimeImmutable('2026-09-03 12:00:00'));
+
+        $this->assertSame(901, $trip['id']);
+        $this->assertSame('Following Guest', $trip['guest_name']);
     }
 
     public function testStaleOperatorPlanIsVisibleButDoesNotSupplyTransportationTruth(): void

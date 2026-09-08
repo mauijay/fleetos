@@ -27,7 +27,9 @@ class MovementAssessmentService
         $eventId = array_key_exists('trip_movement_event_id', $replacement)
             ? (int) $replacement['trip_movement_event_id']
             : ($original['trip_movement_event_id'] === null ? null : (int) $original['trip_movement_event_id']);
-        $data = $this->assessmentData((int) $original['fleet_vehicle_id'], $original['turo_trip_normalized_id'] === null ? null : (int) $original['turo_trip_normalized_id'], $eventId, (string) ($replacement['movement_type'] ?? $original['movement_type']), $replacement['cleanliness'] ?? $original['cleanliness'], $replacement['energy_percent'] ?? $original['energy_percent'], (string) ($replacement['captured_at'] ?? $original['captured_at']), (string) ($replacement['source'] ?? 'operator_correction'), $actorUserId, $replacement['note'] ?? $original['note']);
+        $tripId = array_key_exists('turo_trip_normalized_id', $replacement) ? (int) $replacement['turo_trip_normalized_id'] : ($original['turo_trip_normalized_id'] === null ? null : (int) $original['turo_trip_normalized_id']);
+        $replacementActorUserId = isset($replacement['actor_user_id']) ? (int) $replacement['actor_user_id'] : $actorUserId;
+        $data = $this->assessmentData((int) $original['fleet_vehicle_id'], $tripId, $eventId, (string) ($replacement['movement_type'] ?? $original['movement_type']), $replacement['cleanliness'] ?? $original['cleanliness'], $replacement['energy_percent'] ?? $original['energy_percent'], (string) ($replacement['captured_at'] ?? $original['captured_at']), (string) ($replacement['source'] ?? 'operator_correction'), $replacementActorUserId, $replacement['note'] ?? $original['note']);
         return $this->repo()->correctAssessment($assessmentId, $data, $actorUserId, trim($reason), $manageTransaction);
     }
 

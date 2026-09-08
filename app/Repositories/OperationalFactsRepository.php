@@ -206,9 +206,9 @@ class OperationalFactsRepository
     }
 
     /** @return array<string, mixed>|null */
-    public function nextConfirmedTrip(int $vehicleId, string $after): ?array
+    public function nextConfirmedTrip(int $vehicleId, string $after, ?int $excludeTripId = null): ?array
     {
-        $row = $this->db->table('turo_trips_normalized trips')
+        $builder = $this->db->table('turo_trips_normalized trips')
             ->select('trips.*, trip_statuses.code AS trip_status_code')
             ->select('import_statuses.code AS import_status_code, batches.completed_at AS import_completed_at, batches.source_filename AS import_source_filename')
             ->select('pickup.location_class AS pickup_location_class, pickup.source_text AS pickup_location_source_text')
@@ -218,8 +218,11 @@ class OperationalFactsRepository
             ->join('lookup_values import_statuses', 'import_statuses.id = batches.import_status_lookup_value_id', 'left')
             ->join('scheduled_movement_locations pickup', 'pickup.turo_trip_normalized_id = trips.id AND pickup.movement_type = \'pickup\'', 'left')
             ->where('trips.fleet_vehicle_id', $vehicleId)->where('trips.starts_at >', $after)->where('trips.deleted_at', null)
-            ->where('trip_statuses.code', 'booked')
-            ->orderBy('trips.starts_at', 'ASC')->orderBy('trips.id', 'ASC')->get(1)->getRowArray();
+            ->where('trip_statuses.code', 'booked');
+        if ($excludeTripId !== null) {
+            $builder->where('trips.id !=', $excludeTripId);
+        }
+        $row = $builder->orderBy('trips.starts_at', 'ASC')->orderBy('trips.id', 'ASC')->get(1)->getRowArray();
         return $row === null ? null : $row;
     }
 
@@ -231,6 +234,89 @@ class OperationalFactsRepository
             ->join('fleet_vehicles fv', 'fv.id = trips.fleet_vehicle_id', 'left')
             ->where('trips.id', $tripId)->where('trips.deleted_at', null)->get()->getRowArray();
         return $row === null ? null : $row;
+    }
+
+    /** @return array{previous:?array<string,mixed>,current:?array<string,mixed>,next:?array<string,mixed>} */
+    public function tripContext(int $tripId): array
+    {
+        $current = $this->tripHistoryRow($tripId);
+        if ($current === null || $current['starts_at'] === null) {
+            return ['previous' => null, 'current' => $this->withMovementHref($current), 'next' => null];
+        }
+
+        $previous = $this->tripHistoryBuilder()
+            ->where('trips.fleet_vehicle_id', $current['fleet_vehicle_id'])
+            ->where('trips.starts_at <', $current['starts_at'])
+            ->orderBy('trips.starts_at', 'DESC')->orderBy('trips.id', 'DESC')->get(1)->getRowArray();
+        $next = $this->tripHistoryBuilder()
+            ->where('trips.fleet_vehicle_id', $current['fleet_vehicle_id'])
+            ->where('trips.starts_at >', $current['starts_at'])
+            ->orderBy('trips.starts_at', 'ASC')->orderBy('trips.id', 'ASC')->get(1)->getRowArray();
+
+        return [
+            'previous' => $this->withMovementHref($previous),
+            'current' => $this->withMovementHref($current),
+            'next' => $this->withMovementHref($next),
+        ];
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    public function vehicleTripHistory(int $vehicleId, int $limit = 50): array
+    {
+        $trips = $this->tripHistoryBuilder()
+            ->where('trips.fleet_vehicle_id', $vehicleId)
+            ->orderBy('trips.starts_at', 'DESC')->orderBy('trips.id', 'DESC')
+            ->get(max(1, min($limit, 100)))
+            ->getResultArray();
+
+        return array_map($this->withMovementHref(...), $trips);
+    }
+
+    /** @return array<string, mixed>|null */
+    private function tripHistoryRow(int $tripId): ?array
+    {
+        $row = $this->tripHistoryBuilder()->where('trips.id', $tripId)->get(1)->getRowArray();
+
+        return $row === null ? null : $row;
+    }
+
+    private function tripHistoryBuilder(): \CodeIgniter\Database\BaseBuilder
+    {
+        $tripFields = $this->db->getFieldNames('turo_trips_normalized');
+        $builder = $this->db->table('turo_trips_normalized trips')
+            ->select('trips.id, trips.fleet_vehicle_id, trips.guest_name, trips.starts_at, trips.ends_at')
+            ->select('pickup.location_class AS pickup_location_class, pickup.source_text AS pickup_location_source_text')
+            ->select('return_location.location_class AS return_location_class, return_location.source_text AS return_location_source_text')
+            ->join('scheduled_movement_locations pickup', 'pickup.turo_trip_normalized_id = trips.id AND pickup.movement_type = \'pickup\'', 'left')
+            ->join('scheduled_movement_locations return_location', 'return_location.turo_trip_normalized_id = trips.id AND return_location.movement_type = \'return\'', 'left')
+            ->where('trips.deleted_at', null);
+        if (in_array('turo_trip_id', $tripFields, true)) {
+            $builder->select('trips.turo_trip_id');
+        }
+        if ($this->db->tableExists('lookup_values') && in_array('trip_status_lookup_value_id', $tripFields, true)) {
+            $builder->select('trip_statuses.code AS trip_status_code')
+                ->join('lookup_values trip_statuses', 'trip_statuses.id = trips.trip_status_lookup_value_id', 'left');
+        }
+        if ($this->db->tableExists('trip_movement_checklists')) {
+            $builder->select('pickup_checklist.id AS pickup_checklist_id, return_checklist.id AS return_checklist_id')
+                ->join('trip_movement_checklists pickup_checklist', 'pickup_checklist.turo_trip_normalized_id = trips.id AND pickup_checklist.movement_type = \'pickup\' AND pickup_checklist.scheduled_at = trips.starts_at', 'left')
+                ->join('trip_movement_checklists return_checklist', 'return_checklist.turo_trip_normalized_id = trips.id AND return_checklist.movement_type = \'return\' AND return_checklist.scheduled_at = trips.ends_at', 'left');
+        } else {
+            $builder->select('NULL AS pickup_checklist_id, NULL AS return_checklist_id', false);
+        }
+
+        return $builder;
+    }
+
+    /** @param array<string, mixed>|null $trip @return array<string, mixed>|null */
+    private function withMovementHref(?array $trip): ?array
+    {
+        if ($trip === null) {
+            return null;
+        }
+        $checklistId = (int) ($trip['pickup_checklist_id'] ?? 0) ?: (int) ($trip['return_checklist_id'] ?? 0);
+
+        return array_merge($trip, ['movement_href' => $checklistId > 0 ? '/operations/checklists/' . $checklistId : null]);
     }
 
     /** @return array<string, mixed>|null */
@@ -253,6 +339,29 @@ class OperationalFactsRepository
     {
         $row = $this->db->table('trip_movement_events')->where('id', $eventId)->get()->getRowArray();
         return $row === null ? null : $row;
+    }
+
+    /** @return array<string, mixed>|null */
+    public function latestActiveEventForTrip(int $tripId): ?array
+    {
+        $row = $this->db->table('trip_movement_events')
+            ->where('turo_trip_normalized_id', $tripId)
+            ->where('voided_at', null)
+            ->orderBy('occurred_at', 'DESC')
+            ->orderBy('id', 'DESC')
+            ->get(1)
+            ->getRowArray();
+
+        return $row === null ? null : $row;
+    }
+
+    public function hasActiveMovementFact(int $tripId, string $movementType): bool
+    {
+        return $this->db->table('trip_movement_events')
+            ->where('turo_trip_normalized_id', $tripId)
+            ->where('movement_type', $movementType)
+            ->where('voided_at', null)
+            ->countAllResults() > 0;
     }
 
     public function correctEvent(int $eventId, array $replacement, int $actorUserId, string $reason, bool $manageTransaction = true): int
@@ -329,7 +438,7 @@ class OperationalFactsRepository
         $builder = $this->db->table('trip_movement_events')
             ->select($this->movementEventSelect())
             ->where('fleet_vehicle_id', $vehicleId)
-            ->whereIn('event_code', ['actual_handoff', 'actual_return'])
+            ->whereIn('event_code', ['vehicle_staged', 'actual_handoff', 'actual_return'])
             ->where('voided_at', null);
         if ($asOf !== null) {
             $builder->where('occurred_at <=', $asOf);

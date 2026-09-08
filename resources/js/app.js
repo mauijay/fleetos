@@ -72,3 +72,18 @@ const initializeHnlParking = (group) => {
 };
 
 document.querySelectorAll("[data-hnl-parking]").forEach(initializeHnlParking);
+
+document.querySelectorAll("[data-repair-preview]").forEach((preview) => {
+  const form = preview.closest("form");
+  const select = form?.querySelector("[data-repair-target-select]");
+  const target = preview.querySelector("[data-repair-preview-target]");
+  if (!select || !target) return;
+
+  const sync = () => {
+    target.textContent =
+      select.selectedOptions[0]?.dataset.repairPreview ||
+      "Choose a nearby trip";
+  };
+  select.addEventListener("change", sync);
+  sync();
+});

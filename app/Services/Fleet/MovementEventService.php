@@ -34,7 +34,9 @@ class MovementEventService
             'level' => $replacement['airport_parking_level'] ?? $original['airport_parking_level'] ?? null,
             'row' => $replacement['airport_parking_row'] ?? $original['airport_parking_row'] ?? null,
         ];
-        $data = $this->eventData((int) $original['fleet_vehicle_id'], $original['turo_trip_normalized_id'] === null ? null : (int) $original['turo_trip_normalized_id'], (string) ($replacement['event_code'] ?? $original['event_code']), $replacement['movement_type'] ?? $original['movement_type'], (string) ($replacement['occurred_at'] ?? $original['occurred_at']), $replacement['location_class'] ?? $original['location_class'], $replacement['location_detail'] ?? $original['location_detail'], (string) ($replacement['source'] ?? 'operator_correction'), $actorUserId, $replacement['note'] ?? $original['note'], $airportParking);
+        $tripId = array_key_exists('turo_trip_normalized_id', $replacement) ? (int) $replacement['turo_trip_normalized_id'] : ($original['turo_trip_normalized_id'] === null ? null : (int) $original['turo_trip_normalized_id']);
+        $replacementActorUserId = isset($replacement['actor_user_id']) ? (int) $replacement['actor_user_id'] : $actorUserId;
+        $data = $this->eventData((int) $original['fleet_vehicle_id'], $tripId, (string) ($replacement['event_code'] ?? $original['event_code']), $replacement['movement_type'] ?? $original['movement_type'], (string) ($replacement['occurred_at'] ?? $original['occurred_at']), $replacement['location_class'] ?? $original['location_class'], $replacement['location_detail'] ?? $original['location_detail'], (string) ($replacement['source'] ?? 'operator_correction'), $replacementActorUserId, $replacement['note'] ?? $original['note'], $airportParking);
         return $this->repo()->correctEvent($eventId, $data, $actorUserId, trim($reason), $manageTransaction);
     }
 
@@ -47,6 +49,12 @@ class MovementEventService
     public function find(int $eventId): ?array
     {
         return $this->repo()->event($eventId);
+    }
+
+    /** @return array<string, mixed>|null */
+    public function latestForTrip(int $tripId): ?array
+    {
+        return $this->repo()->latestActiveEventForTrip($tripId);
     }
 
     /** @return array<string, mixed> */

@@ -448,15 +448,36 @@ h3 {
   white-space: normal;
 }
 
-.movement-card__primary {
-  margin: 0;
+.movement-card__commitment {
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.025);
+}
+
+.movement-card__primary {
+  margin: 0;
   padding: 11px 16px;
   color: var(--text);
   font-size: 14px;
   font-weight: 700;
+}
+
+.movement-card__current-trip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 8px;
+  min-width: 0;
+  margin: 0;
+  border-top: 1px solid var(--line);
+  padding: 8px 16px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.movement-card__current-trip strong {
+  min-width: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
 }
 
 .movement-card__facts {
@@ -1383,6 +1404,123 @@ h3 {
   margin-top: 18px;
 }
 
+.fact-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px 16px;
+}
+
+.trip-context-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-block: 1px solid var(--line);
+}
+
+.trip-context-item {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+  padding: 14px 16px;
+}
+
+.trip-context-item.is-linked,
+.trip-history-row.is-linked {
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease;
+}
+
+.trip-context-item.is-linked:hover,
+.trip-context-item.is-linked:focus-visible,
+.trip-history-row.is-linked:hover,
+.trip-history-row.is-linked:focus-visible {
+  border-color: var(--info);
+  background: var(--surface-3);
+}
+
+.trip-context-item + .trip-context-item {
+  border-left: 1px solid var(--line);
+}
+
+.trip-context-item.is-current {
+  background: var(--surface-2);
+}
+
+.trip-context-item.is-canceled,
+.trip-history-row.is-canceled {
+  border-color: rgba(251, 113, 133, 0.32);
+  background: var(--surface);
+}
+
+.trip-context-item.is-canceled strong,
+.trip-history-row.is-canceled > div:first-child strong,
+.trip-history-row.is-canceled .trip-history-status {
+  color: var(--danger);
+}
+
+.trip-context-item span,
+.trip-history-row span {
+  color: var(--muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.trip-context-action {
+  color: var(--info) !important;
+  font-weight: 750;
+}
+
+.trip-history-list {
+  display: grid;
+  gap: 10px;
+}
+
+.trip-history-row {
+  display: grid;
+  grid-template-columns:
+    minmax(170px, 1fr) minmax(220px, 1.25fr) minmax(170px, 1fr)
+    minmax(120px, auto);
+  align-items: center;
+  gap: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  padding: 14px;
+}
+
+.trip-history-row.is-selected {
+  border-color: var(--info);
+  box-shadow: inset 4px 0 0 var(--info);
+}
+
+.trip-history-row > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.repair-preview {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 16px;
+  border-block: 1px solid var(--line);
+  padding-block: 14px;
+}
+
+.repair-preview > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.repair-preview span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .movement-checklist-item {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -1653,8 +1791,16 @@ h3 {
   .vehicle-grid,
   .integration-grid,
   .import-notes,
-  .movement-fact-summary {
+  .movement-fact-summary,
+  .trip-context-grid,
+  .trip-history-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .trip-context-item:nth-child(3) {
+    grid-column: 1 / -1;
+    border-top: 1px solid var(--line);
+    border-left: 0;
   }
 
   .upload-form {
@@ -1715,8 +1861,19 @@ h3 {
   .vehicle-grid,
   .integration-grid,
   .import-notes,
-  .movement-fact-summary {
+  .movement-fact-summary,
+  .trip-context-grid,
+  .trip-history-row {
     grid-template-columns: 1fr;
+  }
+
+  .trip-context-item + .trip-context-item {
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+
+  .trip-context-item:nth-child(3) {
+    grid-column: auto;
   }
 
   .vehicle-card {

@@ -14,6 +14,8 @@ class MovementIntelligence extends BaseConfig
     public int $mediumTermHours = 168;
     public int $importFreshnessWarningHours = 24;
     public int $projectionHorizonDays = 30;
+    public int $earlyHandoffWarningHours = 2;
+    public int $repairCandidateWindowHours = 48;
 
     /** @var array<string, array<string, bool>> */
     public array $locationCapabilities = [

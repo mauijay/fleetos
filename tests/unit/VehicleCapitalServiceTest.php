@@ -253,6 +253,7 @@ final class VehicleCapitalServiceTest extends CIUnitTestCase
         $this->assertIsString($css);
         $this->assertStringContainsString('class="vehicle-detail-actions"', $view);
         $this->assertStringContainsString('class="secondary-action button-link" href="/fleet/vehicles">Back to vehicles</a>', $view);
+        $this->assertStringContainsString('href="/operations/vehicles/<?= (int) $vehicle[\'id\'] ?>/trip-history">Trip history</a>', $view);
         $this->assertStringContainsString('class="primary-action button-link" href="/fleet/vehicles/<?= (int) $vehicle[\'id\'] ?>/edit">Edit vehicle</a>', $view);
         $this->assertStringContainsString('gap: 14px;', $css);
         $this->assertStringContainsString('.vehicle-detail-actions .button-link', $css);

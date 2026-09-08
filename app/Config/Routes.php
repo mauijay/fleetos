@@ -31,8 +31,12 @@ $routes->group('', ['filter' => 'session'], static function (RouteCollection $ro
 		$routes->post('(:num)/loans/(:num)/snapshots', 'VehicleCapital::saveSnapshot/$1/$2', ['filter' => 'csrf']);
 	});
 	$routes->get('operations/checklists/(:num)', 'TripMovementChecklists::show/$1', ['filter' => 'permission:admin.access']);
+	$routes->get('operations/vehicles/(:num)/trip-history', 'TripMovementChecklists::vehicleTripHistory/$1', ['filter' => 'permission:admin.access']);
 	$routes->post('operations/checklists/(:num)/facts', 'TripMovementChecklists::recordFacts/$1', ['filter' => ['permission:admin.access', 'csrf']]);
+	$routes->post('operations/checklists/(:num)/stage-at-hnl', 'TripMovementChecklists::stageAtHnl/$1', ['filter' => ['permission:admin.access', 'csrf']]);
+	$routes->post('operations/checklists/(:num)/confirm-guest-pickup', 'TripMovementChecklists::confirmGuestPickup/$1', ['filter' => ['permission:admin.access', 'csrf']]);
 	$routes->post('operations/checklists/(:num)/facts/correct', 'TripMovementChecklists::correctFacts/$1', ['filter' => ['permission:admin.access', 'csrf']]);
+	$routes->post('operations/checklists/(:num)/facts/repair-trip', 'TripMovementChecklists::repairWrongTrip/$1', ['filter' => ['permission:admin.access', 'csrf']]);
 	$routes->post('operations/checklists/(:num)/complete', 'TripMovementChecklists::complete/$1', ['filter' => ['permission:admin.access', 'csrf']]);
 	$routes->post('operations/checklists/(:num)/reopen', 'TripMovementChecklists::reopen/$1', ['filter' => ['permission:admin.access', 'csrf']]);
 	$routes->post('operations/checklist-items/(:num)/complete', 'TripMovementChecklists::completeItem/$1', ['filter' => ['permission:admin.access', 'csrf']]);

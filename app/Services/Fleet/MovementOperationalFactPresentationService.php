@@ -38,9 +38,9 @@ class MovementOperationalFactPresentationService
         $parkingPresentation = $parking === null ? null : $this->hnlGarages->presentation($parking['garage_code'], $parking['level'], $parking['row']);
 
         return array_merge($facts, [
-            'event_title' => $isHandoff ? 'Guest handoff recorded' : ($eventCode === 'actual_return' ? 'Actual return recorded' : ucwords(str_replace('_', ' ', $eventCode)) . ' recorded'),
+            'event_title' => $isHandoff ? 'Guest handoff recorded' : ($eventCode === 'vehicle_staged' ? 'Staged for pickup' : ($eventCode === 'actual_return' ? 'Actual return recorded' : ucwords(str_replace('_', ' ', $eventCode)) . ' recorded')),
             'occurred_at_label' => date('M j, Y g:i A', strtotime((string) $facts['occurred_at'])),
-            'location_label' => $isHandoff ? 'Handoff location' : ($isCurrent ? 'Current location' : 'Last known location'),
+            'location_label' => $isHandoff ? 'Handoff location' : ($eventCode === 'vehicle_staged' ? 'Staging location' : ($isCurrent ? 'Current location' : 'Last known location')),
             'location_class_label' => $locationLabels[$locationClass] ?? ucwords(str_replace('_', ' ', $locationClass)),
             'location_detail_value' => $locationDetail === '' ? null : $locationDetail,
             'airport_parking' => $parking,
