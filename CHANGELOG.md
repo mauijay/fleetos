@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.9.3 — Operator Flow Polish
+
+Release date: 2026-09-08
+
+### Movement Navigation
+
+- Movement Board current guest and trip rows link directly to the correct movement.
+- Contextual Open movement actions cover rented, staged, overdue, and turnaround states.
+- Normal operation no longer requires typed checklist URLs.
+
+### Trip Facts
+
+- Pickup and Return facts display independently and remain visible together.
+- Missing facts show Not recorded, while superseded and voided facts remain excluded.
+- HNL location formatting and Charge/Fuel presentation are preserved.
+
+### Correction Safety
+
+- Explicit Correct pickup and Correct return actions bind corrections to the intended event and assessment instead of the latest fact.
+- Wrong-trip actions remain fact-specific, and validation preserves the selected correction context.
+
+### Time Entry
+
+- Separate date and exact-minute time controls retain Honolulu-local timestamp composition.
+- Early-handoff protection remains unchanged.
+
+### Reservation Context
+
+- Compact Previous / Selected / Next context skips canceled neighboring reservations.
+- Selected canceled reservations remain displayable, and canceled reservations remain visible in full Vehicle Trip History.
+
+### Navigation Flow
+
+- Command Center -> Movement -> Trip History -> adjacent Movement.
+- Vehicle Details -> Trip History -> Movement.
+- Mobile and keyboard accessibility are improved throughout the flow.
+
 ## v0.9.2 - Historical Trip Repair Fix
 
 Release date: 2026-09-07
