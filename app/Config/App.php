@@ -8,7 +8,7 @@ class App extends BaseConfig
 {
     public string $appVersion = '0.9.0';
 
-    public string $siteCreditEmail = 'jaycadla@gmail';
+    public string $siteCreditEmail = 'jaycadla@gmail.com';
 
     public string $siteCreditClient = '808businesssolutions.com';
 
