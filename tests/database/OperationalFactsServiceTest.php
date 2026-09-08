@@ -77,34 +77,53 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
 
     public function testTripContextAndHistoryStayOnTheSameVehicle(): void
     {
+        $this->connection->table('lookup_values')->insertBatch([
+            ['id' => 1, 'code' => 'booked'],
+            ['id' => 2, 'code' => 'completed'],
+            ['id' => 3, 'code' => 'canceled_zero_payout'],
+            ['id' => 4, 'code' => 'canceled_host_payout'],
+        ]);
         $this->connection->table('turo_trips_normalized')->where('id', 100)->update([
-            'guest_name' => 'Current Guest', 'starts_at' => '2026-09-03 10:00:00', 'ends_at' => '2026-09-04 10:00:00',
+            'guest_name' => 'Current Guest', 'starts_at' => '2026-09-03 10:00:00', 'ends_at' => '2026-09-04 10:00:00', 'trip_status_lookup_value_id' => 2,
         ]);
         $this->connection->table('turo_trips_normalized')->insertBatch([
-            ['id' => 90, 'fleet_vehicle_id' => 10, 'guest_name' => 'Previous Guest', 'starts_at' => '2026-09-01 10:00:00', 'ends_at' => '2026-09-02 10:00:00', 'deleted_at' => null],
-            ['id' => 110, 'fleet_vehicle_id' => 10, 'guest_name' => 'Next Guest', 'starts_at' => '2026-09-05 10:00:00', 'ends_at' => '2026-09-06 10:00:00', 'deleted_at' => null],
-            ['id' => 105, 'fleet_vehicle_id' => 20, 'guest_name' => 'Other Vehicle', 'starts_at' => '2026-09-04 12:00:00', 'ends_at' => '2026-09-05 12:00:00', 'deleted_at' => null],
+            ['id' => 80, 'fleet_vehicle_id' => 10, 'guest_name' => 'Previous Guest', 'starts_at' => '2026-08-29 10:00:00', 'ends_at' => '2026-08-30 10:00:00', 'trip_status_lookup_value_id' => 2, 'deleted_at' => null],
+            ['id' => 90, 'fleet_vehicle_id' => 10, 'guest_name' => 'Canceled Previous Guest', 'starts_at' => '2026-09-01 10:00:00', 'ends_at' => '2026-09-02 10:00:00', 'trip_status_lookup_value_id' => 3, 'deleted_at' => null],
+            ['id' => 110, 'fleet_vehicle_id' => 10, 'guest_name' => 'Canceled Next Guest', 'starts_at' => '2026-09-05 10:00:00', 'ends_at' => '2026-09-06 10:00:00', 'trip_status_lookup_value_id' => 4, 'deleted_at' => null],
+            ['id' => 120, 'fleet_vehicle_id' => 10, 'guest_name' => 'Next Guest', 'starts_at' => '2026-09-07 10:00:00', 'ends_at' => '2026-09-08 10:00:00', 'trip_status_lookup_value_id' => 1, 'deleted_at' => null],
+            ['id' => 105, 'fleet_vehicle_id' => 20, 'guest_name' => 'Other Vehicle', 'starts_at' => '2026-09-04 12:00:00', 'ends_at' => '2026-09-05 12:00:00', 'trip_status_lookup_value_id' => 1, 'deleted_at' => null],
         ]);
         $this->connection->query('CREATE TABLE ' . $this->table('trip_movement_checklists') . ' (id INTEGER PRIMARY KEY, turo_trip_normalized_id INTEGER, movement_type VARCHAR(20), scheduled_at DATETIME)');
         $this->connection->table('trip_movement_checklists')->insertBatch([
-            ['id' => 501, 'turo_trip_normalized_id' => 90, 'movement_type' => 'pickup', 'scheduled_at' => '2026-09-01 10:00:00'],
-            ['id' => 502, 'turo_trip_normalized_id' => 90, 'movement_type' => 'return', 'scheduled_at' => '2026-09-02 10:00:00'],
+            ['id' => 501, 'turo_trip_normalized_id' => 80, 'movement_type' => 'pickup', 'scheduled_at' => '2026-08-29 10:00:00'],
+            ['id' => 502, 'turo_trip_normalized_id' => 90, 'movement_type' => 'pickup', 'scheduled_at' => '2026-09-01 10:00:00'],
             ['id' => 503, 'turo_trip_normalized_id' => 100, 'movement_type' => 'return', 'scheduled_at' => '2026-09-04 10:00:00'],
+            ['id' => 504, 'turo_trip_normalized_id' => 120, 'movement_type' => 'pickup', 'scheduled_at' => '2026-09-07 10:00:00'],
         ]);
         $checklistCount = $this->connection->table('trip_movement_checklists')->countAllResults();
 
         $context = $this->repository->tripContext(100);
         $history = $this->repository->vehicleTripHistory(10);
 
-        $this->assertSame(90, (int) $context['previous']['id']);
+        $this->assertSame(80, (int) $context['previous']['id']);
         $this->assertSame(100, (int) $context['current']['id']);
-        $this->assertSame(110, (int) $context['next']['id']);
+        $this->assertSame(120, (int) $context['next']['id']);
         $this->assertSame('/operations/checklists/501', $context['previous']['movement_href']);
         $this->assertSame('/operations/checklists/503', $context['current']['movement_href']);
-        $this->assertNull($context['next']['movement_href']);
-        $this->assertSame([110, 100, 90], array_map(static fn (array $trip): int => (int) $trip['id'], $history));
-        $this->assertSame([null, '/operations/checklists/503', '/operations/checklists/501'], array_column($history, 'movement_href'));
+        $this->assertSame('/operations/checklists/504', $context['next']['movement_href']);
+        $this->assertSame('/operations/checklists/503', $this->repository->movementChecklistHref(100, 'return'));
+        $this->assertSame([120, 110, 100, 90, 80], array_map(static fn (array $trip): int => (int) $trip['id'], $history));
+        $this->assertSame(['booked', 'canceled_host_payout', 'completed', 'canceled_zero_payout', 'completed'], array_column($history, 'trip_status_code'));
         $this->assertNotContains(105, array_column($history, 'id'));
+        $this->assertSame($checklistCount, $this->connection->table('trip_movement_checklists')->countAllResults());
+
+        $this->connection->table('turo_trips_normalized')->where('id', 100)->update(['trip_status_lookup_value_id' => 3]);
+        $selectedCanceledContext = $this->repository->tripContext(100);
+
+        $this->assertSame(100, (int) $selectedCanceledContext['current']['id']);
+        $this->assertSame('canceled_zero_payout', $selectedCanceledContext['current']['trip_status_code']);
+        $this->assertSame(80, (int) $selectedCanceledContext['previous']['id']);
+        $this->assertSame(120, (int) $selectedCanceledContext['next']['id']);
         $this->assertSame($checklistCount, $this->connection->table('trip_movement_checklists')->countAllResults());
     }
 
@@ -164,6 +183,21 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
         $this->assertSame((int) $originalEvent['id'], (int) $replacementEvent['supersedes_event_id']);
         $this->assertSame((int) $originalAssessment['id'], (int) $replacementAssessment['supersedes_assessment_id']);
         $this->assertSame(2, $this->connection->table('operational_fact_audits')->where('action', 'superseded')->countAllResults());
+
+        $returnChecklist = array_merge($checklist, ['movement_type' => 'return']);
+        $this->assertTrue($service->recordForChecklist($returnChecklist, [
+            'occurred_at' => '2026-09-03 21:42:00',
+            'location_class' => 'home',
+            'cleanliness' => 'clean',
+            'energy_percent' => 87,
+        ], 7));
+
+        $tripFacts = (new MovementOperationalFactPresentationService($this->repository))->tripFacts(100);
+        $this->assertSame((int) $replacementEvent['id'], (int) $tripFacts['pickup']['event_id']);
+        $this->assertNotSame((int) $originalEvent['id'], (int) $tripFacts['pickup']['event_id']);
+        $this->assertSame('actual_return', $tripFacts['return']['event_code']);
+        $this->assertSame('2026-09-03 21:42:00', $tripFacts['return']['occurred_at']);
+        $this->assertSame(1, $this->connection->table('trip_movement_events')->where('voided_at', null)->where('movement_type', 'pickup')->countAllResults());
     }
 
     public function testHnlStagingAndGuestPickupRemainDistinctAuthoritativeEvents(): void

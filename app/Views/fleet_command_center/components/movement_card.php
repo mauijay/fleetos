@@ -2,6 +2,7 @@
 /** @var array<string, mixed> $vehicle */
 $state = $vehicle['state'];
 $currentTrip = $vehicle['current_trip'] ?? null;
+$currentMovementHref = $vehicle['current_movement_href'] ?? null;
 $nextTrip = $vehicle['next_trip'];
 $recommendation = $vehicle['recommendation'];
 $operatorPlan = $vehicle['operator_plan'];
@@ -20,12 +21,14 @@ $blockers = $vehicle['blockers'];
     <div class="movement-card__commitment">
         <p class="movement-card__primary"><?= esc($vehicle['primary_line']) ?></p>
         <?php if ($currentTrip !== null): ?>
-            <p class="movement-card__current-trip" aria-label="Current reservation">
+            <?php $currentTripTag = $currentMovementHref === null ? 'p' : 'a'; ?>
+            <<?= $currentTripTag ?> class="movement-card__current-trip<?= $currentMovementHref === null ? '' : ' movement-card__current-trip-link' ?>"<?= $currentMovementHref === null ? ' aria-label="Current reservation"' : ' href="' . esc((string) $currentMovementHref, 'attr') . '" aria-label="Open movement for ' . esc((string) $currentTrip['guest_name'], 'attr') . '"' ?>>
                 <strong><?= esc($currentTrip['guest_name']) ?></strong>
                 <?php if ($currentTrip['timing_label'] !== null): ?>
                     <span><?= esc($currentTrip['timing_label']) ?></span>
                 <?php endif; ?>
-            </p>
+                <?php if ($currentMovementHref !== null): ?><span class="movement-card__movement-link">Open movement</span><?php endif; ?>
+            </<?= $currentTripTag ?>>
         <?php endif; ?>
     </div>
 

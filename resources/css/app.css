@@ -480,6 +480,24 @@ h3 {
   overflow-wrap: anywhere;
 }
 
+.movement-card__current-trip-link {
+  align-items: center;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.movement-card__current-trip-link:hover,
+.movement-card__current-trip-link:focus-visible {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.movement-card__movement-link {
+  margin-left: auto;
+  color: var(--accent);
+  font-weight: 800;
+}
+
 .movement-card__facts {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1369,9 +1387,62 @@ h3 {
 
 .movement-fact-summary {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   margin: 16px 0 0;
+}
+
+.trip-facts-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.trip-fact {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  padding: 16px;
+}
+
+.trip-fact.is-selected {
+  border-color: var(--accent);
+}
+
+.trip-fact__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.trip-fact__time {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.local-datetime-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.local-datetime-fields legend {
+  grid-column: 1 / -1;
+  margin-bottom: 4px;
+  font-weight: 750;
+}
+
+.local-datetime-fields > span {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .movement-fact-summary div {
@@ -1792,6 +1863,7 @@ h3 {
   .integration-grid,
   .import-notes,
   .movement-fact-summary,
+  .trip-facts-grid,
   .trip-context-grid,
   .trip-history-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1862,6 +1934,8 @@ h3 {
   .integration-grid,
   .import-notes,
   .movement-fact-summary,
+  .trip-facts-grid,
+  .local-datetime-fields,
   .trip-context-grid,
   .trip-history-row {
     grid-template-columns: 1fr;

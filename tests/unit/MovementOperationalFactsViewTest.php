@@ -32,8 +32,8 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
         $this->assertStringNotContainsString('Current location: Waikiki Hotel', $html);
         $this->assertStringContainsString('Clean', $html);
         $this->assertStringContainsString('<dt>Charge</dt><dd>82%</dd>', $html);
-        $this->assertStringContainsString('Record Guest Handoff', $html);
-        $this->assertStringContainsString('Correct recorded facts', $html);
+        $this->assertStringNotContainsString('Record Guest Handoff', $html);
+        $this->assertStringContainsString('Correct pickup', $html);
         $this->assertStringContainsString('<section class="section operational-facts">', $html);
     }
 
@@ -52,7 +52,47 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
         $this->assertStringContainsString('Actual return recorded', $html);
         $this->assertStringContainsString('Current location', $html);
         $this->assertStringContainsString('<dt>Fuel</dt><dd>23%</dd>', $html);
-        $this->assertStringContainsString('Record Actual Return', $html);
+        $this->assertStringNotContainsString('Record Actual Return', $html);
+        $this->assertStringContainsString('Use the return fact actions above', $html);
+    }
+
+    public function testTripFactsRenderAuthoritativePickupAndReturnWithExplicitCorrectionTargets(): void
+    {
+        $pickup = $this->facts(['event_id' => 11, 'assessment_id' => 12]);
+        $return = $this->facts([
+            'event_id' => 21,
+            'assessment_id' => 22,
+            'event_title' => 'Actual return recorded',
+            'occurred_at_label' => 'Sep 5, 2026 6:39 PM',
+            'location_label' => 'Current location',
+            'location_class_label' => 'Home',
+            'location_detail_value' => null,
+            'cleanliness_label' => 'Dirty',
+            'energy_value' => '87%',
+        ]);
+
+        $html = $this->render('return', $return, false, [], ['tripFacts' => ['pickup' => $pickup, 'return' => $return]]);
+
+        $this->assertStringContainsString('Trip facts', $html);
+        $this->assertStringContainsString('>Pickup<', $html);
+        $this->assertStringContainsString('>Return<', $html);
+        $this->assertStringContainsString('Sep 3, 2026 8:05 AM', $html);
+        $this->assertStringContainsString('Sep 5, 2026 6:39 PM', $html);
+        $this->assertStringContainsString('?correct=1&amp;fact=pickup', $html);
+        $this->assertStringContainsString('?correct=1&amp;fact=return', $html);
+        $this->assertStringContainsString('?repair=1&amp;fact=pickup', $html);
+        $this->assertStringContainsString('?repair=1&amp;fact=return', $html);
+    }
+
+    public function testTripFactsShowMissingSideWithoutDuplicatingLatestFactPanel(): void
+    {
+        $pickup = $this->facts();
+
+        $html = $this->render('pickup', $pickup, false, [], ['tripFacts' => ['pickup' => $pickup, 'return' => null]]);
+
+        $this->assertStringContainsString('>Return<', $html);
+        $this->assertStringContainsString('Not recorded', $html);
+        $this->assertStringNotContainsString('Latest saved facts', $html);
     }
 
     public function testStagedPickupShowsSeparateConfirmationAndRepairActions(): void
@@ -124,10 +164,13 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
 
     public function testDirectHandoffDefaultsEditableTimeWithoutWritingOrPrematureConfirmation(): void
     {
-        $html = $this->render('pickup', $this->facts(), false, ['occurred_at' => '2026-09-07T16:27']);
+        $html = $this->render('pickup', $this->facts(), false, ['occurred_at' => '2026-09-07T16:27'], ['tripFacts' => ['pickup' => null, 'return' => null]]);
 
         $this->assertStringContainsString('id="handoff-entry"', $html);
-        $this->assertStringContainsString('name="occurred_at" required value="2026-09-07T16&#x3A;27"', $html);
+        $this->assertStringContainsString('type="date" name="occurred_on" required value="2026-09-07"', $html);
+        $this->assertStringContainsString('type="time" name="occurred_time" required step="60" value="16&#x3A;27"', $html);
+        $this->assertStringContainsString('type="hidden" name="occurred_at" value="2026-09-07T16&#x3A;27"', $html);
+        $this->assertStringContainsString('data-local-datetime', $html);
         $this->assertStringContainsString('Charge/Fuel percent', $html);
         $this->assertStringContainsString('Record Guest Handoff', $html);
         $this->assertStringNotContainsString('name="confirm_early_handoff"', $html);
@@ -138,6 +181,7 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
         $trip = ['id' => 100, 'turo_trip_id' => 900100, 'guest_name' => 'Selected Guest', 'starts_at' => '2026-10-06 21:30:00', 'ends_at' => '2026-10-12 06:00:00', 'pickup_location_class' => 'home', 'return_location_class' => 'home', 'trip_status_code' => 'booked'];
         $warning = 'This reservation does not begin until Oct 6, 2026 at 9:30 PM. The handoff time entered is more than 2 hours early. Are you sure this is the correct reservation?';
         $html = $this->render('pickup', $this->facts(), false, ['occurred_at' => '2026-10-05T08:05', 'location_class' => 'home'], [
+            'tripFacts' => ['pickup' => null, 'return' => null],
             'tripContext' => ['previous' => null, 'current' => $trip, 'next' => null],
             'isEarlyHandoffWarning' => true,
             'error' => $warning,
@@ -146,7 +190,9 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
         $this->assertStringContainsString($warning, $html);
         $this->assertStringContainsString('Selected trip', $html);
         $this->assertStringContainsString('Selected Guest', $html);
-        $this->assertStringContainsString('value="2026-10-05T08&#x3A;05"', $html);
+        $this->assertStringContainsString('name="occurred_on" required value="2026-10-05"', $html);
+        $this->assertStringContainsString('name="occurred_time" required step="60" value="08&#x3A;05"', $html);
+        $this->assertStringContainsString('name="occurred_at" value="2026-10-05T08&#x3A;05"', $html);
         $this->assertStringContainsString('name="confirm_early_handoff" value="1" required', $html);
     }
 

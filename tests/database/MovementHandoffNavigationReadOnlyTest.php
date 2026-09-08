@@ -43,6 +43,7 @@ final class MovementHandoffNavigationReadOnlyTest extends CIUnitTestCase
 
         $facts = $this->createMock(MovementOperationalFactPresentationService::class);
         $facts->method('latestForTrip')->willReturn(null);
+        $facts->method('tripFacts')->willReturn(['pickup' => null, 'return' => null]);
         Services::injectMock('movementOperationalFactPresentationService', $facts);
 
         $events = $this->createMock(MovementEventService::class);
@@ -134,6 +135,8 @@ final class MovementHandoffNavigationReadOnlyTest extends CIUnitTestCase
             'trip_movement_checklists',
             'trip_movement_checklist_items',
             'operational_fact_audits',
+            'vehicle_positioning_plans',
+            'airport_movement_workflows',
         ];
     }
 }

@@ -73,11 +73,27 @@ final class MovementBoardCardViewTest extends CIUnitTestCase
     {
         $vehicle = $this->vehicle();
         $vehicle['action'] = ['code' => 'monitor_pickup', 'label' => 'Record handoff', 'href' => '/operations/checklists/40?action=handoff'];
+        $vehicle['current_movement_href'] = '/operations/checklists/40';
 
         $html = $this->render($vehicle);
 
         $this->assertStringContainsString('<a class="button-link movement-card__action" href="&#x2F;operations&#x2F;checklists&#x2F;40&#x3F;action&#x3D;handoff">Record handoff</a>', $html);
+        $this->assertStringContainsString('movement-card__current-trip-link', $html);
+        $this->assertStringContainsString('href="&#x2F;operations&#x2F;checklists&#x2F;40"', $html);
+        $this->assertStringContainsString('aria-label="Open movement for Current&#x20;Guest"', $html);
         $this->assertStringNotContainsString('<form', $html);
+    }
+
+    public function testCardShowsContextualOpenMovementActionForKnownCurrentMovement(): void
+    {
+        $vehicle = $this->vehicle();
+        $vehicle['current_movement_href'] = '/operations/checklists/41';
+
+        $html = $this->render($vehicle);
+
+        $this->assertStringContainsString('class="movement-card__movement-link"', $html);
+        $this->assertStringContainsString('href="&#x2F;operations&#x2F;checklists&#x2F;41"', $html);
+        $this->assertStringContainsString('Open movement', $html);
     }
 
     public function testNextTripWithoutGuestKeepsTimeAndLocationWithoutAnEmptyGuestLine(): void
@@ -107,6 +123,7 @@ final class MovementBoardCardViewTest extends CIUnitTestCase
             'state' => ['tone' => 'info', 'label' => 'Currently Rented'],
             'primary_line' => 'On trip; due Sep 5, 5:00 PM.',
             'current_trip' => ['id' => 90, 'guest_name' => 'Current Guest', 'timing_label' => 'Due Sep 5, 5:00 PM'],
+            'current_movement_href' => null,
             'location_heading' => 'Planned return',
             'location_class_label' => 'Airport HNL',
             'location_detail' => 'Terminal 2 garage',

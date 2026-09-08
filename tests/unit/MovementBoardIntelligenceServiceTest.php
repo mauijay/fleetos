@@ -49,6 +49,7 @@ final class MovementBoardIntelligenceServiceTest extends CIUnitTestCase
         $this->assertSame('Spaceship-09', $card['fleet_code']);
         $this->assertSame('Record return', $card['action']['label']);
         $this->assertSame('/operations/checklists/41', $card['action']['href']);
+        $this->assertSame('/operations/checklists/41', $card['current_movement_href']);
     }
 
     public function testActualReturnUsesActualLocationAndIncompleteAssessmentRequiresAction(): void
@@ -90,6 +91,7 @@ final class MovementBoardIntelligenceServiceTest extends CIUnitTestCase
         $this->assertSame(['id' => 900, 'guest_name' => 'Staged Guest', 'timing_label' => 'Pickup Sep 3, 2:00 PM'], $card['current_trip']);
         $this->assertSame('Confirm Guest Pickup', $card['action']['label']);
         $this->assertSame('/operations/checklists/40?action=confirm-pickup', $card['action']['href']);
+        $this->assertSame('/operations/checklists/40', $card['current_movement_href']);
         $this->assertSame('International Garage · Blue', $card['airport_garage_line']);
     }
 
@@ -108,6 +110,31 @@ final class MovementBoardIntelligenceServiceTest extends CIUnitTestCase
         $this->assertSame('Record handoff', $card['action']['label']);
         $this->assertSame('/operations/checklists/40?action=handoff', $card['action']['href']);
         $this->assertSame(['id' => 900, 'guest_name' => 'Overdue Guest', 'timing_label' => 'Scheduled Sep 2, 9:30 PM'], $card['current_trip']);
+        $this->assertSame('/operations/checklists/40', $card['current_movement_href']);
+    }
+
+    public function testReturnOverdueLinkMatchesCurrentTripInsteadOfFirstReturnChecklist(): void
+    {
+        $service = $this->service(
+            ['id' => 90, 'turo_trip_normalized_id' => 900, 'event_code' => 'actual_handoff', 'occurred_at' => '2026-09-03 08:05:00'],
+            ['id' => 900, 'guest_name' => 'Return Guest', 'starts_at' => '2026-09-03 08:00:00', 'ends_at' => '2026-09-05 10:00:00'],
+            ['cleanliness' => 'clean', 'energy_percent' => 80],
+            ['energy_kind' => 'electric', 'ready_energy_target_percent' => 80, 'capabilities' => []],
+            null,
+        );
+
+        $card = $service->enrich([[
+            'fleet_vehicle_id' => 9,
+            'status' => 'available',
+            'checklists' => [
+                ['turo_trip_normalized_id' => 899, 'movement_type' => 'return', 'href' => '/operations/checklists/39'],
+                ['turo_trip_normalized_id' => 900, 'movement_type' => 'return', 'href' => '/operations/checklists/41'],
+            ],
+        ]], new DateTimeImmutable('2026-09-05 12:00:00'))[0];
+
+        $this->assertSame('return_confirmation_overdue', $card['state']['code']);
+        $this->assertSame('/operations/checklists/41', $card['current_movement_href']);
+        $this->assertSame('/operations/checklists/41', $card['action']['href']);
     }
 
     public function testCurrentGuestNeverFallsBackToCardOrNextTripGuest(): void

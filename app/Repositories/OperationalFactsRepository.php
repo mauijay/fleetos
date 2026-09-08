@@ -244,11 +244,11 @@ class OperationalFactsRepository
             return ['previous' => null, 'current' => $this->withMovementHref($current), 'next' => null];
         }
 
-        $previous = $this->tripHistoryBuilder()
+        $previous = $this->tripHistoryBuilder(excludeCanceled: true)
             ->where('trips.fleet_vehicle_id', $current['fleet_vehicle_id'])
             ->where('trips.starts_at <', $current['starts_at'])
             ->orderBy('trips.starts_at', 'DESC')->orderBy('trips.id', 'DESC')->get(1)->getRowArray();
-        $next = $this->tripHistoryBuilder()
+        $next = $this->tripHistoryBuilder(excludeCanceled: true)
             ->where('trips.fleet_vehicle_id', $current['fleet_vehicle_id'])
             ->where('trips.starts_at >', $current['starts_at'])
             ->orderBy('trips.starts_at', 'ASC')->orderBy('trips.id', 'ASC')->get(1)->getRowArray();
@@ -280,7 +280,7 @@ class OperationalFactsRepository
         return $row === null ? null : $row;
     }
 
-    private function tripHistoryBuilder(): \CodeIgniter\Database\BaseBuilder
+    private function tripHistoryBuilder(bool $excludeCanceled = false): \CodeIgniter\Database\BaseBuilder
     {
         $tripFields = $this->db->getFieldNames('turo_trips_normalized');
         $builder = $this->db->table('turo_trips_normalized trips')
@@ -296,6 +296,12 @@ class OperationalFactsRepository
         if ($this->db->tableExists('lookup_values') && in_array('trip_status_lookup_value_id', $tripFields, true)) {
             $builder->select('trip_statuses.code AS trip_status_code')
                 ->join('lookup_values trip_statuses', 'trip_statuses.id = trips.trip_status_lookup_value_id', 'left');
+            if ($excludeCanceled) {
+                $builder->groupStart()
+                    ->where('trip_statuses.code', null)
+                    ->orWhereNotIn('trip_statuses.code', (new FleetIntelligenceRepository($this->db))->canceledTripStatusCodes())
+                    ->groupEnd();
+            }
         }
         if ($this->db->tableExists('trip_movement_checklists')) {
             $builder->select('pickup_checklist.id AS pickup_checklist_id, return_checklist.id AS return_checklist_id')
@@ -317,6 +323,34 @@ class OperationalFactsRepository
         $checklistId = (int) ($trip['pickup_checklist_id'] ?? 0) ?: (int) ($trip['return_checklist_id'] ?? 0);
 
         return array_merge($trip, ['movement_href' => $checklistId > 0 ? '/operations/checklists/' . $checklistId : null]);
+    }
+
+    public function movementChecklistHref(int $tripId, ?string $preferredMovementType = null): ?string
+    {
+        if (! $this->db->tableExists('trip_movement_checklists')) {
+            return null;
+        }
+        if ($preferredMovementType !== null) {
+            $preferred = $this->db->table('trip_movement_checklists')
+                ->select('id')
+                ->where('turo_trip_normalized_id', $tripId)
+                ->where('movement_type', $preferredMovementType)
+                ->orderBy('scheduled_at', 'DESC')
+                ->get(1)
+                ->getRowArray();
+            if ($preferred !== null) {
+                return '/operations/checklists/' . (int) $preferred['id'];
+            }
+        }
+
+        $fallback = $this->db->table('trip_movement_checklists')
+            ->select('id')
+            ->where('turo_trip_normalized_id', $tripId)
+            ->orderBy('scheduled_at', 'DESC')
+            ->get(1)
+            ->getRowArray();
+
+        return $fallback === null ? null : '/operations/checklists/' . (int) $fallback['id'];
     }
 
     /** @return array<string, mixed>|null */
@@ -503,6 +537,12 @@ class OperationalFactsRepository
     /** @return array<string, mixed>|null */
     public function latestActiveFactsForTrip(int $tripId): ?array
     {
+        return $this->activeFactsForTrip($tripId)[0] ?? null;
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    public function activeFactsForTrip(int $tripId): array
+    {
         $builder = $this->db->table('movement_assessments assessments')
             ->select('assessments.id AS assessment_id, assessments.movement_type, assessments.cleanliness, assessments.energy_percent, assessments.captured_at, assessments.source, assessments.actor_user_id, assessments.note')
             ->select('events.id AS event_id, events.event_code, events.occurred_at, events.location_class, events.location_detail')
@@ -516,9 +556,7 @@ class OperationalFactsRepository
         if ($this->hasStructuredAirportParking()) {
             $builder->select('events.airport_garage_code, events.airport_parking_level, events.airport_parking_row');
         }
-        $row = $builder->orderBy('assessments.captured_at', 'DESC')->orderBy('assessments.id', 'DESC')->get(1)->getRowArray();
-
-        return $row === null ? null : $row;
+        return $builder->orderBy('assessments.captured_at', 'DESC')->orderBy('assessments.id', 'DESC')->get()->getResultArray();
     }
 
     private function movementEventSelect(): string

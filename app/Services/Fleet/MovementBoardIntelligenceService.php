@@ -69,6 +69,8 @@ class MovementBoardIntelligenceService
         ]);
         $energyKind = (string) ($profile['energy_kind'] ?? 'unknown');
         $recommendation = $this->presentRecommendation($recommendation, $assessment, $profile);
+        $currentTrip = $this->presentCurrentTrip($schedule, (string) $state['code']);
+        $currentMovementHref = $currentTrip === null ? null : $this->movementHref($state, $card, $schedule);
 
         return array_merge($card, [
             'state' => $state,
@@ -82,7 +84,8 @@ class MovementBoardIntelligenceService
             'airport_position_line' => $location['position_line'],
             'approved_turo_garage' => $location['approved_turo_garage'],
             'location_basis' => $location['basis'],
-            'current_trip' => $this->presentCurrentTrip($schedule, (string) $state['code']),
+            'current_trip' => $currentTrip,
+            'current_movement_href' => $currentMovementHref,
             'next_trip' => $this->presentNextTrip($nextTrip),
             'condition_label' => $assessment === null || ($assessment['cleanliness'] ?? null) === null ? 'Condition not captured' : ucfirst((string) $assessment['cleanliness']),
             'energy_label' => $energyKind === 'electric' ? 'Charge' : (in_array($energyKind, ['gasoline', 'diesel', 'hybrid'], true) ? 'Fuel' : 'Energy'),
@@ -92,7 +95,7 @@ class MovementBoardIntelligenceService
             'operator_plan' => $this->presentOperatorPlan($activePlan, (string) ($recommendation['code'] ?? '')),
             'positioning_plan_href' => '/fleet/vehicles/' . $vehicleId . '/positioning-plan',
             'freshness' => $freshness,
-            'action' => $this->presentAction($state, $card, $vehicleId),
+            'action' => $this->presentAction($state, $card, $vehicleId, $schedule),
         ]);
     }
 
@@ -333,18 +336,10 @@ class MovementBoardIntelligenceService
     }
 
     /** @return array{code:string,label:string,href:string} */
-    private function presentAction(array $state, array $card, int $vehicleId): array
+    private function presentAction(array $state, array $card, int $vehicleId, ?array $schedule): array
     {
         $code = (string) ($state['primary_action']['code'] ?? 'none');
-        $movementType = in_array($code, ['confirm_handoff', 'monitor_pickup'], true) ? 'pickup'
-            : (in_array($code, ['confirm_return', 'monitor_return', 'complete_return_assessment', 'complete_turnaround'], true) ? 'return' : null);
-        $checklistHref = null;
-        foreach ($card['checklists'] ?? [] as $checklist) {
-            if ($movementType === null || ($checklist['movement_type'] ?? null) === $movementType) {
-                $checklistHref = $checklist['href'] ?? null;
-                break;
-            }
-        }
+        $checklistHref = $this->movementHref($state, $card, $schedule);
         $checklistHref ??= $card['checklist_href'] ?? null;
         $checklistLabels = [
             'confirm_handoff' => in_array($state['code'] ?? null, ['staged_for_pickup', 'staged_pickup_confirmation_needed'], true) ? 'Confirm Guest Pickup' : 'Record handoff',
@@ -368,6 +363,22 @@ class MovementBoardIntelligenceService
             'label' => $isPositioningAction ? 'Set positioning plan' : 'View vehicle',
             'href' => '/fleet/vehicles/' . $vehicleId . ($isPositioningAction ? '/positioning-plan' : ''),
         ];
+    }
+
+    private function movementHref(array $state, array $card, ?array $schedule): ?string
+    {
+        $code = (string) ($state['primary_action']['code'] ?? 'none');
+        $movementType = in_array($code, ['confirm_handoff', 'monitor_pickup'], true) ? 'pickup'
+            : (in_array($code, ['confirm_return', 'monitor_return', 'complete_return_assessment', 'complete_turnaround'], true) ? 'return' : null);
+        $tripId = (int) ($schedule['id'] ?? 0);
+        foreach ($card['checklists'] ?? [] as $checklist) {
+            if (($movementType === null || ($checklist['movement_type'] ?? null) === $movementType)
+                && ($tripId === 0 || ! isset($checklist['turo_trip_normalized_id']) || (int) $checklist['turo_trip_normalized_id'] === $tripId)) {
+                return isset($checklist['href']) ? (string) $checklist['href'] : null;
+            }
+        }
+
+        return $tripId > 0 ? $this->repo()->movementChecklistHref($tripId, $movementType) : null;
     }
 
     private function repo(): OperationalFactsRepository

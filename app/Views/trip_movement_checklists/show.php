@@ -5,6 +5,7 @@
 /** @var string|null $error */
 /** @var array<string, mixed>|null $currentLocation */
 /** @var array<string, mixed>|null $latestFacts */
+/** @var array{pickup:array<string, mixed>|null,return:array<string, mixed>|null} $tripFacts */
 /** @var bool $correctingFacts */
 /** @var bool $isStagedPickup */
 /** @var bool $isPickupConfirmed */
@@ -21,7 +22,13 @@ $repairingFacts ??= false;
 $repairCandidates ??= [];
 $repairConflicts ??= [];
 $tripContext ??= null;
+$currentLocation ??= null;
 $isEarlyHandoffWarning ??= false;
+$factTarget ??= null;
+$tripFacts ??= [
+    'pickup' => ($latestFacts['movement_type'] ?? $checklist['movement_type'] ?? null) === 'pickup' ? $latestFacts : null,
+    'return' => ($latestFacts['movement_type'] ?? $checklist['movement_type'] ?? null) === 'return' ? $latestFacts : null,
+];
 ?>
 <!doctype html>
 <html lang="en">
@@ -108,28 +115,41 @@ $isEarlyHandoffWarning ??= false;
             <?php endif; ?>
 
             <section class="section operational-facts">
-                <div class="section-heading"><p class="eyebrow">Observed</p><h2>Operational Facts</h2></div>
-                <?php if ($latestFacts !== null): ?>
-                    <div class="briefing-card">
-                        <div class="section-heading">
-                            <div><p class="eyebrow">Latest saved facts</p><h3><?= esc((string) $latestFacts['event_title']) ?></h3></div>
-                            <?php if (! $correctingFacts && ! $repairingFacts): ?><div class="fact-actions"><a class="action-link" href="/operations/checklists/<?= (int) $checklist['id'] ?>?correct=1">Correct recorded facts</a><a class="action-link" href="/operations/checklists/<?= (int) $checklist['id'] ?>?repair=1">Recorded on wrong trip</a></div><?php endif; ?>
-                        </div>
-                        <p class="briefing-copy"><?= esc((string) $latestFacts['occurred_at_label']) ?></p>
-                        <dl class="movement-fact-summary">
-                            <div><dt><?= esc((string) $latestFacts['location_label']) ?></dt><dd><?= esc((string) $latestFacts['location_class_label']) ?><?php if (($latestFacts['airport_garage_line'] ?? null) !== null): ?><span class="movement-fact-detail movement-fact-garage"><?= esc((string) $latestFacts['airport_garage_line']) ?></span><span class="movement-fact-detail"><?= esc((string) $latestFacts['airport_position_line']) ?></span><?php elseif ($latestFacts['location_detail_value'] !== null): ?><span class="movement-fact-detail"><?= esc((string) $latestFacts['location_detail_value']) ?></span><?php endif; ?></dd></div>
-                            <div><dt>Cleanliness</dt><dd><?= esc((string) $latestFacts['cleanliness_label']) ?></dd></div>
-                            <div><dt><?= esc((string) $latestFacts['energy_label']) ?></dt><dd><?= esc((string) $latestFacts['energy_value']) ?></dd></div>
-                            <div><dt>Provenance</dt><dd><?= esc((string) $latestFacts['source_label']) ?> · <?= esc((string) $latestFacts['actor_label']) ?></dd></div>
-                        </dl>
-                    </div>
-                <?php elseif ($currentLocation !== null): ?>
+                <div class="section-heading"><div><p class="eyebrow">Observed</p><h2>Trip facts</h2></div></div>
+                <div class="trip-facts-grid">
+                    <?php foreach (['pickup' => 'Pickup', 'return' => 'Return'] as $factType => $factLabel): ?>
+                        <?php $fact = $tripFacts[$factType] ?? null; ?>
+                        <article class="trip-fact<?= $factTarget === $factType ? ' is-selected' : '' ?>" aria-labelledby="<?= esc($factType, 'attr') ?>-fact-heading">
+                            <div class="trip-fact__header">
+                                <div><p class="eyebrow"><?= esc($factLabel) ?></p><h3 id="<?= esc($factType, 'attr') ?>-fact-heading"><?= $fact === null ? 'Not recorded' : esc((string) $fact['event_title']) ?></h3></div>
+                                <?php if ($fact !== null && ! $correctingFacts && ! $repairingFacts): ?>
+                                    <div class="fact-actions">
+                                        <a class="action-link" href="/operations/checklists/<?= (int) $checklist['id'] ?>?correct=1&amp;fact=<?= esc($factType, 'attr') ?>">Correct <?= esc(strtolower($factLabel)) ?></a>
+                                        <a class="action-link" href="/operations/checklists/<?= (int) $checklist['id'] ?>?repair=1&amp;fact=<?= esc($factType, 'attr') ?>">Recorded on wrong trip</a>
+                                    </div>
+                                <?php endif; ?>
+                            </div>
+                            <?php if ($fact !== null): ?>
+                                <p class="trip-fact__time"><?= esc((string) $fact['occurred_at_label']) ?></p>
+                                <dl class="movement-fact-summary">
+                                    <div><dt><?= esc((string) $fact['location_label']) ?></dt><dd><?= esc((string) $fact['location_class_label']) ?><?php if (($fact['airport_garage_line'] ?? null) !== null): ?><span class="movement-fact-detail movement-fact-garage"><?= esc((string) $fact['airport_garage_line']) ?></span><span class="movement-fact-detail"><?= esc((string) $fact['airport_position_line']) ?></span><?php elseif ($fact['location_detail_value'] !== null): ?><span class="movement-fact-detail"><?= esc((string) $fact['location_detail_value']) ?></span><?php endif; ?></dd></div>
+                                    <div><dt>Cleanliness</dt><dd><?= esc((string) $fact['cleanliness_label']) ?></dd></div>
+                                    <div><dt><?= esc((string) $fact['energy_label']) ?></dt><dd><?= esc((string) $fact['energy_value']) ?></dd></div>
+                                    <div><dt>Provenance</dt><dd><?= esc((string) $fact['source_label']) ?> · <?= esc((string) $fact['actor_label']) ?></dd></div>
+                                </dl>
+                            <?php endif; ?>
+                        </article>
+                    <?php endforeach; ?>
+                </div>
+                <?php if ($tripFacts['pickup'] === null && $tripFacts['return'] === null && $currentLocation !== null): ?>
                     <p class="muted"><?= esc((string) ($currentLocation['location_label'] ?? 'Last known location')) ?>: <?= esc(ucwords(str_replace('_', ' ', (string) ($currentLocation['location_class'] ?? 'unknown')))) ?></p>
                 <?php endif; ?>
                 <?php
-                $movementType = (string) ($checklist['movement_type'] ?? 'movement');
+$movementType = (string) (($correctingFacts || $repairingFacts) ? ($latestFacts['movement_type'] ?? $factTarget ?? $checklist['movement_type'] ?? 'movement') : ($checklist['movement_type'] ?? 'movement'));
 $formAction = $correctingFacts ? '/operations/checklists/' . (int) $checklist['id'] . '/facts/correct' : '/operations/checklists/' . (int) $checklist['id'] . '/facts';
 $occurredAt = (string) ($factFormData['occurred_at'] ?? date('Y-m-d\TH:i'));
+$occurredOn = substr($occurredAt, 0, 10);
+$occurredTime = substr($occurredAt, 11, 5);
 $selectedLocation = (string) ($factFormData['location_class'] ?? 'unknown');
 $selectedGarage = (string) ($factFormData['airport_garage_code'] ?? '');
 $selectedLevel = (string) ($factFormData['airport_parking_level'] ?? '');
@@ -142,6 +162,7 @@ $energyPercent = $factFormData['energy_percent'] ?? '';
                         <?= csrf_field() ?>
                         <input type="hidden" name="event_id" value="<?= (int) ($latestFacts['event_id'] ?? 0) ?>">
                         <input type="hidden" name="assessment_id" value="<?= (int) ($latestFacts['assessment_id'] ?? 0) ?>">
+                        <input type="hidden" name="fact_target" value="<?= esc((string) ($factTarget ?? $movementType), 'attr') ?>">
                         <label>Correct trip
                             <select name="target_trip_id" required data-repair-target-select>
                                 <option value="">Choose a nearby trip</option>
@@ -170,27 +191,33 @@ $energyPercent = $factFormData['energy_percent'] ?? '';
                         <button class="primary-action" type="submit" <?= $repairCandidates === [] ? 'disabled' : '' ?>>Move Recorded Facts</button>
                         <a class="action-link" href="/operations/checklists/<?= (int) $checklist['id'] ?>">Cancel repair</a>
                     </form>
-                <?php elseif ($isPickupConfirmed && ! $correctingFacts): ?>
+                <?php elseif ($movementType === 'pickup' && $isPickupConfirmed && ! $correctingFacts): ?>
                     <div class="import-message tone-success">
                         <strong>Guest pickup confirmed</strong>
-                        <span><?= esc((new DateTimeImmutable((string) ($latestEvent['occurred_at'] ?? 'now')))->format('M j, Y g:i A')) ?></span>
+                        <span><?= esc((string) ($tripFacts['pickup']['occurred_at_label'] ?? 'Time not captured')) ?></span>
                     </div>
-                <?php elseif ($isStagedPickup && ! $correctingFacts): ?>
+                <?php elseif ($movementType === 'pickup' && $isStagedPickup && ! $correctingFacts): ?>
                     <form id="handoff-entry" class="issue-filters" action="/operations/checklists/<?= (int) $checklist['id'] ?>/confirm-guest-pickup" method="post">
                         <?= csrf_field() ?>
-                        <label>Guest pickup time<input type="datetime-local" name="occurred_at" required value="<?= esc($occurredAt, 'attr') ?>"></label>
+                        <fieldset class="local-datetime-fields" data-local-datetime><legend>Guest pickup time</legend><label>Date<input type="date" name="occurred_on" required value="<?= esc($occurredOn, 'attr') ?>"></label><label>Time<input type="time" name="occurred_time" required step="60" value="<?= esc($occurredTime, 'attr') ?>"></label><input type="hidden" name="occurred_at" value="<?= esc($occurredAt, 'attr') ?>"><span>Honolulu local time</span></fieldset>
                         <label>Note<textarea name="note" rows="2"><?= esc((string) ($factFormData['note'] ?? '')) ?></textarea></label>
                         <?php if ($isEarlyHandoffWarning): ?><label class="checkbox-row"><input type="checkbox" name="confirm_early_handoff" value="1" required><span>I reviewed the selected reservation and confirm this early guest pickup time is correct.</span></label><?php endif; ?>
                         <button class="primary-action" type="submit">Confirm Guest Pickup</button>
                     </form>
+                <?php elseif (! $correctingFacts && ($tripFacts[$movementType] ?? null) !== null): ?>
+                    <div class="import-message tone-success">
+                        <strong><?= $movementType === 'return' ? 'Actual return recorded' : 'Guest pickup recorded' ?></strong>
+                        <span>Use the <?= esc($movementType) ?> fact actions above to correct or repair this observation.</span>
+                    </div>
                 <?php else: ?>
                 <form id="handoff-entry" class="issue-filters" action="<?= esc($formAction, 'attr') ?>" method="post">
                     <?= csrf_field() ?>
                     <?php if ($correctingFacts): ?>
                         <input type="hidden" name="event_id" value="<?= (int) ($factFormData['event_id'] ?? 0) ?>">
                         <input type="hidden" name="assessment_id" value="<?= (int) ($factFormData['assessment_id'] ?? 0) ?>">
+                        <input type="hidden" name="fact_target" value="<?= esc((string) ($factTarget ?? $movementType), 'attr') ?>">
                     <?php endif; ?>
-                    <label>Actual time<input type="datetime-local" name="occurred_at" required value="<?= esc($occurredAt, 'attr') ?>"></label>
+                    <fieldset class="local-datetime-fields" data-local-datetime><legend>Actual time</legend><label>Date<input type="date" name="occurred_on" required value="<?= esc($occurredOn, 'attr') ?>"></label><label>Time<input type="time" name="occurred_time" required step="60" value="<?= esc($occurredTime, 'attr') ?>"></label><input type="hidden" name="occurred_at" value="<?= esc($occurredAt, 'attr') ?>"><span>Honolulu local time</span></fieldset>
                     <label><?= $movementType === 'pickup' ? 'Handoff location' : 'Current location' ?><select id="movement-location-class" name="location_class" required><?php foreach (['unknown', 'home', 'airport_hnl', 'waikiki_hotel', 'other_delivery'] as $location): ?><option value="<?= esc($location, 'attr') ?>" <?= $selectedLocation === $location ? 'selected' : '' ?>><?= esc(ucwords(str_replace('_', ' ', $location))) ?></option><?php endforeach; ?></select></label>
                     <label data-location-detail <?= $selectedLocation === 'airport_hnl' ? 'hidden' : '' ?>>Location detail<input name="location_detail" maxlength="500" value="<?= esc((string) ($factFormData['location_detail'] ?? ''), 'attr') ?>" <?= $selectedLocation === 'airport_hnl' ? 'disabled' : '' ?>></label>
                     <fieldset class="hnl-parking-fields" data-hnl-parking data-location-select="movement-location-class">

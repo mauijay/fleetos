@@ -16,9 +16,26 @@ class MovementOperationalFactPresentationService
     public function latestForTrip(int $tripId): ?array
     {
         $facts = $this->repo()->latestActiveFactsForTrip($tripId);
-        if ($facts === null) {
-            return null;
+        return $facts === null ? null : $this->present($facts);
+    }
+
+    /** @return array{pickup:array<string, mixed>|null,return:array<string, mixed>|null} */
+    public function tripFacts(int $tripId): array
+    {
+        $presented = ['pickup' => null, 'return' => null];
+        foreach ($this->repo()->activeFactsForTrip($tripId) as $facts) {
+            $movementType = (string) ($facts['movement_type'] ?? '');
+            if (array_key_exists($movementType, $presented) && $presented[$movementType] === null) {
+                $presented[$movementType] = $this->present($facts);
+            }
         }
+
+        return $presented;
+    }
+
+    /** @return array<string, mixed> */
+    private function present(array $facts): array
+    {
 
         $eventCode = (string) $facts['event_code'];
         $isHandoff = $eventCode === 'actual_handoff';

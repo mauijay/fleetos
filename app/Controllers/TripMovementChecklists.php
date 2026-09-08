@@ -13,30 +13,39 @@ class TripMovementChecklists extends BaseController
     public function show(int $id): string
     {
         $checklist = Services::tripMovementChecklistService()->checklist($id);
-        $latestFacts = ($checklist['exists'] ?? false) ? Services::movementOperationalFactPresentationService()->latestForTrip((int) $checklist['turo_trip_normalized_id']) : null;
+        $factsPresenter = Services::movementOperationalFactPresentationService();
+        $tripFacts = ($checklist['exists'] ?? false) ? $factsPresenter->tripFacts((int) $checklist['turo_trip_normalized_id']) : ['pickup' => null, 'return' => null];
+        $latestFacts = ($checklist['exists'] ?? false) ? $factsPresenter->latestForTrip((int) $checklist['turo_trip_normalized_id']) : null;
         $latestEvent = ($checklist['exists'] ?? false) ? Services::movementEventService()->latestForTrip((int) $checklist['turo_trip_normalized_id']) : null;
-        $isStagedPickup = ($latestEvent['event_code'] ?? null) === 'vehicle_staged';
-        $isPickupConfirmed = ($latestEvent['event_code'] ?? null) === 'actual_handoff';
+        $isStagedPickup = ($tripFacts['pickup']['event_code'] ?? null) === 'vehicle_staged';
+        $isPickupConfirmed = ($tripFacts['pickup']['event_code'] ?? null) === 'actual_handoff';
         $flashedFormData = CoreServices::session()->getFlashdata('movement_fact_data');
         $isEarlyHandoffWarning = CoreServices::session()->getFlashdata('movement_early_handoff_warning') === '1';
-        $correctingFacts = $latestFacts !== null && ($this->request->getGet('correct') === '1' || is_array($flashedFormData) && isset($flashedFormData['assessment_id']));
-        $repairingFacts = $latestFacts !== null && $this->request->getGet('repair') === '1';
+        $factTarget = $this->factTarget((string) $this->request->getGet('fact'));
+        if ($factTarget === null && is_array($flashedFormData)) {
+            $factTarget = $this->factTarget((string) ($flashedFormData['fact_target'] ?? ''));
+        }
+        $selectedFacts = $factTarget === null ? $latestFacts : $tripFacts[$factTarget];
+        $correctingFacts = $selectedFacts !== null && ($this->request->getGet('correct') === '1' || is_array($flashedFormData) && isset($flashedFormData['assessment_id']));
+        $repairingFacts = $selectedFacts !== null && $this->request->getGet('repair') === '1';
         $factFormData = $correctingFacts && is_array($flashedFormData)
-            ? Services::movementOperationalFactPresentationService()->mergeCorrectionFormData($latestFacts['form_data'], $flashedFormData)
-            : ($correctingFacts ? $latestFacts['form_data'] : (is_array($flashedFormData) ? $flashedFormData : []));
+            ? $factsPresenter->mergeCorrectionFormData($selectedFacts['form_data'], $flashedFormData)
+            : ($correctingFacts ? $selectedFacts['form_data'] : (is_array($flashedFormData) ? $flashedFormData : []));
         return view('trip_movement_checklists/show', [
             'assets' => Services::assetManifestService()->appAssets(),
             'checklist' => $checklist,
             'currentLocation' => ($checklist['exists'] ?? false) ? Services::currentVehicleLocationService()->resolve((int) $checklist['fleet_vehicle_id']) : null,
             'tripContext' => ($checklist['exists'] ?? false) ? Services::operationalFactsRepository()->tripContext((int) $checklist['turo_trip_normalized_id']) : null,
-            'latestFacts' => $latestFacts,
+            'latestFacts' => $selectedFacts,
+            'tripFacts' => $tripFacts,
+            'factTarget' => $factTarget,
             'latestEvent' => $latestEvent,
             'isStagedPickup' => $isStagedPickup,
             'isPickupConfirmed' => $isPickupConfirmed,
             'correctingFacts' => $correctingFacts,
             'repairingFacts' => $repairingFacts,
-            'repairCandidates' => $repairingFacts ? Services::movementOperationalFactService()->wrongTripCandidates($checklist, (int) $latestFacts['event_id']) : [],
-            'repairConflicts' => $repairingFacts ? Services::movementOperationalFactService()->wrongTripConflicts($checklist, (int) $latestFacts['event_id']) : [],
+            'repairCandidates' => $repairingFacts ? Services::movementOperationalFactService()->wrongTripCandidates($checklist, (int) $selectedFacts['event_id']) : [],
+            'repairConflicts' => $repairingFacts ? Services::movementOperationalFactService()->wrongTripConflicts($checklist, (int) $selectedFacts['event_id']) : [],
             'factFormData' => $factFormData,
             'isEarlyHandoffWarning' => $isEarlyHandoffWarning,
             'hnlGarages' => (new \App\Services\Fleet\HnlGarageCatalog())->definitions(),
@@ -95,7 +104,7 @@ class TripMovementChecklists extends BaseController
 
     public function recordFacts(int $id): RedirectResponse
     {
-        $data = $this->request->getPost();
+        $data = $this->movementFactData();
         try {
             $ok = Services::movementOperationalFactService()->recordForChecklist(Services::tripMovementChecklistService()->checklist($id), $data, $this->actorUserId());
             return $this->back($ok, 'Operational facts recorded.', 'That movement could not be recorded.');
@@ -111,7 +120,7 @@ class TripMovementChecklists extends BaseController
 
     public function stageAtHnl(int $id): RedirectResponse
     {
-        $data = $this->request->getPost();
+        $data = $this->movementFactData();
         try {
             $ok = Services::movementOperationalFactService()->stageForChecklist(Services::tripMovementChecklistService()->checklist($id), $data, $this->actorUserId());
             return $this->back($ok, 'Vehicle staged at HNL. Guest pickup is not yet confirmed.', 'That vehicle could not be staged.');
@@ -122,7 +131,7 @@ class TripMovementChecklists extends BaseController
 
     public function confirmGuestPickup(int $id): RedirectResponse
     {
-        $data = $this->request->getPost();
+        $data = $this->movementFactData();
         try {
             $ok = Services::movementOperationalFactService()->confirmGuestPickup(Services::tripMovementChecklistService()->checklist($id), $data, $this->actorUserId());
             return $this->back($ok, 'Guest pickup confirmed.', 'Guest pickup could not be confirmed.');
@@ -138,31 +147,35 @@ class TripMovementChecklists extends BaseController
 
     public function correctFacts(int $id): RedirectResponse
     {
-        $data = $this->request->getPost();
+        $data = $this->movementFactData();
+        $target = $this->factTarget((string) ($data['fact_target'] ?? ''));
+        $correctionHref = '/operations/checklists/' . $id . '?correct=1' . ($target === null ? '' : '&fact=' . $target);
         try {
             $ok = Services::movementOperationalFactService()->correctForChecklist(Services::tripMovementChecklistService()->checklist($id), $data, $this->actorUserId());
             if ($ok) {
                 return CoreServices::redirectresponse()->to('/operations/checklists/' . $id)->with('movement_checklist_notice', 'Recorded facts corrected.');
             }
 
-            return CoreServices::redirectresponse()->to('/operations/checklists/' . $id . '?correct=1')->with('movement_checklist_error', 'Those recorded facts could not be corrected.')->with('movement_fact_data', $data);
+            return CoreServices::redirectresponse()->to($correctionHref)->with('movement_checklist_error', 'Those recorded facts could not be corrected.')->with('movement_fact_data', $data);
         } catch (\InvalidArgumentException $exception) {
-            return CoreServices::redirectresponse()->to('/operations/checklists/' . $id . '?correct=1')->with('movement_checklist_error', $exception->getMessage())->with('movement_fact_data', $data);
+            return CoreServices::redirectresponse()->to($correctionHref)->with('movement_checklist_error', $exception->getMessage())->with('movement_fact_data', $data);
         }
     }
 
     public function repairWrongTrip(int $id): RedirectResponse
     {
         $data = $this->request->getPost();
+        $target = $this->factTarget((string) ($data['fact_target'] ?? ''));
+        $repairHref = '/operations/checklists/' . $id . '?repair=1' . ($target === null ? '' : '&fact=' . $target);
         try {
             $ok = Services::movementOperationalFactService()->repairWrongTrip(Services::tripMovementChecklistService()->checklist($id), $data, $this->actorUserId());
             if ($ok) {
                 return CoreServices::redirectresponse()->to('/operations/checklists/' . $id)->with('movement_checklist_notice', 'Recorded facts moved to the correct trip.');
             }
 
-            return CoreServices::redirectresponse()->to('/operations/checklists/' . $id . '?repair=1')->with('movement_checklist_error', 'Those facts could not be repaired.');
+            return CoreServices::redirectresponse()->to($repairHref)->with('movement_checklist_error', 'Those facts could not be repaired.');
         } catch (\InvalidArgumentException $exception) {
-            return CoreServices::redirectresponse()->to('/operations/checklists/' . $id . '?repair=1')->with('movement_checklist_error', $exception->getMessage());
+            return CoreServices::redirectresponse()->to($repairHref)->with('movement_checklist_error', $exception->getMessage());
         }
     }
 
@@ -179,5 +192,23 @@ class TripMovementChecklists extends BaseController
         }
 
         return (int) $user->id;
+    }
+
+    private function factTarget(string $target): ?string
+    {
+        return in_array($target, ['pickup', 'return'], true) ? $target : null;
+    }
+
+    /** @return array<string, mixed> */
+    private function movementFactData(): array
+    {
+        $data = $this->request->getPost();
+        $occurredOn = trim((string) ($data['occurred_on'] ?? ''));
+        $occurredTime = trim((string) ($data['occurred_time'] ?? ''));
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $occurredOn) === 1 && preg_match('/^\d{2}:\d{2}$/', $occurredTime) === 1) {
+            $data['occurred_at'] = $occurredOn . 'T' . $occurredTime;
+        }
+
+        return $data;
     }
 }

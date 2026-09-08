@@ -1,5 +1,6 @@
 import "../css/app.css";
 import { resolveHnlParkingState } from "./hnl-parking-state.js";
+import { combineLocalDateTime } from "./local-datetime.js";
 
 const initializeHnlParking = (group) => {
   const garage = group.querySelector("[data-hnl-garage]");
@@ -72,6 +73,21 @@ const initializeHnlParking = (group) => {
 };
 
 document.querySelectorAll("[data-hnl-parking]").forEach(initializeHnlParking);
+
+document.querySelectorAll("[data-local-datetime]").forEach((group) => {
+  const date = group.querySelector('[name="occurred_on"]');
+  const time = group.querySelector('[name="occurred_time"]');
+  const timestamp = group.querySelector('[name="occurred_at"]');
+  if (!date || !time || !timestamp) return;
+
+  const sync = () => {
+    timestamp.value = combineLocalDateTime(date.value, time.value);
+  };
+  date.addEventListener("input", sync);
+  time.addEventListener("input", sync);
+  group.closest("form")?.addEventListener("submit", sync);
+  sync();
+});
 
 document.querySelectorAll("[data-repair-preview]").forEach((preview) => {
   const form = preview.closest("form");
