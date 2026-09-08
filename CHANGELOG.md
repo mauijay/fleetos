@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.9.2 - Historical Trip Repair Fix
+
+Release date: 2026-09-07
+
+### Wrong-Trip Repair
+
+- Completed historical reservations can be valid repair targets.
+- Staging facts no longer falsely conflict with guest handoff repair; an `actual_handoff` conflicts only with another active `actual_handoff`.
+- Genuine conflicting handoffs remain blocked and are shown to the operator.
+- Canceled, deleted, invalid, different-vehicle, and implausibly distant trips remain excluded.
+- Append/void/supersede audit history remains preserved.
+
 ## v0.9.1 - Movement Accuracy & Recovery
 
 Release date: 2026-09-07
