@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.9.1 - Movement Accuracy & Recovery
+
+Release date: 2026-09-07
+
+### Airport Pickup Accuracy
+
+- Keep HNL staging distinct from guest handoff, so vehicles can be staged early without becoming Currently Rented.
+- Use Confirm Guest Pickup to record the actual handoff separately while preserving structured HNL garage, level, and row staging.
+
+### Handoff Safety
+
+- Movement Board handoff actions now open an entry form instead of writing immediately, with an editable actual handoff time.
+- Warn when a handoff is more than two hours early and require explicit confirmation before recording it.
+
+### Wrong-Trip Recovery
+
+- Repair movements recorded on the wrong trip by selecting a same-vehicle candidate and reviewing a FROM -> TO preview.
+- Preserve append/void/supersede audit history and recompute current and next reservation state after repair.
+
+### Trip Context & Navigation
+
+- Show Previous / Selected / Next reservation context and vehicle trip history with clickable trip and movement navigation.
+- Link Vehicle Details -> Trip History and show guest names on Movement Board cards.
+
+### Turnaround Accuracy
+
+- Require two adjacent reservations for a same-day turnaround and enforce same-vehicle, same-day return-to-next-pickup rules.
+- Do not treat a short trip that starts and ends on the same day as a turnaround by itself.
+
+### Minor Fix
+
+- Correct the site credit email address.
+
 ## v0.9.0 - Movement Intelligence & Positioning
 
 Release date: 2026-09-04
