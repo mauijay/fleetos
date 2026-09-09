@@ -31,7 +31,7 @@ final class MovementReadinessProjectionServiceTest extends CIUnitTestCase
         );
     }
 
-    public function testReturnFactsSatisfyDerivedRequirementsWithoutMutatingLegacyItems(): void
+    public function testReturnFactsWithoutDistinctNextTripDoNotCreateNextPickupWorkOrMutateLegacyItems(): void
     {
         $this->insertChecklist(101, 1001, 11, 'return', [
             'readiness_status' => 'completed',
@@ -61,14 +61,65 @@ final class MovementReadinessProjectionServiceTest extends CIUnitTestCase
         $this->assertSame('movement_event', $this->requirement($projection, 'return_time_confirmed')['satisfied_by']);
         $this->assertSame('movement_assessment', $this->requirement($projection, 'energy_known')['satisfied_by']);
         $this->assertSame('movement_assessment', $this->requirement($projection, 'cleaning_status_known')['satisfied_by']);
-        $this->assertSame('unsatisfied', $this->requirement($projection, 'vehicle_clean')['status']);
-        $this->assertSame(MovementReadinessProjectionService::PHASE_TURNAROUND, $this->requirement($projection, 'vehicle_clean')['phase']);
-        $this->assertSame('unsatisfied', $this->requirement($projection, 'energy_ready')['status']);
-        $this->assertSame(MovementReadinessProjectionService::PHASE_TURNAROUND, $this->requirement($projection, 'energy_ready')['phase']);
+        $this->assertNull($projection['next_trip']);
+        $this->assertFalse($projection['is_same_day_turnaround']);
+        $this->assertNotContains('vehicle_clean', array_column($projection['requirements'], 'code'));
+        $this->assertNotContains('energy_ready', array_column($projection['requirements'], 'code'));
         $this->assertTrue($projection['workflow_history']['historically_completed']);
         $this->assertSame($itemCount, $this->connection->table('trip_movement_checklist_items')->countAllResults());
         $this->assertSame($eventCount, $this->connection->table('trip_movement_events')->countAllResults());
         $this->assertSame('open', $this->connection->table('trip_movement_checklist_items')->where('item_code', 'vehicle_received')->get()->getRow('completion_state'));
+    }
+
+    public function testCanceledDeletedAndInvalidTripsDoNotCreateNextPickupWork(): void
+    {
+        $this->insertChecklist(101, 1001, 11, 'return');
+        $this->connection->table('lookup_values')->insertBatch([
+            ['id' => 1, 'code' => 'booked'],
+            ['id' => 2, 'code' => 'canceled_by_guest'],
+            ['id' => 3, 'code' => 'invalid'],
+        ]);
+        $this->connection->table('turo_trips_normalized')->insertBatch([
+            ['id' => 1101, 'fleet_vehicle_id' => 11, 'trip_status_lookup_value_id' => 1, 'starts_at' => '2026-09-08 19:00:00', 'ends_at' => '2026-09-08 20:00:00', 'canceled_at' => null, 'deleted_at' => '2026-09-08 12:00:00'],
+            ['id' => 1102, 'fleet_vehicle_id' => 11, 'trip_status_lookup_value_id' => 1, 'starts_at' => '2026-09-08 20:00:00', 'ends_at' => '2026-09-08 21:00:00', 'canceled_at' => '2026-09-08 12:00:00', 'deleted_at' => null],
+            ['id' => 1103, 'fleet_vehicle_id' => 11, 'trip_status_lookup_value_id' => 2, 'starts_at' => '2026-09-08 21:00:00', 'ends_at' => '2026-09-08 22:00:00', 'canceled_at' => null, 'deleted_at' => null],
+            ['id' => 1104, 'fleet_vehicle_id' => 11, 'trip_status_lookup_value_id' => 3, 'starts_at' => '2026-09-08 22:00:00', 'ends_at' => '2026-09-08 23:00:00', 'canceled_at' => null, 'deleted_at' => null],
+        ]);
+
+        $projection = $this->service->forCompany(1, [101])[101];
+
+        $this->assertNull($projection['next_trip']);
+        $this->assertFalse($projection['is_same_day_turnaround']);
+        $this->assertNotContains(MovementReadinessProjectionService::PHASE_NEXT_PICKUP_PREPARATION, array_column($projection['requirements'], 'phase'));
+    }
+
+    public function testValidFutureTripCreatesPreparationWithoutTurnaroundClassification(): void
+    {
+        $this->insertChecklist(101, 1001, 11, 'return');
+        $this->connection->table('turo_trips_normalized')->insert([
+            'id' => 1201, 'fleet_vehicle_id' => 11, 'starts_at' => '2026-09-09 09:00:00', 'ends_at' => '2026-09-09 12:00:00',
+        ]);
+
+        $projection = $this->service->forCompany(1, [101])[101];
+
+        $this->assertSame(1201, $projection['next_trip']['id']);
+        $this->assertFalse($projection['is_same_day_turnaround']);
+        $this->assertSame(MovementReadinessProjectionService::PHASE_NEXT_PICKUP_PREPARATION, $this->requirement($projection, 'vehicle_clean')['phase']);
+        $this->assertSame(1201, $this->requirement($projection, 'vehicle_clean')['target_trip_id']);
+        $this->assertSame(1201, $this->requirement($projection, 'energy_ready')['target_trip_id']);
+    }
+
+    public function testDistinctSameDayNextTripIsClassifiedAsTurnaround(): void
+    {
+        $this->insertChecklist(101, 1001, 11, 'return');
+        $this->connection->table('turo_trips_normalized')->insert([
+            'id' => 1202, 'fleet_vehicle_id' => 11, 'starts_at' => '2026-09-08 19:00:00', 'ends_at' => '2026-09-09 08:00:00',
+        ]);
+
+        $projection = $this->service->forCompany(1, [101])[101];
+
+        $this->assertSame(1202, $projection['next_trip']['id']);
+        $this->assertTrue($projection['is_same_day_turnaround']);
     }
 
     public function testHistoricalCompletionAndVoidedFactsDoNotMaskCurrentBlockingWork(): void
@@ -110,7 +161,7 @@ final class MovementReadinessProjectionServiceTest extends CIUnitTestCase
 
     public function testAssessmentObservationsDoNotProveHumanInspectionOrPhotos(): void
     {
-        $this->insertChecklist(104, 1004, 14, 'return', ['vehicle_disposition' => 'available']);
+        $this->insertChecklist(104, 1004, 14, 'return');
         $this->insertEvent(304, 1, 14, 1004, 'actual_return', 'return', '2026-09-08 13:00:00', 'home');
         $this->insertAssessment(404, 1, 14, 1004, 304, 'return', 'clean', 100, '2026-09-08 13:05:00');
 
@@ -122,6 +173,11 @@ final class MovementReadinessProjectionServiceTest extends CIUnitTestCase
         $this->assertSame('unsatisfied', $this->requirement($projection, 'damage_check_completed')['status']);
         $this->assertSame('unsatisfied', $this->requirement($projection, 'return_photos_completed')['status']);
         $this->assertSame(4, $projection['human_actions_remaining_count']);
+        $this->assertSame('Inspect exterior', $this->requirement($projection, 'exterior_inspected')['action']['label']);
+        $this->assertSame('Inspect interior', $this->requirement($projection, 'interior_inspected')['action']['label']);
+        $this->assertSame('Check for damage', $this->requirement($projection, 'damage_check_completed')['action']['label']);
+        $this->assertSame('Confirm return photos', $this->requirement($projection, 'return_photos_completed')['action']['label']);
+        $this->assertSame('Assign vehicle disposition', $this->requirement($projection, 'vehicle_disposition')['action']['label']);
     }
 
     public function testActiveUnknownLocationCannotBeOverriddenByWeakerLegacyCompletion(): void
@@ -176,6 +232,32 @@ final class MovementReadinessProjectionServiceTest extends CIUnitTestCase
         $this->assertFalse($this->requirement($projection, 'guest_handoff')['blocking']);
     }
 
+    public function testAirportPickupCountsBlockingAndAdditionalActionsSeparately(): void
+    {
+        $this->insertChecklist(107, 1007, 17, 'pickup');
+        $this->insertItems(107, [
+            ['key_card_confirmed', 'Key card confirmed', 'complete', 'applicable'],
+        ]);
+        $this->connection->table('vehicle_operational_profiles')->insert([
+            'id' => 2, 'fleet_vehicle_id' => 17, 'energy_kind' => 'electric', 'ready_energy_target_percent' => null,
+        ]);
+        $this->insertEvent(307, 1, 17, 1007, 'vehicle_staged', 'pickup', '2026-09-08 15:00:00', 'airport_hnl', null, [
+            'airport_garage_code' => 'T2', 'airport_parking_level' => 4, 'airport_parking_row' => 'B',
+        ]);
+        $this->insertAssessment(407, 1, 17, 1007, 307, 'pickup', 'dirty', 84, '2026-09-08 15:05:00');
+
+        $projection = $this->service->forCompany(1, [107])[107];
+        $pending = array_filter($projection['requirements'], static fn (array $requirement): bool => $requirement['phase'] === $projection['readiness_phase'] && $requirement['status'] === 'unsatisfied');
+        $blocking = array_filter($pending, static fn (array $requirement): bool => $requirement['blocking']);
+        $additional = array_filter($pending, static fn (array $requirement): bool => ! $requirement['blocking']);
+
+        $this->assertCount(4, $blocking);
+        $this->assertCount(2, $additional);
+        $this->assertSame(count($blocking), $projection['blocking_remaining_count']);
+        $this->assertSame(count($additional), $projection['additional_actions_remaining_count']);
+        $this->assertSame(['guest_pickup_instructions_confirmed', 'turo_access_instructions_confirmed'], array_column($additional, 'code'));
+    }
+
     public function testCompanyScopeAndQueryCountAreBoundedForBatch(): void
     {
         $this->insertChecklist(107, 1007, 17, 'pickup');
@@ -194,14 +276,14 @@ final class MovementReadinessProjectionServiceTest extends CIUnitTestCase
         }
 
         $this->assertSame([107, 108], array_keys($projections));
-        $this->assertSame(9, $queryCount);
+        $this->assertSame(10, $queryCount);
         $this->assertSame(1, $projections[107]['company_id']);
         $this->assertArrayNotHasKey(207, $projections);
     }
 
     private function dropTables(): void
     {
-        foreach (['vehicle_positioning_plans', 'airport_movement_workflows', 'scheduled_movement_locations', 'vehicle_operational_capabilities', 'vehicle_operational_profiles', 'movement_assessments', 'trip_movement_events', 'trip_movement_checklist_items', 'trip_movement_checklists', 'turo_trips_normalized', 'fleet_vehicles'] as $table) {
+        foreach (['vehicle_positioning_plans', 'airport_movement_workflows', 'scheduled_movement_locations', 'vehicle_operational_capabilities', 'vehicle_operational_profiles', 'movement_assessments', 'trip_movement_events', 'trip_movement_checklist_items', 'trip_movement_checklists', 'turo_trips_normalized', 'lookup_values', 'fleet_vehicles'] as $table) {
             $this->connection->query('DROP TABLE IF EXISTS ' . $this->table($table));
         }
     }
@@ -209,7 +291,8 @@ final class MovementReadinessProjectionServiceTest extends CIUnitTestCase
     private function createTables(): void
     {
         $this->connection->query('CREATE TABLE ' . $this->table('fleet_vehicles') . ' (id INTEGER PRIMARY KEY, company_id INTEGER NOT NULL)');
-        $this->connection->query('CREATE TABLE ' . $this->table('turo_trips_normalized') . ' (id INTEGER PRIMARY KEY, fleet_vehicle_id INTEGER NOT NULL, starts_at DATETIME NULL, ends_at DATETIME NULL)');
+        $this->connection->query('CREATE TABLE ' . $this->table('lookup_values') . ' (id INTEGER PRIMARY KEY, code VARCHAR(80) NOT NULL)');
+        $this->connection->query('CREATE TABLE ' . $this->table('turo_trips_normalized') . ' (id INTEGER PRIMARY KEY, fleet_vehicle_id INTEGER NOT NULL, trip_status_lookup_value_id INTEGER NULL, starts_at DATETIME NULL, ends_at DATETIME NULL, canceled_at DATETIME NULL, deleted_at DATETIME NULL)');
         $this->connection->query('CREATE TABLE ' . $this->table('trip_movement_checklists') . ' (id INTEGER PRIMARY KEY, turo_trip_normalized_id INTEGER NOT NULL, fleet_vehicle_id INTEGER NOT NULL, movement_type VARCHAR(40) NOT NULL, scheduled_at DATETIME NOT NULL, readiness_status VARCHAR(40) NOT NULL DEFAULT \'not_started\', vehicle_disposition VARCHAR(40) NULL, completed_at DATETIME NULL, completion_note TEXT NULL)');
         $this->connection->query('CREATE TABLE ' . $this->table('trip_movement_checklist_items') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, trip_movement_checklist_id INTEGER NOT NULL, item_code VARCHAR(80) NOT NULL, label VARCHAR(190) NOT NULL, is_required INTEGER NOT NULL DEFAULT 1, is_critical INTEGER NOT NULL DEFAULT 1, applicability VARCHAR(40) NOT NULL DEFAULT \'applicable\', completion_state VARCHAR(40) NOT NULL DEFAULT \'open\', completion_source VARCHAR(40) NULL, completed_at DATETIME NULL, note TEXT NULL, sort_order INTEGER NOT NULL DEFAULT 0)');
         $this->connection->query('CREATE TABLE ' . $this->table('trip_movement_events') . ' (id INTEGER PRIMARY KEY, company_id INTEGER NOT NULL, fleet_vehicle_id INTEGER NOT NULL, turo_trip_normalized_id INTEGER NULL, event_code VARCHAR(40) NOT NULL, movement_type VARCHAR(20) NULL, occurred_at DATETIME NOT NULL, location_class VARCHAR(40) NULL, location_detail VARCHAR(500) NULL, airport_garage_code VARCHAR(40) NULL, airport_parking_level INTEGER NULL, airport_parking_row VARCHAR(4) NULL, source VARCHAR(40) NOT NULL, actor_user_id INTEGER NOT NULL, note TEXT NULL, supersedes_event_id INTEGER NULL, voided_at DATETIME NULL, voided_by_user_id INTEGER NULL, void_reason TEXT NULL, created_at DATETIME NULL, updated_at DATETIME NULL)');

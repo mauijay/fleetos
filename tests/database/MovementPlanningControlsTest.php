@@ -58,6 +58,7 @@ final class MovementPlanningControlsTest extends CIUnitTestCase
         $this->assertContains('airport_garage_code', $this->connection->getFieldNames('trip_movement_events'));
         $this->assertContains('airport_parking_level', $this->connection->getFieldNames('trip_movement_events'));
         $this->assertContains('airport_parking_row', $this->connection->getFieldNames('trip_movement_events'));
+        $this->assertNotContains('airport_parking_stall', $this->connection->getFieldNames('trip_movement_events'));
         $this->assertContains('projection_source', $this->connection->getFieldNames('trip_movement_checklists'));
         $this->assertContains('projected_at', $this->connection->getFieldNames('trip_movement_checklists'));
 

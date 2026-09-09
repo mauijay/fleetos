@@ -35,6 +35,7 @@ $routes->group('', ['filter' => 'session'], static function (RouteCollection $ro
 	$routes->post('operations/checklists/(:num)/facts', 'TripMovementChecklists::recordFacts/$1', ['filter' => ['permission:admin.access', 'csrf']]);
 	$routes->post('operations/checklists/(:num)/stage-at-hnl', 'TripMovementChecklists::stageAtHnl/$1', ['filter' => ['permission:admin.access', 'csrf']]);
 	$routes->post('operations/checklists/(:num)/confirm-guest-pickup', 'TripMovementChecklists::confirmGuestPickup/$1', ['filter' => ['permission:admin.access', 'csrf']]);
+	$routes->post('operations/checklists/(:num)/vehicle-position', 'TripMovementChecklists::recordVehiclePosition/$1', ['filter' => ['permission:admin.access', 'csrf']]);
 	$routes->post('operations/checklists/(:num)/facts/correct', 'TripMovementChecklists::correctFacts/$1', ['filter' => ['permission:admin.access', 'csrf']]);
 	$routes->post('operations/checklists/(:num)/facts/repair-trip', 'TripMovementChecklists::repairWrongTrip/$1', ['filter' => ['permission:admin.access', 'csrf']]);
 	$routes->post('operations/checklists/(:num)/complete', 'TripMovementChecklists::complete/$1', ['filter' => ['permission:admin.access', 'csrf']]);

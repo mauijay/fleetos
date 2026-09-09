@@ -13,13 +13,22 @@ class TripMovementChecklists extends BaseController
     public function show(int $id): string
     {
         $checklist = Services::tripMovementChecklistService()->checklist($id);
+        $companyId = (int) ($checklist['company_id'] ?? 0);
+        $readiness = ($checklist['exists'] ?? false) && $companyId > 0
+            ? (Services::movementReadinessReadService()->forCompany($companyId, [$id])[$id] ?? null)
+            : null;
         $factsPresenter = Services::movementOperationalFactPresentationService();
         $tripFacts = ($checklist['exists'] ?? false) ? $factsPresenter->tripFacts((int) $checklist['turo_trip_normalized_id']) : ['pickup' => null, 'return' => null];
         $latestFacts = ($checklist['exists'] ?? false) ? $factsPresenter->latestForTrip((int) $checklist['turo_trip_normalized_id']) : null;
         $latestEvent = ($checklist['exists'] ?? false) ? Services::movementEventService()->latestForTrip((int) $checklist['turo_trip_normalized_id']) : null;
         $isStagedPickup = ($tripFacts['pickup']['event_code'] ?? null) === 'vehicle_staged';
-        $isPickupConfirmed = ($tripFacts['pickup']['event_code'] ?? null) === 'actual_handoff';
+        $handoffRequirement = array_values(array_filter(
+            $readiness['requirements'] ?? [],
+            static fn (array $requirement): bool => ($requirement['code'] ?? null) === 'guest_handoff',
+        ))[0] ?? null;
+        $isPickupConfirmed = ($handoffRequirement['status'] ?? null) === 'satisfied';
         $flashedFormData = CoreServices::session()->getFlashdata('movement_fact_data');
+        $positionFormData = CoreServices::session()->getFlashdata('vehicle_position_data');
         $isEarlyHandoffWarning = CoreServices::session()->getFlashdata('movement_early_handoff_warning') === '1';
         $factTarget = $this->factTarget((string) $this->request->getGet('fact'));
         if ($factTarget === null && is_array($flashedFormData)) {
@@ -34,6 +43,7 @@ class TripMovementChecklists extends BaseController
         return view('trip_movement_checklists/show', [
             'assets' => Services::assetManifestService()->appAssets(),
             'checklist' => $checklist,
+            'readiness' => $readiness,
             'currentLocation' => ($checklist['exists'] ?? false) ? Services::currentVehicleLocationService()->resolve((int) $checklist['fleet_vehicle_id']) : null,
             'tripContext' => ($checklist['exists'] ?? false) ? Services::operationalFactsRepository()->tripContext((int) $checklist['turo_trip_normalized_id']) : null,
             'latestFacts' => $selectedFacts,
@@ -42,12 +52,15 @@ class TripMovementChecklists extends BaseController
             'latestEvent' => $latestEvent,
             'isStagedPickup' => $isStagedPickup,
             'isPickupConfirmed' => $isPickupConfirmed,
+            'pickupConfirmedAt' => $handoffRequirement['basis_at'] ?? null,
             'correctingFacts' => $correctingFacts,
             'repairingFacts' => $repairingFacts,
             'repairCandidates' => $repairingFacts ? Services::movementOperationalFactService()->wrongTripCandidates($checklist, (int) $selectedFacts['event_id']) : [],
             'repairConflicts' => $repairingFacts ? Services::movementOperationalFactService()->wrongTripConflicts($checklist, (int) $selectedFacts['event_id']) : [],
             'factFormData' => $factFormData,
             'isEarlyHandoffWarning' => $isEarlyHandoffWarning,
+            'positionFormData' => is_array($positionFormData) ? $positionFormData : [],
+            'showPositionForm' => $this->request->getGet('action') === 'position',
             'hnlGarages' => (new \App\Services\Fleet\HnlGarageCatalog())->definitions(),
             'notice' => session()->getFlashdata('movement_checklist_notice'),
             'error' => session()->getFlashdata('movement_checklist_error'),
@@ -93,7 +106,13 @@ class TripMovementChecklists extends BaseController
 
     public function complete(int $id): RedirectResponse
     {
-        return $this->back(Services::tripMovementChecklistService()->completeChecklist($id, $this->request->getPost('completion_note'), $this->actorUserId()), 'Movement workflow completed.', 'Complete required critical items before closing this workflow.');
+        $checklist = Services::tripMovementChecklistService()->checklist($id);
+        $companyId = (int) ($checklist['company_id'] ?? 0);
+        $readiness = ($checklist['exists'] ?? false) && $companyId > 0
+            ? (Services::movementReadinessReadService()->forCompany($companyId, [$id])[$id] ?? null)
+            : null;
+
+        return $this->back(Services::tripMovementChecklistService()->completeChecklist($id, $this->request->getPost('completion_note'), $this->actorUserId(), ($readiness['ready'] ?? false) === true), 'Movement workflow completed.', 'Complete current readiness actions before closing this workflow.');
     }
 
     public function reopen(int $id): RedirectResponse
@@ -142,6 +161,26 @@ class TripMovementChecklists extends BaseController
                 ->with('movement_early_handoff_warning', '1');
         } catch (\InvalidArgumentException $exception) {
             return $this->back(false, '', $exception->getMessage())->with('movement_fact_data', $data);
+        }
+    }
+
+    public function recordVehiclePosition(int $id): RedirectResponse
+    {
+        $data = $this->movementFactData();
+        try {
+            $ok = Services::movementOperationalFactService()->recordVehiclePosition(Services::tripMovementChecklistService()->checklist($id), $data, $this->actorUserId());
+            if ($ok) {
+                return CoreServices::redirectresponse()->to('/operations/checklists/' . $id)
+                    ->with('movement_checklist_notice', 'Current vehicle position recorded.');
+            }
+
+            return CoreServices::redirectresponse()->to('/operations/checklists/' . $id . '?action=position')
+                ->with('movement_checklist_error', 'That vehicle position could not be recorded.')
+                ->with('vehicle_position_data', $data);
+        } catch (\InvalidArgumentException $exception) {
+            return CoreServices::redirectresponse()->to('/operations/checklists/' . $id . '?action=position')
+                ->with('movement_checklist_error', $exception->getMessage())
+                ->with('vehicle_position_data', $data);
         }
     }
 

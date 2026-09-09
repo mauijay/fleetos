@@ -37,7 +37,7 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
     {
         parent::setUp();
         $this->connection = Database::connect('tests');
-        foreach (['operational_fact_audits', 'vehicle_operational_capabilities', 'vehicle_operational_profiles', 'movement_assessments', 'trip_movement_events', 'scheduled_movement_locations', 'airport_movement_workflows', 'airports', 'turo_trips_normalized', 'turo_trip_raw', 'turo_import_batches', 'lookup_values', 'fleet_vehicles', 'users'] as $table) {
+        foreach (['operational_fact_audits', 'vehicle_positioning_plans', 'vehicle_operational_capabilities', 'vehicle_operational_profiles', 'movement_assessments', 'trip_movement_events', 'scheduled_movement_locations', 'airport_movement_workflows', 'airports', 'turo_trips_normalized', 'turo_trip_raw', 'turo_import_batches', 'lookup_values', 'fleet_vehicles', 'users'] as $table) {
             $this->connection->query('DROP TABLE IF EXISTS ' . $this->table($table));
         }
         $this->connection->query('CREATE TABLE ' . $this->table('fleet_vehicles') . ' (id INTEGER PRIMARY KEY, company_id INTEGER, deleted_at DATETIME NULL)');
@@ -73,6 +73,187 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
         $this->assertSame('home', $location['location_class']);
         $this->assertSame('Yard', $location['location_detail']);
         $this->assertSame(7200, $location['age_seconds']);
+    }
+
+    public function testCurrentPositionChronologyPreservesReturnLocationAndRentedSemantics(): void
+    {
+        $returnId = $this->events->record(10, 100, 'actual_return', 'return', '2026-09-01 09:00:00', 'waikiki_hotel', 'Romer House', 'operator', 7);
+        $this->connection->table('scheduled_movement_locations')->insert([
+            'turo_trip_normalized_id' => 100,
+            'fleet_vehicle_id' => 10,
+            'movement_type' => 'pickup',
+            'location_class' => 'airport_hnl',
+            'source_text' => 'HNL future pickup',
+        ]);
+        $resolver = new CurrentVehicleLocationService($this->repository);
+
+        $atReturn = $resolver->resolve(10, new DateTimeImmutable('2026-09-01 09:30:00'));
+        $this->assertSame('waikiki_hotel', $atReturn['location_class']);
+        $this->assertSame('Romer House', $atReturn['location_detail']);
+        $this->assertSame('parked', $atReturn['operational_state']);
+
+        $positionedId = $this->events->record(10, 100, 'vehicle_positioned', null, '2026-09-01 10:00:00', 'home', null, 'operator', 7);
+        $atHome = $resolver->resolve(10, new DateTimeImmutable('2026-09-01 10:30:00'));
+        $this->assertSame('home', $atHome['location_class']);
+        $this->assertSame($positionedId, $atHome['event_id']);
+        $this->assertSame('waikiki_hotel', $this->repository->event($returnId)['location_class']);
+        $this->assertSame('Romer House', $this->repository->event($returnId)['location_detail']);
+
+        $this->assertTrue($this->events->void($positionedId, 8, 'Position was recorded in error.'));
+        $afterVoid = $resolver->resolve(10, new DateTimeImmutable('2026-09-01 10:30:00'));
+        $this->assertSame('waikiki_hotel', $afterVoid['location_class']);
+
+        $this->events->record(10, 100, 'vehicle_staged', 'pickup', '2026-09-01 11:00:00', 'airport_hnl', 'International Garage L2 RG', 'operator', 7);
+        $atHnl = $resolver->resolve(10, new DateTimeImmutable('2026-09-01 11:30:00'));
+        $this->assertSame('airport_hnl', $atHnl['location_class']);
+        $this->assertSame('current', $atHnl['position_semantics']);
+        $this->assertSame('parked', $atHnl['operational_state']);
+
+        $this->events->record(10, 100, 'actual_handoff', 'pickup', '2026-09-01 12:00:00', 'airport_hnl', 'International Garage L2 RG', 'operator', 7);
+        $rented = $resolver->resolve(10, new DateTimeImmutable('2026-09-01 12:30:00'));
+        $this->assertSame('rented', $rented['operational_state']);
+        $this->assertSame('rented', $rented['position_semantics']);
+        $this->assertSame('Handoff location', $rented['location_label']);
+
+        $this->events->record(10, 100, 'vehicle_staged', 'pickup', '2026-09-02 12:00:00', 'airport_hnl', 'Future staging', 'operator', 7);
+        $beforeFutureEvent = $resolver->resolve(10, new DateTimeImmutable('2026-09-01 13:00:00'));
+        $this->assertSame('actual_handoff', $beforeFutureEvent['event_code']);
+    }
+
+    public function testRecordVehiclePositionAppendsOnlyPositionFactAndInvalidatesPlan(): void
+    {
+        $this->connection->query('CREATE TABLE ' . $this->table('vehicle_positioning_plans') . ' (id INTEGER PRIMARY KEY, company_id INTEGER NOT NULL, fleet_vehicle_id INTEGER NOT NULL, invalidated_at DATETIME NULL, invalidation_reason VARCHAR(80) NULL, invalidated_by_user_id INTEGER NULL)');
+        $this->connection->table('vehicle_positioning_plans')->insert(['id' => 1, 'company_id' => 1, 'fleet_vehicle_id' => 10]);
+        $returnId = $this->events->record(10, 100, 'actual_return', 'return', '2026-09-01 09:00:00', 'waikiki_hotel', 'Romer House', 'operator', 7);
+        $service = new MovementOperationalFactService($this->connection, $this->events, $this->assessments, new VehiclePositioningPlanService($this->repository));
+
+        $beforePosition = (new CurrentVehicleLocationService($this->repository))->resolve(10);
+        $this->assertSame('waikiki_hotel', $beforePosition['location_class']);
+        $this->assertSame('Romer House', $beforePosition['location_detail']);
+
+        $this->assertTrue($service->recordVehiclePosition(
+            ['exists' => true, 'fleet_vehicle_id' => 10, 'turo_trip_normalized_id' => 100, 'movement_type' => 'return'],
+            ['occurred_at' => '2026-09-01 10:00:00', 'location_class' => 'home', 'note' => 'Vehicle arrived home.'],
+            8,
+        ));
+
+        $this->assertSame(2, $this->connection->table('trip_movement_events')->countAllResults());
+        $this->assertSame(0, $this->connection->table('movement_assessments')->countAllResults());
+        $position = $this->repository->latestLocationEvent(10);
+        $this->assertSame('vehicle_positioned', $position['event_code']);
+        $this->assertSame('home', $position['location_class']);
+        $this->assertNull($position['movement_type']);
+        $this->assertSame('checklist_operator', $position['source']);
+        $this->assertSame(8, (int) $position['actor_user_id']);
+        $this->assertSame('waikiki_hotel', $this->repository->event($returnId)['location_class']);
+        $plan = $this->connection->table('vehicle_positioning_plans')->where('id', 1)->get()->getRowArray();
+        $this->assertNotNull($plan['invalidated_at']);
+        $this->assertSame('actual_vehicle_position_recorded', $plan['invalidation_reason']);
+        $this->assertSame(1, $this->connection->table('operational_fact_audits')->where('table_name', 'vehicle_positioning_plans')->where('action', 'invalidated')->countAllResults());
+    }
+
+    public function testExactPositionReplayIsRejectedButLaterReturnToSameLocationIsAllowed(): void
+    {
+        $returnId = $this->events->record(10, 100, 'actual_return', 'return', '2026-09-01 15:30:00', 'waikiki_hotel', 'LOCAL TEST HOTEL', 'operator', 7);
+        $service = new MovementOperationalFactService($this->connection, $this->events, $this->assessments);
+        $checklist = ['exists' => true, 'fleet_vehicle_id' => 10, 'turo_trip_normalized_id' => 100, 'movement_type' => 'return'];
+        $home = ['occurred_at' => '2026-09-01 16:50:00', 'location_class' => 'home', 'note' => 'Arrived home.'];
+
+        $this->assertTrue($service->recordVehiclePosition($checklist, $home, 7));
+        $this->assertSame(2, $this->connection->table('trip_movement_events')->countAllResults());
+
+        try {
+            $service->recordVehiclePosition($checklist, $home, 8);
+            $this->fail('Expected an exact position replay to be rejected.');
+        } catch (InvalidArgumentException $exception) {
+            $this->assertSame('This exact vehicle position is already recorded.', $exception->getMessage());
+        }
+        $this->assertSame(2, $this->connection->table('trip_movement_events')->countAllResults());
+
+        $this->assertTrue($service->recordVehiclePosition($checklist, [
+            'occurred_at' => '2026-09-01 17:30:00',
+            'location_class' => 'other_delivery',
+            'location_detail' => 'Service center',
+        ], 7));
+        $this->assertTrue($service->recordVehiclePosition($checklist, [
+            'occurred_at' => '2026-09-01 18:45:00',
+            'location_class' => 'home',
+        ], 7));
+
+        $this->assertSame(4, $this->connection->table('trip_movement_events')->countAllResults());
+        $return = $this->repository->event($returnId);
+        $this->assertSame('actual_return', $return['event_code']);
+        $this->assertSame('waikiki_hotel', $return['location_class']);
+        $this->assertSame('LOCAL TEST HOTEL', $return['location_detail']);
+        $this->assertSame('2026-09-01 15:30:00', $return['occurred_at']);
+    }
+
+    public function testLegacyParkingColumnIsExposedOnlyAsCanonicalRow(): void
+    {
+        $this->connection->query('ALTER TABLE ' . $this->table('trip_movement_events') . ' ADD COLUMN airport_garage_code VARCHAR(40) NULL');
+        $this->connection->query('ALTER TABLE ' . $this->table('trip_movement_events') . ' ADD COLUMN airport_parking_level INTEGER NULL');
+        $this->connection->query('ALTER TABLE ' . $this->table('trip_movement_events') . ' ADD COLUMN airport_parking_stall VARCHAR(4) NULL');
+        $repository = new OperationalFactsRepository($this->connection);
+        $events = new MovementEventService($repository);
+
+        $eventId = $events->record(
+            10,
+            100,
+            'vehicle_positioned',
+            null,
+            '2026-09-01 16:50:00',
+            'airport_hnl',
+            null,
+            'checklist_operator',
+            7,
+            null,
+            ['garage_code' => 'terminal_2', 'level' => 4, 'row' => 'M'],
+        );
+
+        $stored = $this->connection->table('trip_movement_events')->where('id', $eventId)->get()->getRowArray();
+        $event = $repository->event($eventId);
+        $this->assertSame('M', $stored['airport_parking_stall']);
+        $this->assertSame('M', $event['airport_parking_row']);
+        $this->assertArrayNotHasKey('airport_parking_stall', $event);
+        $this->assertTrue($events->hasExactActivePosition(10, 100, '2026-09-01 16:50:00', 'airport_hnl', null, 8, [
+            'garage_code' => 'terminal_2', 'level' => 4, 'row' => 'M',
+        ]));
+    }
+
+    public function testPickupHnlPositionMustUseStagingWorkflow(): void
+    {
+        $service = new MovementOperationalFactService($this->connection, $this->events, $this->assessments);
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Use Stage at HNL');
+        $service->recordVehiclePosition(
+            ['exists' => true, 'fleet_vehicle_id' => 10, 'turo_trip_normalized_id' => 100, 'movement_type' => 'pickup'],
+            ['occurred_at' => '2026-09-01 10:00:00', 'location_class' => 'airport_hnl'],
+            7,
+        );
+    }
+
+    public function testFutureOrRentedPositionWritesAreRejectedWithoutMutation(): void
+    {
+        $service = new MovementOperationalFactService($this->connection, $this->events, $this->assessments);
+        $checklist = ['exists' => true, 'fleet_vehicle_id' => 10, 'turo_trip_normalized_id' => 100, 'movement_type' => 'return'];
+
+        try {
+            $service->recordVehiclePosition($checklist, ['occurred_at' => (new DateTimeImmutable('+1 day'))->format('Y-m-d H:i:s'), 'location_class' => 'home'], 7);
+            $this->fail('Expected a future position time to be rejected.');
+        } catch (InvalidArgumentException $exception) {
+            $this->assertSame('Actual position time cannot be in the future.', $exception->getMessage());
+        }
+        $this->assertSame(0, $this->connection->table('trip_movement_events')->countAllResults());
+
+        $this->events->record(10, 100, 'actual_handoff', 'pickup', '2026-09-01 09:00:00', 'home', null, 'operator', 7);
+        try {
+            $service->recordVehiclePosition($checklist, ['occurred_at' => '2026-09-01 10:00:00', 'location_class' => 'home'], 7);
+            $this->fail('Expected a rented vehicle position to be rejected.');
+        } catch (InvalidArgumentException $exception) {
+            $this->assertSame('Record the actual return before recording a parked vehicle position.', $exception->getMessage());
+        }
+        $this->assertSame(1, $this->connection->table('trip_movement_events')->countAllResults());
     }
 
     public function testTripContextAndHistoryStayOnTheSameVehicle(): void
@@ -231,6 +412,65 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
         $this->assertSame(2, $this->connection->table('trip_movement_events')->countAllResults());
         $this->assertSame(1, $this->connection->table('movement_assessments')->countAllResults());
         $this->assertNull($this->repository->event((int) $staged['id'])['voided_at']);
+    }
+
+    public function testVoidedAndSupersededHandoffsDoNotSuppressValidConfirmation(): void
+    {
+        $service = new MovementOperationalFactService($this->connection, $this->events, $this->assessments);
+        $checklist = ['exists' => true, 'fleet_vehicle_id' => 10, 'turo_trip_normalized_id' => 100, 'movement_type' => 'pickup'];
+        $service->stageForChecklist($checklist, [
+            'occurred_at' => '2026-09-03 07:30:00',
+            'location_class' => 'airport_hnl',
+            'airport_garage_code' => 'international',
+            'airport_parking_level' => 7,
+            'airport_parking_row' => 'F',
+            'cleanliness' => 'clean',
+            'energy_percent' => 82,
+        ], 7);
+        $service->confirmGuestPickup($checklist, ['occurred_at' => '2026-09-03 08:00:00'], 7);
+        $firstHandoff = $this->repository->activeMovementConflict(100, ['actual_handoff']);
+        $this->assertTrue($this->events->void((int) $firstHandoff['id'], 8, 'Confirmation was premature.'));
+
+        $this->assertTrue($service->confirmGuestPickup($checklist, ['occurred_at' => '2026-09-03 08:05:00'], 8));
+        $secondHandoff = $this->repository->activeMovementConflict(100, ['actual_handoff']);
+        $this->events->correct((int) $secondHandoff['id'], ['event_code' => 'vehicle_staged', 'occurred_at' => '2026-09-03 08:06:00'], 8, 'Guest had not taken possession.');
+
+        $this->assertTrue($service->confirmGuestPickup($checklist, ['occurred_at' => '2026-09-03 08:10:00'], 8));
+        $this->assertSame(1, $this->connection->table('trip_movement_events')->where(['event_code' => 'actual_handoff', 'voided_at' => null])->countAllResults());
+        $this->assertSame(2, $this->connection->table('trip_movement_events')->where('event_code', 'actual_handoff')->where('voided_at IS NOT NULL', null, false)->countAllResults());
+    }
+
+    public function testDuplicateHandoffIsRejectedEvenWhenLaterStagingIsLatest(): void
+    {
+        $service = new MovementOperationalFactService($this->connection, $this->events, $this->assessments);
+        $checklist = ['exists' => true, 'fleet_vehicle_id' => 10, 'turo_trip_normalized_id' => 100, 'movement_type' => 'pickup'];
+        $service->stageForChecklist($checklist, [
+            'occurred_at' => '2026-09-03 07:30:00',
+            'location_class' => 'airport_hnl',
+            'airport_garage_code' => 'international',
+            'airport_parking_level' => 7,
+            'airport_parking_row' => 'F',
+            'cleanliness' => 'clean',
+            'energy_percent' => 82,
+        ], 7);
+        $service->confirmGuestPickup($checklist, ['occurred_at' => '2026-09-03 08:00:00'], 7);
+        $this->events->record(10, 100, 'vehicle_staged', 'pickup', '2026-09-03 08:05:00', 'airport_hnl', 'International Garage L7 RF', 'operator', 7);
+
+        try {
+            $service->confirmGuestPickup($checklist, ['occurred_at' => '2026-09-03 08:10:00'], 8);
+            $this->fail('Expected duplicate handoff rejection.');
+        } catch (InvalidArgumentException $exception) {
+            $this->assertSame('Guest pickup is already confirmed for this movement.', $exception->getMessage());
+        }
+
+        try {
+            $service->recordForChecklist($checklist, ['occurred_at' => '2026-09-03 08:10:00', 'location_class' => 'home'], 8);
+            $this->fail('Expected duplicate direct handoff rejection.');
+        } catch (InvalidArgumentException $exception) {
+            $this->assertSame('Guest pickup is already confirmed for this movement.', $exception->getMessage());
+        }
+
+        $this->assertSame(1, $this->connection->table('trip_movement_events')->where(['event_code' => 'actual_handoff', 'voided_at' => null])->countAllResults());
     }
 
     public function testStagingRejectsNonAirportAndNonPickupMovements(): void
@@ -604,7 +844,7 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
         $this->assertSame(82, (int) $facts['form_data']['energy_percent']);
     }
 
-    public function testLatestReturnFactsUseCurrentLocationAndFuelOrMissingEnergy(): void
+    public function testLatestReturnFactsUseReturnLocationAndFuelOrMissingEnergy(): void
     {
         $this->connection->table('vehicle_operational_profiles')->insert(['fleet_vehicle_id' => 10, 'energy_kind' => 'gasoline', 'created_by' => 7, 'updated_by' => 7]);
         $eventId = $this->events->record(10, 100, 'actual_return', 'return', '2026-09-03 09:05:00', 'airport_hnl', null, 'checklist_operator', 7);
@@ -613,7 +853,7 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
         $facts = (new MovementOperationalFactPresentationService($this->repository))->latestForTrip(100);
 
         $this->assertSame('Actual return recorded', $facts['event_title']);
-        $this->assertSame('Current location', $facts['location_label']);
+        $this->assertSame('Return location', $facts['location_label']);
         $this->assertSame('Dirty', $facts['cleanliness_label']);
         $this->assertSame('Fuel', $facts['energy_label']);
         $this->assertSame('Not captured', $facts['energy_value']);
@@ -636,12 +876,12 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
     public static function locationPresentationProvider(): array
     {
         return [
-            'airport with detail' => ['actual_return', 'return', 'airport_hnl', 'International Garage L7 RF', 'Current location', 'Airport HNL'],
-            'airport without detail' => ['actual_return', 'return', 'airport_hnl', null, 'Current location', 'Airport HNL'],
+            'airport with detail' => ['actual_return', 'return', 'airport_hnl', 'International Garage L7 RF', 'Return location', 'Airport HNL'],
+            'airport without detail' => ['actual_return', 'return', 'airport_hnl', null, 'Return location', 'Airport HNL'],
             'Waikiki handoff with detail' => ['actual_handoff', 'pickup', 'waikiki_hotel', 'Front drive', 'Handoff location', 'Waikiki Hotel'],
-            'home' => ['actual_return', 'return', 'home', null, 'Current location', 'Home'],
-            'unknown' => ['actual_return', 'return', 'unknown', null, 'Current location', 'Unknown'],
-            'other delivery' => ['actual_return', 'return', 'other_delivery', null, 'Current location', 'Other delivery'],
+            'home' => ['actual_return', 'return', 'home', null, 'Return location', 'Home'],
+            'unknown' => ['actual_return', 'return', 'unknown', null, 'Return location', 'Unknown'],
+            'other delivery' => ['actual_return', 'return', 'other_delivery', null, 'Return location', 'Other delivery'],
         ];
     }
 

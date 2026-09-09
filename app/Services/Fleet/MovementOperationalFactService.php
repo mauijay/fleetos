@@ -34,6 +34,7 @@ class MovementOperationalFactService
             throw new \InvalidArgumentException('Stage the vehicle at HNL, then confirm guest pickup separately.');
         }
         if ($eventCode === 'actual_handoff') {
+            $this->rejectDuplicateHandoff($checklist);
             $this->requireEarlyHandoffConfirmation($checklist, $data);
         }
 
@@ -59,6 +60,87 @@ class MovementOperationalFactService
         return $this->recordObservation($checklist, $data, $actorUserId, 'vehicle_staged');
     }
 
+    public function recordVehiclePosition(array $checklist, array $data, int $actorUserId): bool
+    {
+        if (! ($checklist['exists'] ?? false)) {
+            return false;
+        }
+        $occurredAt = trim((string) ($data['occurred_at'] ?? ''));
+        $locationClass = trim((string) ($data['location_class'] ?? ''));
+        if ($occurredAt === '' || $locationClass === '' || $locationClass === 'unknown') {
+            throw new \InvalidArgumentException('Actual position time and location are required.');
+        }
+        try {
+            $occurred = new \DateTimeImmutable($occurredAt);
+        } catch (\Exception) {
+            throw new \InvalidArgumentException('Choose a valid actual position time.');
+        }
+        if ($occurred > new \DateTimeImmutable()) {
+            throw new \InvalidArgumentException('Actual position time cannot be in the future.');
+        }
+        $active = $this->events->latestForTrip((int) $checklist['turo_trip_normalized_id']);
+        if (($active['event_code'] ?? null) === 'actual_handoff') {
+            throw new \InvalidArgumentException('Record the actual return before recording a parked vehicle position.');
+        }
+        if (($checklist['movement_type'] ?? null) === 'pickup' && $locationClass === 'airport_hnl') {
+            throw new \InvalidArgumentException('Use Stage at HNL for an Airport HNL pickup.');
+        }
+        $this->rejectExactPositionReplay($checklist, $data, $actorUserId);
+
+        $this->db->transBegin();
+        try {
+            $this->rejectExactPositionReplay($checklist, $data, $actorUserId);
+            $this->events->record(
+                (int) $checklist['fleet_vehicle_id'],
+                (int) $checklist['turo_trip_normalized_id'],
+                'vehicle_positioned',
+                null,
+                $occurredAt,
+                $locationClass,
+                $data['location_detail'] ?? null,
+                'checklist_operator',
+                $actorUserId,
+                $data['note'] ?? null,
+                [
+                    'garage_code' => $data['airport_garage_code'] ?? null,
+                    'level' => $data['airport_parking_level'] ?? null,
+                    'row' => $data['airport_parking_row'] ?? null,
+                    'structured_input_present' => array_key_exists('airport_garage_code', $data),
+                ],
+            );
+            $this->plans()->invalidateForWrite((int) $checklist['fleet_vehicle_id'], 'actual_vehicle_position_recorded', $actorUserId);
+            if ($this->db->transStatus() === false) {
+                throw new RuntimeException('Vehicle position transaction failed.');
+            }
+            $this->db->transCommit();
+
+            return true;
+        } catch (\Throwable $exception) {
+            $this->db->transRollback();
+            throw $exception;
+        }
+    }
+
+    private function rejectExactPositionReplay(array $checklist, array $data, int $actorUserId): void
+    {
+        if ($this->events->hasExactActivePosition(
+            (int) $checklist['fleet_vehicle_id'],
+            (int) $checklist['turo_trip_normalized_id'],
+            (string) $data['occurred_at'],
+            (string) $data['location_class'],
+            $data['location_detail'] ?? null,
+            $actorUserId,
+            [
+                'garage_code' => $data['airport_garage_code'] ?? null,
+                'level' => $data['airport_parking_level'] ?? null,
+                'row' => $data['airport_parking_row'] ?? null,
+                'structured_input_present' => array_key_exists('airport_garage_code', $data),
+            ],
+        )) {
+            throw new \InvalidArgumentException('This exact vehicle position is already recorded.');
+        }
+    }
+
     public function confirmGuestPickup(array $checklist, array $data, int $actorUserId): bool
     {
         if (! ($checklist['exists'] ?? false)) {
@@ -67,6 +149,7 @@ class MovementOperationalFactService
         if (($checklist['movement_type'] ?? null) !== 'pickup') {
             throw new \InvalidArgumentException('Guest pickup can only be confirmed for a pickup movement.');
         }
+        $this->rejectDuplicateHandoff($checklist);
         $active = $this->events->latestForTrip((int) $checklist['turo_trip_normalized_id']);
         if (($active['event_code'] ?? null) !== 'vehicle_staged') {
             throw new \InvalidArgumentException('Stage the vehicle at HNL before confirming guest pickup.');
@@ -79,6 +162,7 @@ class MovementOperationalFactService
 
         $this->db->transBegin();
         try {
+            $this->rejectDuplicateHandoff($checklist);
             $this->events->record(
                 (int) $checklist['fleet_vehicle_id'],
                 (int) $checklist['turo_trip_normalized_id'],
@@ -114,6 +198,13 @@ class MovementOperationalFactService
         }
     }
 
+    private function rejectDuplicateHandoff(array $checklist): void
+    {
+        if ($this->events->activeForTrip((int) $checklist['turo_trip_normalized_id'], ['actual_handoff']) !== null) {
+            throw new \InvalidArgumentException('Guest pickup is already confirmed for this movement.');
+        }
+    }
+
     private function recordObservation(array $checklist, array $data, int $actorUserId, string $eventCode): bool
     {
         $movementType = (string) $checklist['movement_type'];
@@ -124,6 +215,9 @@ class MovementOperationalFactService
 
         $this->db->transBegin();
         try {
+            if ($eventCode === 'actual_handoff') {
+                $this->rejectDuplicateHandoff($checklist);
+            }
             $eventId = $this->events->record(
                 (int) $checklist['fleet_vehicle_id'],
                 (int) $checklist['turo_trip_normalized_id'],

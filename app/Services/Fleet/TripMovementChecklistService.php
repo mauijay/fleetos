@@ -117,10 +117,11 @@ class TripMovementChecklistService
         return $this->repo()->updateChecklist($checklistId, ['vehicle_disposition' => $disposition], $actorUserId);
     }
 
-    public function completeChecklist(int $checklistId, ?string $note = null, ?int $actorUserId = null): bool
+    public function completeChecklist(int $checklistId, ?string $note = null, ?int $actorUserId = null, ?bool $currentReadinessReady = null): bool
     {
         $checklist = $this->checklist($checklistId);
-        if (! ($checklist['exists'] ?? false) || ! in_array($checklist['readiness_status'], ['ready'], true)) {
+        $ready = $currentReadinessReady ?? in_array($checklist['readiness_status'] ?? null, ['ready'], true);
+        if (! ($checklist['exists'] ?? false) || ! $ready || $checklist['completed_at'] !== null) {
             return false;
         }
 

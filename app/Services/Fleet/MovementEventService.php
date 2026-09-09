@@ -57,6 +57,19 @@ class MovementEventService
         return $this->repo()->latestActiveEventForTrip($tripId);
     }
 
+    /** @param list<string> $eventCodes @return array<string, mixed>|null */
+    public function activeForTrip(int $tripId, array $eventCodes): ?array
+    {
+        return $this->repo()->activeMovementConflict($tripId, $eventCodes);
+    }
+
+    public function hasExactActivePosition(int $vehicleId, int $tripId, string $occurredAt, string $locationClass, ?string $locationDetail, int $actorUserId, array $airportParking = []): bool
+    {
+        $fact = $this->eventData($vehicleId, $tripId, 'vehicle_positioned', null, $occurredAt, $locationClass, $locationDetail, 'checklist_operator', $actorUserId, null, $airportParking);
+
+        return $this->repo()->hasExactActivePositionFact($fact);
+    }
+
     /** @return array<string, mixed> */
     private function eventData(int $vehicleId, ?int $tripId, string $eventCode, ?string $movementType, string $occurredAt, ?string $locationClass, ?string $locationDetail, string $source, int $actorUserId, ?string $note, array $airportParking): array
     {

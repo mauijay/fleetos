@@ -37,11 +37,11 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
         $this->assertStringContainsString('<section class="section operational-facts">', $html);
     }
 
-    public function testReturnSummaryUsesCurrentLocationFuelAndContextualAction(): void
+    public function testReturnSummaryUsesReturnLocationFuelAndContextualAction(): void
     {
         $html = $this->render('return', $this->facts([
             'event_title' => 'Actual return recorded',
-            'location_label' => 'Current location',
+            'location_label' => 'Return location',
             'location_class_label' => 'Airport HNL',
             'location_detail_value' => null,
             'cleanliness_label' => 'Dirty',
@@ -50,7 +50,7 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
         ]));
 
         $this->assertStringContainsString('Actual return recorded', $html);
-        $this->assertStringContainsString('Current location', $html);
+        $this->assertStringContainsString('Return location', $html);
         $this->assertStringContainsString('<dt>Fuel</dt><dd>23%</dd>', $html);
         $this->assertStringNotContainsString('Record Actual Return', $html);
         $this->assertStringContainsString('Use the return fact actions above', $html);
@@ -113,6 +113,59 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
         $this->assertStringContainsString('Guest pickup confirmed', $html);
         $this->assertStringContainsString('Recorded on wrong trip', $html);
         $this->assertStringContainsString('/operations/checklists/4?repair=1', $html);
+    }
+
+    public function testActiveHandoffSuppressesStaleStagedConfirmationAction(): void
+    {
+        $staged = $this->facts(['event_code' => 'vehicle_staged', 'event_title' => 'Staged for pickup', 'location_label' => 'Staging location']);
+        $data = [
+            'isStagedPickup' => true,
+            'isPickupConfirmed' => true,
+            'pickupConfirmedAt' => '2026-09-03 08:05:00',
+            'tripFacts' => ['pickup' => $staged, 'return' => null],
+            'readiness' => [
+                'ready' => true,
+                'blocking_remaining_count' => 0,
+                'additional_actions_remaining_count' => 0,
+                'readiness_phase' => 'pickup_preparation',
+                'requirements' => [
+                    ['code' => 'guest_handoff', 'label' => 'Guest handoff', 'phase' => 'pickup_lifecycle', 'kind' => 'derived', 'status' => 'satisfied', 'blocking' => false, 'satisfied_by' => 'movement_event', 'basis_at' => '2026-09-03 08:05:00', 'action' => null, 'allows_na' => false],
+                ],
+                'workflow_history' => ['historically_completed' => false, 'completed_at' => null, 'legacy_items' => []],
+            ],
+        ];
+
+        $html = $this->render('pickup', $staged, false, [], $data);
+
+        $this->assertStringContainsString('Guest pickup confirmed', $html);
+        $this->assertStringContainsString('Sep 3, 2026 8:05 AM', $html);
+        $this->assertMatchesRegularExpression('/is-complete[^>]*>.*Guest handoff/s', $html);
+        $this->assertStringNotContainsString('Confirm Guest Pickup', $html);
+    }
+
+    public function testStagedPickupWithoutHandoffKeepsLifecyclePendingAndConfirmationAvailable(): void
+    {
+        $staged = $this->facts(['event_code' => 'vehicle_staged', 'event_title' => 'Staged for pickup', 'location_label' => 'Staging location']);
+        $data = [
+            'isStagedPickup' => true,
+            'isPickupConfirmed' => false,
+            'tripFacts' => ['pickup' => $staged, 'return' => null],
+            'readiness' => [
+                'ready' => true,
+                'blocking_remaining_count' => 0,
+                'additional_actions_remaining_count' => 0,
+                'readiness_phase' => 'pickup_preparation',
+                'requirements' => [
+                    ['code' => 'guest_handoff', 'label' => 'Guest handoff', 'phase' => 'pickup_lifecycle', 'kind' => 'derived', 'status' => 'unsatisfied', 'blocking' => false, 'satisfied_by' => null, 'basis_at' => null, 'action' => ['type' => 'record_fact', 'label' => 'Record actual guest handoff'], 'allows_na' => false],
+                ],
+                'workflow_history' => ['historically_completed' => false, 'completed_at' => null, 'legacy_items' => []],
+            ],
+        ];
+
+        $html = $this->render('pickup', $staged, false, [], $data);
+
+        $this->assertMatchesRegularExpression('/is-pending[^>]*>.*Guest handoff/s', $html);
+        $this->assertStringContainsString('Confirm Guest Pickup', $html);
     }
 
     public function testConfirmedHandoffRepairModeShowsFromToPreview(): void
@@ -244,6 +297,8 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
         $this->assertStringContainsString('name="airport_garage_code"', $html);
         $this->assertStringContainsString('name="airport_parking_level"', $html);
         $this->assertStringContainsString('name="airport_parking_row"', $html);
+        $this->assertStringContainsString('>Row<select name="airport_parking_row"', $html);
+        $this->assertStringNotContainsString('stall', strtolower($html));
         $this->assertStringContainsString('value="terminal_2" data-max-level="6"', $html);
         $this->assertTrue(strpos($html, 'name="airport_parking_row"') < strpos($html, 'name="airport_garage_code"'));
         $this->assertTrue(strpos($html, 'name="airport_garage_code"') < strpos($html, 'name="airport_parking_level"'));
@@ -347,18 +402,168 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
         $this->assertSame('Energy typo.', $merged['correction_reason']);
     }
 
+    public function testProjectionRendersKnownFactsAndOnlyGenuineHumanControls(): void
+    {
+        $html = $this->render('return', $this->facts([
+            'event_title' => 'Actual return recorded',
+            'location_label' => 'Return location',
+            'location_class_label' => 'Waikiki Hotel',
+            'location_detail_value' => 'Romer House',
+            'cleanliness_label' => 'Dirty',
+            'energy_value' => '83%',
+        ]), false, [], $this->readinessViewData());
+
+        $this->assertStringContainsString('Return readiness', $html);
+        $this->assertStringContainsString('2 blocking actions remaining', $html);
+        $this->assertStringContainsString('<h3>Known</h3>', $html);
+        $this->assertStringContainsString('Vehicle returned', $html);
+        $this->assertStringContainsString('83%', $html);
+        $this->assertStringContainsString('Dirty', $html);
+        $this->assertStringContainsString('/operations/checklist-items/81/complete', $html);
+        $this->assertStringContainsString('/operations/checklist-items/82/undo', $html);
+        $this->assertStringContainsString('>Confirm</button>', $html);
+        $this->assertStringContainsString('>Undo</button>', $html);
+        $this->assertStringNotContainsString('>Complete</button>', $html);
+        $this->assertStringNotContainsString('/not-applicable', $html);
+        $this->assertSame(1, substr_count($html, '/disposition'));
+    }
+
+    public function testLegacyRowsRemainOnlyInCollapsedChecklistHistory(): void
+    {
+        $html = $this->render('return', $this->facts(), false, [], $this->readinessViewData());
+
+        $this->assertStringContainsString('<details class="checklist-history"><summary>Checklist history</summary>', $html);
+        $this->assertStringContainsString('Legacy return workflow completed', $html);
+        $this->assertStringContainsString('Imported history', $html);
+        $this->assertSame(1, substr_count($html, 'Legacy return workflow completed'));
+        $this->assertStringNotContainsString('movement-checklist-list', $html);
+    }
+
+    public function testClosedWorkflowLocksHumanControlsUntilExplicitReopen(): void
+    {
+        $data = $this->readinessViewData();
+        $data['checklist']['completed_at'] = '2026-09-03 10:30:00';
+        $data['checklist']['completion_note'] = 'Return reviewed.';
+        $data['readiness']['workflow_history']['historically_completed'] = true;
+        $data['readiness']['workflow_history']['completed_at'] = '2026-09-03 10:30:00';
+
+        $html = $this->render('return', $this->facts(), false, [], $data);
+
+        $this->assertStringContainsString('Workflow closed', $html);
+        $this->assertStringContainsString('Reopen Workflow', $html);
+        $this->assertStringContainsString('name="confirm_reopen"', $html);
+        $this->assertStringNotContainsString('/operations/checklist-items/81/complete', $html);
+        $this->assertStringNotContainsString('/operations/checklist-items/82/undo', $html);
+        $this->assertStringNotContainsString('Close Movement Workflow', $html);
+        $this->assertStringContainsString('Return reviewed.', $html);
+    }
+
+    public function testPickupPreparationKeepsGuestHandoffInNonBlockingLifecycle(): void
+    {
+        $data = $this->readinessViewData();
+        $data['checklist'] = array_merge($data['checklist'], ['movement_type' => 'pickup', 'items' => []]);
+        $data['readiness'] = [
+            'ready' => true,
+            'blocking_remaining_count' => 0,
+            'readiness_phase' => 'pickup_preparation',
+            'requirements' => [
+                ['code' => 'airport_staging', 'label' => 'Airport staging', 'phase' => 'pickup_preparation', 'kind' => 'derived', 'status' => 'satisfied', 'blocking' => true, 'satisfied_by' => 'movement_event', 'basis_at' => '2026-09-03 07:30:00', 'action' => null, 'allows_na' => false],
+                ['code' => 'guest_handoff', 'label' => 'Guest handoff', 'phase' => 'pickup_lifecycle', 'kind' => 'derived', 'status' => 'unsatisfied', 'blocking' => false, 'satisfied_by' => null, 'basis_at' => null, 'action' => ['type' => 'record_fact', 'label' => 'Record actual guest handoff'], 'allows_na' => false],
+            ],
+            'workflow_history' => ['historically_completed' => false, 'completed_at' => null, 'legacy_items' => []],
+        ];
+
+        $html = $this->render('pickup', $this->facts(['event_code' => 'vehicle_staged', 'event_title' => 'Staged for pickup']), false, [], $data);
+
+        $this->assertStringContainsString('Pickup preparation', $html);
+        $this->assertStringContainsString('Ready', $html);
+        $this->assertStringContainsString('Airport staging', $html);
+        $this->assertStringContainsString('Lifecycle', $html);
+        $this->assertStringContainsString('Guest handoff', $html);
+        $this->assertStringContainsString('Does not gate pickup preparation', $html);
+    }
+
+    public function testReadinessSeparatesBlockingAndAdditionalPendingActions(): void
+    {
+        $data = $this->readinessViewData();
+        $data['readiness']['requirements'][] = ['code' => 'guest_pickup_instructions_confirmed', 'label' => 'Guest pickup instructions confirmed', 'phase' => 'return_intake', 'kind' => 'derived', 'status' => 'unsatisfied', 'blocking' => false, 'satisfied_by' => null, 'basis_at' => null, 'action' => ['type' => 'record_fact', 'label' => 'Confirm guest pickup instructions'], 'allows_na' => false];
+        $data['readiness']['requirements'][] = ['code' => 'turo_access_instructions_confirmed', 'label' => 'Turo Access instructions confirmed', 'phase' => 'return_intake', 'kind' => 'derived', 'status' => 'unsatisfied', 'blocking' => false, 'satisfied_by' => null, 'basis_at' => null, 'action' => ['type' => 'record_fact', 'label' => 'Confirm Turo Access instructions'], 'allows_na' => false];
+
+        $html = $this->render('return', $this->facts(), false, [], $data);
+
+        $this->assertStringContainsString('2 blocking · 2 additional actions', $html);
+        $this->assertStringContainsString('>Blocking</p>', $html);
+        $this->assertStringContainsString('>Additional actions</p>', $html);
+        $this->assertStringContainsString('Inspect exterior', $html);
+        $this->assertStringNotContainsString('>Exterior inspected</strong></div>', $html);
+        $this->assertStringContainsString('<strong>Exterior inspected</strong><span>Open</span>', $html);
+        $this->assertStringContainsString('class="is-pending readiness-compound-action"', $html);
+        $this->assertStringContainsString('Choose what happens to the vehicle next', $html);
+        $this->assertStringContainsString('class="readiness-compound-controls inline-disposition"', $html);
+        $this->assertStringContainsString('<span class="visually-hidden">Choose vehicle disposition</span>', $html);
+        $this->assertStringContainsString('<option value="">Choose disposition</option>', $html);
+        $this->assertMatchesRegularExpression('/class="is-pending"><span[^>]*>○<\/span><div><strong>Inspect exterior<\/strong>/', $html);
+        $this->assertStringContainsString('Confirm guest pickup instructions', $html);
+        $this->assertStringContainsString('Confirm Turo Access instructions', $html);
+    }
+
+    public function testNextPickupHeadingOnlyUsesTurnaroundForSameDayPair(): void
+    {
+        $data = $this->readinessViewData();
+        $data['readiness']['requirements'][] = ['code' => 'vehicle_clean', 'label' => 'Vehicle clean for next pickup', 'phase' => 'next_pickup_preparation', 'kind' => 'derived', 'status' => 'unsatisfied', 'blocking' => true, 'satisfied_by' => null, 'basis_at' => null, 'action' => ['type' => 'record_fact', 'label' => 'Clean vehicle'], 'allows_na' => false];
+        $data['readiness']['is_same_day_turnaround'] = false;
+
+        $preparationHtml = $this->render('return', $this->facts(), false, [], $data);
+
+        $this->assertStringContainsString('Preparation for next pickup', $preparationHtml);
+        $this->assertStringNotContainsString('Same-day turnaround', $preparationHtml);
+
+        $data['readiness']['is_same_day_turnaround'] = true;
+        $turnaroundHtml = $this->render('return', $this->facts(), false, [], $data);
+
+        $this->assertStringContainsString('Same-day turnaround', $turnaroundHtml);
+        $this->assertStringNotContainsString('Preparation for next pickup', $turnaroundHtml);
+    }
+
     /** @param array<string, mixed> $latestFacts @param array<string, mixed> $formData */
     private function render(string $movementType, array $latestFacts, bool $correcting = false, array $formData = [], array $extra = []): string
     {
+        $checklist = array_merge(['exists' => true, 'id' => 4, 'fleet_vehicle_id' => 10, 'turo_trip_normalized_id' => 100, 'fleet_code' => 'EV-10', 'movement_type' => $movementType, 'scheduled_at' => '2026-09-03 08:00:00', 'guest_name' => 'Guest', 'readiness_status' => 'ready', 'progress' => ['required_complete_count' => 1, 'required_count' => 1, 'required_remaining_count' => 0], 'items' => [], 'vehicle_disposition' => 'available', 'completed_at' => null], $extra['checklist'] ?? []);
+        unset($extra['checklist']);
+
         return CoreServices::renderer()->setData(array_merge([
             'assets' => ['css' => null, 'js' => null],
-            'checklist' => ['exists' => true, 'id' => 4, 'fleet_vehicle_id' => 10, 'turo_trip_normalized_id' => 100, 'fleet_code' => 'EV-10', 'movement_type' => $movementType, 'scheduled_at' => '2026-09-03 08:00:00', 'guest_name' => 'Guest', 'readiness_status' => 'ready', 'progress' => ['required_complete_count' => 1, 'required_count' => 1, 'required_remaining_count' => 0], 'items' => [], 'vehicle_disposition' => 'available', 'completed_at' => null],
+            'checklist' => $checklist,
             'latestFacts' => $latestFacts,
             'correctingFacts' => $correcting,
             'factFormData' => $formData,
             'notice' => null,
             'error' => null,
         ], $extra))->render('trip_movement_checklists/show');
+    }
+
+    /** @return array<string, mixed> */
+    private function readinessViewData(): array
+    {
+        $items = [
+            ['id' => 80, 'item_code' => 'vehicle_received', 'label' => 'Legacy return received', 'completion_state' => 'complete', 'applicability' => 'applicable', 'completion_source' => 'imported', 'completed_at' => '2026-09-03 09:10:00', 'note' => null],
+            ['id' => 81, 'item_code' => 'exterior_inspected', 'label' => 'Exterior inspected', 'completion_state' => 'open', 'applicability' => 'applicable', 'completion_source' => null, 'completed_at' => null, 'note' => null],
+            ['id' => 82, 'item_code' => 'interior_inspected', 'label' => 'Interior inspected', 'completion_state' => 'complete', 'applicability' => 'applicable', 'completion_source' => 'manual', 'completed_at' => '2026-09-03 09:22:00', 'note' => null],
+            ['id' => 83, 'item_code' => 'return_workflow_completed', 'label' => 'Legacy return workflow completed', 'completion_state' => 'complete', 'applicability' => 'applicable', 'completion_source' => 'manual', 'completed_at' => '2026-09-03 09:30:00', 'note' => 'Imported history'],
+        ];
+        $requirements = [
+            ['code' => 'vehicle_received', 'label' => 'Vehicle returned', 'phase' => 'return_intake', 'kind' => 'derived', 'status' => 'satisfied', 'blocking' => true, 'satisfied_by' => 'movement_event', 'basis_at' => '2026-09-03 09:16:00', 'action' => null, 'allows_na' => false],
+            ['code' => 'energy_known', 'label' => 'Energy known', 'phase' => 'return_intake', 'kind' => 'derived', 'status' => 'satisfied', 'blocking' => true, 'satisfied_by' => 'movement_assessment', 'basis_at' => '2026-09-03 09:17:00', 'action' => null, 'allows_na' => false],
+            ['code' => 'cleaning_status_known', 'label' => 'Cleaning status known', 'phase' => 'return_intake', 'kind' => 'derived', 'status' => 'satisfied', 'blocking' => true, 'satisfied_by' => 'movement_assessment', 'basis_at' => '2026-09-03 09:17:00', 'action' => null, 'allows_na' => false],
+            ['code' => 'exterior_inspected', 'label' => 'Exterior inspected', 'phase' => 'return_intake', 'kind' => 'human', 'status' => 'unsatisfied', 'blocking' => true, 'satisfied_by' => null, 'basis_at' => null, 'action' => ['type' => 'checklist_item', 'item_id' => 81, 'label' => 'Confirm exterior inspected'], 'allows_na' => false],
+            ['code' => 'interior_inspected', 'label' => 'Interior inspected', 'phase' => 'return_intake', 'kind' => 'human', 'status' => 'satisfied', 'blocking' => true, 'satisfied_by' => 'human_checklist', 'basis_at' => '2026-09-03 09:22:00', 'action' => null, 'allows_na' => false],
+            ['code' => 'vehicle_disposition', 'label' => 'Vehicle disposition assigned', 'phase' => 'return_intake', 'kind' => 'derived', 'status' => 'unsatisfied', 'blocking' => true, 'satisfied_by' => null, 'basis_at' => null, 'action' => ['type' => 'record_fact', 'label' => 'Assign vehicle disposition'], 'allows_na' => false],
+        ];
+
+        return [
+            'checklist' => ['items' => $items, 'vehicle_disposition' => null],
+            'readiness' => ['ready' => false, 'blocking_remaining_count' => 2, 'readiness_phase' => 'return_intake', 'requirements' => $requirements, 'workflow_history' => ['historically_completed' => false, 'completed_at' => null, 'legacy_items' => $items]],
+        ];
     }
 
     /** @param array<string, mixed> $overrides @return array<string, mixed> */

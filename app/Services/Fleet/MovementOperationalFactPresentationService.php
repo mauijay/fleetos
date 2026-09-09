@@ -39,7 +39,6 @@ class MovementOperationalFactPresentationService
 
         $eventCode = (string) $facts['event_code'];
         $isHandoff = $eventCode === 'actual_handoff';
-        $isCurrent = in_array($eventCode, ['actual_return', 'vehicle_recovered', 'vehicle_positioned'], true);
         $energyKind = (string) ($facts['energy_kind'] ?? 'unknown');
         $energyLabel = in_array($energyKind, ['gasoline', 'diesel'], true) ? 'Fuel' : (in_array($energyKind, ['electric'], true) ? 'Charge' : 'Energy');
         $locationClass = (string) ($facts['location_class'] ?? 'unknown');
@@ -57,7 +56,7 @@ class MovementOperationalFactPresentationService
         return array_merge($facts, [
             'event_title' => $isHandoff ? 'Guest handoff recorded' : ($eventCode === 'vehicle_staged' ? 'Staged for pickup' : ($eventCode === 'actual_return' ? 'Actual return recorded' : ucwords(str_replace('_', ' ', $eventCode)) . ' recorded')),
             'occurred_at_label' => date('M j, Y g:i A', strtotime((string) $facts['occurred_at'])),
-            'location_label' => $isHandoff ? 'Handoff location' : ($eventCode === 'vehicle_staged' ? 'Staging location' : ($isCurrent ? 'Current location' : 'Last known location')),
+            'location_label' => $isHandoff ? 'Handoff location' : ($eventCode === 'vehicle_staged' ? 'Staging location' : ($eventCode === 'actual_return' ? 'Return location' : ($eventCode === 'vehicle_positioned' ? 'Position recorded at' : 'Event location'))),
             'location_class_label' => $locationLabels[$locationClass] ?? ucwords(str_replace('_', ' ', $locationClass)),
             'location_detail_value' => $locationDetail === '' ? null : $locationDetail,
             'airport_parking' => $parking,

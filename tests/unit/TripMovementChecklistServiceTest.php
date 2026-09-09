@@ -118,6 +118,25 @@ final class TripMovementChecklistServiceTest extends CIUnitTestCase
         $this->assertFalse($this->service->completeItem(999));
     }
 
+    public function testExplicitDerivedReadinessControlsWorkflowClose(): void
+    {
+        $derivedReady = $this->service->ensureForMovement($this->reservation(), 'return');
+
+        $this->assertTrue($this->service->completeChecklist((int) $derivedReady['id'], 'Derived facts reviewed.', null, true));
+        $this->assertNotNull($this->connection->table('trip_movement_checklists')->where('id', $derivedReady['id'])->get()->getRow('completed_at'));
+        $this->assertFalse($this->service->completeChecklist((int) $derivedReady['id'], null, null, true));
+
+        $legacyReady = $this->service->ensureForMovement(array_merge($this->reservation(), ['id' => 2, 'starts_at' => '2026-07-19 12:00:00']), 'pickup');
+        foreach ($legacyReady['items'] as $item) {
+            if ((bool) $item['is_critical']) {
+                $this->service->completeItem((int) $item['id']);
+            }
+        }
+        $this->assertSame('ready', $this->service->checklist((int) $legacyReady['id'])['readiness_status']);
+        $this->assertFalse($this->service->completeChecklist((int) $legacyReady['id'], null, null, false));
+        $this->assertNull($this->connection->table('trip_movement_checklists')->where('id', $legacyReady['id'])->get()->getRow('completed_at'));
+    }
+
     public function testSummariesForDaySupportCommandCenterProgress(): void
     {
         $checklist = $this->service->ensureForMovement($this->reservation(), 'pickup');

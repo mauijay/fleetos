@@ -4,26 +4,34 @@
 /** @var string|null $notice */
 /** @var string|null $error */
 /** @var array<string, mixed>|null $currentLocation */
+/** @var array<string, mixed>|null $readiness */
 /** @var array<string, mixed>|null $latestFacts */
 /** @var array{pickup:array<string, mixed>|null,return:array<string, mixed>|null} $tripFacts */
 /** @var bool $correctingFacts */
 /** @var bool $isStagedPickup */
 /** @var bool $isPickupConfirmed */
+/** @var string|null $pickupConfirmedAt */
 /** @var bool $repairingFacts */
 /** @var array<int, array<string, mixed>> $repairCandidates */
 /** @var array<int, array<string, mixed>> $repairConflicts */
 /** @var array<string, mixed> $factFormData */
 /** @var bool $isEarlyHandoffWarning */
 /** @var array<string, array<string, mixed>|null>|null $tripContext */
+/** @var array<string, mixed> $positionFormData */
+/** @var bool $showPositionForm */
 $hnlGarages ??= (new \App\Services\Fleet\HnlGarageCatalog())->definitions();
 $isStagedPickup ??= false;
 $isPickupConfirmed ??= false;
+$pickupConfirmedAt ??= null;
 $repairingFacts ??= false;
 $repairCandidates ??= [];
 $repairConflicts ??= [];
 $tripContext ??= null;
 $currentLocation ??= null;
 $isEarlyHandoffWarning ??= false;
+$readiness ??= null;
+$positionFormData ??= [];
+$showPositionForm ??= false;
 $factTarget ??= null;
 $tripFacts ??= [
     'pickup' => ($latestFacts['movement_type'] ?? $checklist['movement_type'] ?? null) === 'pickup' ? $latestFacts : null,
@@ -58,11 +66,7 @@ $tripFacts ??= [
         <?php if (! ($checklist['exists'] ?? false)): ?>
             <section class="section"><div class="empty-state">Checklist not found.</div></section>
         <?php else: ?>
-            <section class="section briefing-card">
-                <p class="eyebrow">Readiness</p>
-                <h2><?= esc(ucwords(str_replace('_', ' ', (string) $checklist['readiness_status']))) ?></h2>
-                <p class="briefing-copy"><?= esc((string) $checklist['progress']['required_complete_count']) ?> of <?= esc((string) $checklist['progress']['required_count']) ?> required items complete. <?= esc((string) $checklist['progress']['required_remaining_count']) ?> remaining.</p>
-            </section>
+            <?= view('trip_movement_checklists/_readiness', ['checklist' => $checklist, 'readiness' => $readiness, 'tripFacts' => $tripFacts]) ?>
 
             <?php if ($tripContext !== null): ?>
                 <section class="section trip-context">
@@ -95,22 +99,6 @@ $tripFacts ??= [
                             </<?= $contextTag ?>>
                         <?php endforeach; ?>
                     </div>
-                </section>
-            <?php endif; ?>
-
-            <?php if (($checklist['movement_type'] ?? '') === 'return'): ?>
-                <section class="section">
-                    <form class="issue-filters" action="/operations/checklists/<?= esc((string) $checklist['id'], 'attr') ?>/disposition" method="post">
-                        <?= csrf_field() ?>
-                        <label>Vehicle availability
-                            <select name="vehicle_disposition" required>
-                                <?php foreach (['available', 'needs_cleaning', 'needs_charging', 'maintenance_required', 'claim_review_required', 'offline'] as $disposition): ?>
-                                    <option value="<?= esc($disposition, 'attr') ?>" <?= ($checklist['vehicle_disposition'] ?? '') === $disposition ? 'selected' : '' ?>><?= esc(ucwords(str_replace('_', ' ', $disposition))) ?></option>
-                                <?php endforeach; ?>
-                            </select>
-                        </label>
-                        <button class="primary-action" type="submit">Save Availability</button>
-                    </form>
                 </section>
             <?php endif; ?>
 
@@ -194,9 +182,9 @@ $energyPercent = $factFormData['energy_percent'] ?? '';
                 <?php elseif ($movementType === 'pickup' && $isPickupConfirmed && ! $correctingFacts): ?>
                     <div class="import-message tone-success">
                         <strong>Guest pickup confirmed</strong>
-                        <span><?= esc((string) ($tripFacts['pickup']['occurred_at_label'] ?? 'Time not captured')) ?></span>
+                        <span><?= $pickupConfirmedAt === null ? 'Time not captured' : esc(date('M j, Y g:i A', strtotime($pickupConfirmedAt))) ?></span>
                     </div>
-                <?php elseif ($movementType === 'pickup' && $isStagedPickup && ! $correctingFacts): ?>
+                <?php elseif ($movementType === 'pickup' && $isStagedPickup && ! $isPickupConfirmed && ! $correctingFacts): ?>
                     <form id="handoff-entry" class="issue-filters" action="/operations/checklists/<?= (int) $checklist['id'] ?>/confirm-guest-pickup" method="post">
                         <?= csrf_field() ?>
                         <fieldset class="local-datetime-fields" data-local-datetime><legend>Guest pickup time</legend><label>Date<input type="date" name="occurred_on" required value="<?= esc($occurredOn, 'attr') ?>"></label><label>Time<input type="time" name="occurred_time" required step="60" value="<?= esc($occurredTime, 'attr') ?>"></label><input type="hidden" name="occurred_at" value="<?= esc($occurredAt, 'attr') ?>"><span>Honolulu local time</span></fieldset>
@@ -218,7 +206,7 @@ $energyPercent = $factFormData['energy_percent'] ?? '';
                         <input type="hidden" name="fact_target" value="<?= esc((string) ($factTarget ?? $movementType), 'attr') ?>">
                     <?php endif; ?>
                     <fieldset class="local-datetime-fields" data-local-datetime><legend>Actual time</legend><label>Date<input type="date" name="occurred_on" required value="<?= esc($occurredOn, 'attr') ?>"></label><label>Time<input type="time" name="occurred_time" required step="60" value="<?= esc($occurredTime, 'attr') ?>"></label><input type="hidden" name="occurred_at" value="<?= esc($occurredAt, 'attr') ?>"><span>Honolulu local time</span></fieldset>
-                    <label><?= $movementType === 'pickup' ? 'Handoff location' : 'Current location' ?><select id="movement-location-class" name="location_class" required><?php foreach (['unknown', 'home', 'airport_hnl', 'waikiki_hotel', 'other_delivery'] as $location): ?><option value="<?= esc($location, 'attr') ?>" <?= $selectedLocation === $location ? 'selected' : '' ?>><?= esc(ucwords(str_replace('_', ' ', $location))) ?></option><?php endforeach; ?></select></label>
+                    <label><?= $movementType === 'pickup' ? 'Handoff location' : 'Return location' ?><select id="movement-location-class" name="location_class" required><?php foreach (['unknown', 'home', 'airport_hnl', 'waikiki_hotel', 'other_delivery'] as $location): ?><option value="<?= esc($location, 'attr') ?>" <?= $selectedLocation === $location ? 'selected' : '' ?>><?= esc(ucwords(str_replace('_', ' ', $location))) ?></option><?php endforeach; ?></select></label>
                     <label data-location-detail <?= $selectedLocation === 'airport_hnl' ? 'hidden' : '' ?>>Location detail<input name="location_detail" maxlength="500" value="<?= esc((string) ($factFormData['location_detail'] ?? ''), 'attr') ?>" <?= $selectedLocation === 'airport_hnl' ? 'disabled' : '' ?>></label>
                     <fieldset class="hnl-parking-fields" data-hnl-parking data-location-select="movement-location-class">
                         <legend>HNL parking</legend>
@@ -242,41 +230,7 @@ $energyPercent = $factFormData['energy_percent'] ?? '';
                 </form>
                 <?php endif; ?>
             </section>
-
-            <section class="section">
-                <div class="movement-checklist-list">
-                    <?php foreach ($checklist['items'] as $item): ?>
-                        <article class="movement-checklist-item tone-<?= $item['completion_state'] === 'complete' ? 'success' : ($item['is_critical'] ? 'warning' : 'info') ?>">
-                            <div>
-                                <h3><?= esc($item['label']) ?></h3>
-                                <p><?= $item['is_required'] ? 'Required' : 'Optional' ?> · <?= $item['is_critical'] ? 'Critical' : 'Standard' ?> · <?= esc(ucwords(str_replace('_', ' ', (string) $item['completion_state']))) ?></p>
-                            </div>
-                            <div class="checklist-actions">
-                                <form action="/operations/checklist-items/<?= esc((string) $item['id'], 'attr') ?>/complete" method="post"><?= csrf_field() ?><button class="primary-action" type="submit">Complete</button></form>
-                                <form action="/operations/checklist-items/<?= esc((string) $item['id'], 'attr') ?>/undo" method="post"><?= csrf_field() ?><button class="secondary-action" type="submit">Undo</button></form>
-                                <form action="/operations/checklist-items/<?= esc((string) $item['id'], 'attr') ?>/not-applicable" method="post"><?= csrf_field() ?><button class="secondary-action" type="submit">N/A</button></form>
-                            </div>
-                        </article>
-                    <?php endforeach; ?>
-                </div>
-            </section>
-
-            <section class="section">
-                <form class="resolution-form" action="/operations/checklists/<?= esc((string) $checklist['id'], 'attr') ?>/complete" method="post">
-                    <?= csrf_field() ?>
-                    <label>Completion note
-                        <textarea name="completion_note" rows="3" placeholder="Optional note"></textarea>
-                    </label>
-                    <button class="primary-action" type="submit">Complete Movement Workflow</button>
-                </form>
-                <?php if ($checklist['completed_at'] !== null): ?>
-                    <form class="resolution-form" action="/operations/checklists/<?= esc((string) $checklist['id'], 'attr') ?>/reopen" method="post">
-                        <?= csrf_field() ?>
-                        <label class="checkbox-row"><input type="checkbox" name="confirm_reopen" value="1" required><span>Confirm reopening this completed workflow.</span></label>
-                        <button class="secondary-action" type="submit">Reopen Workflow</button>
-                    </form>
-                <?php endif; ?>
-            </section>
+            <?= view('trip_movement_checklists/_position', ['checklist' => $checklist, 'currentLocation' => $currentLocation, 'tripContext' => $tripContext, 'showPositionForm' => $showPositionForm, 'positionFormData' => $positionFormData, 'hnlGarages' => $hnlGarages]) ?>
         <?php endif; ?>
 
         <?= view('fleet_command_center/components/footer') ?>

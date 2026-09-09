@@ -42,6 +42,7 @@ class MovementReadinessReadModelRepository
         $scopedChecklistIds = array_map('intval', array_column($checklists, 'id'));
         $tripIds = array_values(array_unique(array_map('intval', array_column($checklists, 'turo_trip_normalized_id'))));
         $vehicleIds = array_values(array_unique(array_map('intval', array_column($checklists, 'fleet_vehicle_id'))));
+        $nextTripsByVehicle = $this->nextTripCandidates($checklists, $vehicleIds);
 
         $items = $this->db->table('trip_movement_checklist_items')
             ->whereIn('trip_movement_checklist_id', $scopedChecklistIds)
@@ -164,9 +165,68 @@ class MovementReadinessReadModelRepository
                 'scheduled_location' => $locationsByTrip[$tripId][$movementType] ?? null,
                 'airport_workflow' => $airportByTrip[$tripId][$movementType] ?? null,
                 'positioning_plan' => $plansByVehicle[$vehicleId] ?? null,
+                'next_trip' => $movementType === 'return' ? $this->eligibleNextTrip($checklist, $nextTripsByVehicle[$vehicleId] ?? []) : null,
             ]);
         }
 
         return $contexts;
+    }
+
+    /** @param array<int, array<string, mixed>> $checklists @param list<int> $vehicleIds @return array<int, list<array<string, mixed>>> */
+    private function nextTripCandidates(array $checklists, array $vehicleIds): array
+    {
+        if (! array_any($checklists, static fn (array $checklist): bool => $checklist['movement_type'] === 'return')) {
+            return [];
+        }
+
+        $builder = $this->db->table('turo_trips_normalized trips')
+            ->select('trips.id, trips.fleet_vehicle_id, trips.starts_at, trips.ends_at, trips.canceled_at, trip_statuses.code AS trip_status_code')
+            ->join('lookup_values trip_statuses', 'trip_statuses.id = trips.trip_status_lookup_value_id', 'left')
+            ->whereIn('trips.fleet_vehicle_id', $vehicleIds)
+            ->where('trips.deleted_at', null)
+            ->orderBy('trips.starts_at', 'ASC')
+            ->orderBy('trips.id', 'ASC');
+
+        $byVehicle = [];
+        foreach ($builder->get()->getResultArray() as $trip) {
+            $byVehicle[(int) $trip['fleet_vehicle_id']][] = $trip;
+        }
+
+        return $byVehicle;
+    }
+
+    /** @param array<string, mixed> $checklist @param list<array<string, mixed>> $candidates @return array<string, mixed>|null */
+    private function eligibleNextTrip(array $checklist, array $candidates): ?array
+    {
+        try {
+            $returnAt = new \DateTimeImmutable((string) $checklist['ends_at']);
+        } catch (\Exception) {
+            return null;
+        }
+
+        foreach ($candidates as $candidate) {
+            $status = (string) ($candidate['trip_status_code'] ?? '');
+            if ((int) $candidate['id'] === (int) $checklist['turo_trip_normalized_id']
+                || ($candidate['canceled_at'] ?? null) !== null
+                || str_starts_with($status, 'canceled')
+                || $status === 'invalid') {
+                continue;
+            }
+            try {
+                $startsAt = new \DateTimeImmutable((string) $candidate['starts_at']);
+                $endsAt = new \DateTimeImmutable((string) $candidate['ends_at']);
+            } catch (\Exception) {
+                continue;
+            }
+            if ($endsAt <= $startsAt || $startsAt < $returnAt) {
+                continue;
+            }
+
+            return array_merge($candidate, [
+                'is_same_day_turnaround' => $returnAt->format('Y-m-d') === $startsAt->format('Y-m-d'),
+            ]);
+        }
+
+        return null;
     }
 }

@@ -7,7 +7,7 @@ class MovementReadinessProjectionService
     public const PHASE_PICKUP_PREPARATION = 'pickup_preparation';
     public const PHASE_PICKUP_LIFECYCLE = 'pickup_lifecycle';
     public const PHASE_RETURN_INTAKE = 'return_intake';
-    public const PHASE_TURNAROUND = 'turnaround_next_pickup';
+    public const PHASE_NEXT_PICKUP_PREPARATION = 'next_pickup_preparation';
     public const KIND_DERIVED = 'derived';
     public const KIND_HUMAN = 'human';
     public const KIND_HYBRID = 'hybrid';
@@ -31,6 +31,10 @@ class MovementReadinessProjectionService
             $readinessRequirements,
             static fn (array $requirement): bool => $requirement['blocking'] && $requirement['status'] === self::STATUS_UNSATISFIED,
         ));
+        $additionalActionsRemaining = count(array_filter(
+            $readinessRequirements,
+            static fn (array $requirement): bool => ! $requirement['blocking'] && $requirement['status'] === self::STATUS_UNSATISFIED,
+        ));
         $humanRemaining = count(array_filter(
             $readinessRequirements,
             static fn (array $requirement): bool => $requirement['blocking']
@@ -52,9 +56,12 @@ class MovementReadinessProjectionService
             'readiness_phase' => $readinessPhase,
             'ready' => $blockingRemaining === 0,
             'blocking_remaining_count' => $blockingRemaining,
+            'additional_actions_remaining_count' => $additionalActionsRemaining,
             'human_actions_remaining_count' => $humanRemaining,
             'known_facts_satisfied_count' => $knownFacts,
             'requirements' => $requirements,
+            'next_trip' => $context['next_trip'] ?? null,
+            'is_same_day_turnaround' => ($context['next_trip']['is_same_day_turnaround'] ?? false) === true,
             'positioning_plan' => $context['positioning_plan'],
             'workflow_history' => [
                 'historically_completed' => $context['completed_at'] !== null,
@@ -118,6 +125,7 @@ class MovementReadinessProjectionService
         $cleanlinessKnown = ($assessment['cleanliness'] ?? null) !== null;
         $clean = ($assessment['cleanliness'] ?? null) === 'clean';
         $disposition = trim((string) ($context['vehicle_disposition'] ?? ''));
+        $nextTrip = $context['next_trip'] ?? null;
 
         $requirements = [
             $this->derivedRequirement('vehicle_received', 'Vehicle returned or recovered', self::PHASE_RETURN_INTAKE, $received !== null, true, $received !== null ? 'movement_event' : null, $received['occurred_at'] ?? null, 'Record actual return or recovery'),
@@ -129,12 +137,20 @@ class MovementReadinessProjectionService
             $this->humanRequirement($context, 'damage_check_completed', 'Damage check completed', self::PHASE_RETURN_INTAKE),
             $this->humanRequirement($context, 'return_photos_completed', 'Return photos completed', self::PHASE_RETURN_INTAKE),
             $this->derivedRequirement('vehicle_disposition', 'Vehicle disposition assigned', self::PHASE_RETURN_INTAKE, $disposition !== '', true, $disposition !== '' ? 'vehicle_disposition' : null, null, 'Assign vehicle disposition'),
-            $this->derivedRequirement('vehicle_clean', 'Vehicle clean for next pickup', self::PHASE_TURNAROUND, $clean, true, $clean ? 'movement_assessment' : null, $assessment['captured_at'] ?? null, 'Clean vehicle'),
         ];
 
-        $requirements[] = $target === null
-            ? $this->notApplicableRequirement('energy_ready', 'Energy ready for next pickup', self::PHASE_TURNAROUND)
-            : $this->derivedRequirement('energy_ready', 'Energy ready for next pickup', self::PHASE_TURNAROUND, $energy !== null && $energy >= $target, true, $energy !== null ? 'movement_assessment_and_profile' : null, $assessment['captured_at'] ?? null, 'Charge/Fuel to ' . $target . '%');
+        if ($nextTrip !== null) {
+            $requirements[] = $this->nextPickupRequirement(
+                $this->derivedRequirement('vehicle_clean', 'Vehicle clean for next pickup', self::PHASE_NEXT_PICKUP_PREPARATION, $clean, true, $clean ? 'movement_assessment' : null, $assessment['captured_at'] ?? null, 'Clean vehicle'),
+                $nextTrip,
+            );
+            $requirements[] = $this->nextPickupRequirement(
+                $target === null
+                    ? $this->notApplicableRequirement('energy_ready', 'Energy ready for next pickup', self::PHASE_NEXT_PICKUP_PREPARATION)
+                    : $this->derivedRequirement('energy_ready', 'Energy ready for next pickup', self::PHASE_NEXT_PICKUP_PREPARATION, $energy !== null && $energy >= $target, true, $energy !== null ? 'movement_assessment_and_profile' : null, $assessment['captured_at'] ?? null, 'Charge/Fuel to ' . $target . '%'),
+                $nextTrip,
+            );
+        }
 
         return $requirements;
     }
@@ -156,8 +172,28 @@ class MovementReadinessProjectionService
             true,
             $satisfied ? 'human_checklist' : null,
             $satisfied ? ($item['completed_at'] ?? null) : null,
-            $satisfied ? null : ['type' => 'checklist_item', 'item_id' => $item === null ? null : (int) $item['id'], 'label' => 'Confirm ' . strtolower($label)],
+            $satisfied ? null : ['type' => 'checklist_item', 'item_id' => $item === null ? null : (int) $item['id'], 'label' => $this->humanActionLabel($code, $label)],
         );
+    }
+
+    private function humanActionLabel(string $code, string $label): string
+    {
+        return match ($code) {
+            'exterior_inspected' => 'Inspect exterior',
+            'interior_inspected' => 'Inspect interior',
+            'damage_check_completed' => 'Check for damage',
+            'return_photos_completed' => 'Confirm return photos',
+            default => 'Confirm ' . strtolower($label),
+        };
+    }
+
+    /** @param array<string, mixed> $requirement @param array<string, mixed> $nextTrip @return array<string, mixed> */
+    private function nextPickupRequirement(array $requirement, array $nextTrip): array
+    {
+        return array_merge($requirement, [
+            'target_trip_id' => (int) $nextTrip['id'],
+            'target_at' => (string) $nextTrip['starts_at'],
+        ]);
     }
 
     /** @param array<string, mixed> $context @param array<string, mixed>|null $actualLocation @return array<string, mixed> */

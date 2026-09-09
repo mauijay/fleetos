@@ -96,6 +96,9 @@ final class MovementHandoffNavigationReadOnlyTest extends CIUnitTestCase
         $before = $this->factCounts();
 
         $this->call('GET', '/operations/checklists/41?action=handoff')->assertOK();
+        $this->call('GET', '/operations/checklists/41?action=confirm-pickup')->assertOK();
+        $this->call('GET', '/operations/checklists/41?action=position')->assertOK();
+        $this->call('GET', '/operations/checklists/41')->assertOK();
 
         $this->assertSame($before, $this->factCounts());
     }

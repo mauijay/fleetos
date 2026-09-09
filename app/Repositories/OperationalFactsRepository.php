@@ -364,6 +364,10 @@ class OperationalFactsRepository
     {
         $now = date('Y-m-d H:i:s');
         $fields = array_flip($this->db->getFieldNames('trip_movement_events'));
+        $rowColumn = $this->airportParkingRowColumn();
+        if ($rowColumn !== null && $rowColumn !== 'airport_parking_row') {
+            $data[$rowColumn] = $data['airport_parking_row'] ?? null;
+        }
         $this->db->table('trip_movement_events')->insert(array_intersect_key(array_merge($data, ['created_at' => $now, 'updated_at' => $now]), $fields));
         return (int) $this->db->insertID();
     }
@@ -372,7 +376,7 @@ class OperationalFactsRepository
     public function event(int $eventId): ?array
     {
         $row = $this->db->table('trip_movement_events')->where('id', $eventId)->get()->getRowArray();
-        return $row === null ? null : $row;
+        return $this->normalizeMovementEvent($row);
     }
 
     /** @return array<string, mixed>|null */
@@ -386,7 +390,7 @@ class OperationalFactsRepository
             ->get(1)
             ->getRowArray();
 
-        return $row === null ? null : $row;
+        return $this->normalizeMovementEvent($row);
     }
 
     /** @param list<string> $eventCodes @return array<string, mixed>|null */
@@ -405,7 +409,28 @@ class OperationalFactsRepository
             ->get(1)
             ->getRowArray();
 
-        return $row === null ? null : $row;
+        return $this->normalizeMovementEvent($row);
+    }
+
+    /** @param array<string, mixed> $fact */
+    public function hasExactActivePositionFact(array $fact): bool
+    {
+        $builder = $this->db->table('trip_movement_events')
+            ->where('fleet_vehicle_id', $fact['fleet_vehicle_id'])
+            ->where('turo_trip_normalized_id', $fact['turo_trip_normalized_id'])
+            ->where('event_code', 'vehicle_positioned')
+            ->where('occurred_at', $fact['occurred_at'])
+            ->where('voided_at', null);
+        foreach (['location_class', 'location_detail'] as $field) {
+            $builder->where($field, $fact[$field] ?? null);
+        }
+        if ($this->hasStructuredAirportParking()) {
+            $builder->where('airport_garage_code', $fact['airport_garage_code'] ?? null)
+                ->where('airport_parking_level', $fact['airport_parking_level'] ?? null)
+                ->where($this->airportParkingRowColumn(), $fact['airport_parking_row'] ?? null);
+        }
+
+        return $builder->countAllResults() > 0;
     }
 
     public function correctEvent(int $eventId, array $replacement, int $actorUserId, string $reason, bool $manageTransaction = true): int
@@ -458,7 +483,7 @@ class OperationalFactsRepository
             $builder->where('occurred_at <=', $asOf);
         }
         $row = $builder->orderBy('occurred_at', 'DESC')->orderBy('id', 'DESC')->get(1)->getRowArray();
-        return $row === null ? null : $row;
+        return $this->normalizeMovementEvent($row);
     }
 
     /** @return array<string, mixed>|null */
@@ -554,7 +579,7 @@ class OperationalFactsRepository
             ->where('assessments.voided_at', null)
             ->where('events.voided_at', null);
         if ($this->hasStructuredAirportParking()) {
-            $builder->select('events.airport_garage_code, events.airport_parking_level, events.airport_parking_row');
+            $builder->select('events.airport_garage_code, events.airport_parking_level, ' . $this->qualifiedAirportParkingRowSelect('events'));
         }
         return $builder->orderBy('assessments.captured_at', 'DESC')->orderBy('assessments.id', 'DESC')->get()->getResultArray();
     }
@@ -564,13 +589,58 @@ class OperationalFactsRepository
         $columns = 'id, fleet_vehicle_id, turo_trip_normalized_id, event_code, movement_type, occurred_at, location_class, location_detail, source, note';
 
         return $this->hasStructuredAirportParking()
-            ? $columns . ', airport_garage_code, airport_parking_level, airport_parking_row'
+            ? $columns . ', airport_garage_code, airport_parking_level, ' . $this->airportParkingRowSelect()
             : $columns;
     }
 
     private function hasStructuredAirportParking(): bool
     {
-        return in_array('airport_garage_code', $this->db->getFieldNames('trip_movement_events'), true);
+        $fields = $this->db->getFieldNames('trip_movement_events');
+
+        return in_array('airport_garage_code', $fields, true)
+            && in_array('airport_parking_level', $fields, true)
+            && $this->airportParkingRowColumn($fields) !== null;
+    }
+
+    /** @param list<string>|null $fields */
+    private function airportParkingRowColumn(?array $fields = null): ?string
+    {
+        $fields ??= $this->db->getFieldNames('trip_movement_events');
+        if (in_array('airport_parking_row', $fields, true)) {
+            return 'airport_parking_row';
+        }
+
+        return in_array('airport_parking_stall', $fields, true) ? 'airport_parking_stall' : null;
+    }
+
+    private function airportParkingRowSelect(): string
+    {
+        $column = $this->airportParkingRowColumn();
+
+        return $column === 'airport_parking_row' ? $column : $column . ' AS airport_parking_row';
+    }
+
+    private function qualifiedAirportParkingRowSelect(string $tableAlias): string
+    {
+        $column = $this->airportParkingRowColumn();
+
+        return $column === 'airport_parking_row'
+            ? $tableAlias . '.' . $column
+            : $tableAlias . '.' . $column . ' AS airport_parking_row';
+    }
+
+    /** @param array<string, mixed>|null $event @return array<string, mixed>|null */
+    private function normalizeMovementEvent(?array $event): ?array
+    {
+        if ($event === null) {
+            return null;
+        }
+        if (! array_key_exists('airport_parking_row', $event) && array_key_exists('airport_parking_stall', $event)) {
+            $event['airport_parking_row'] = $event['airport_parking_stall'];
+        }
+        unset($event['airport_parking_stall']);
+
+        return $event;
     }
 
     public function createAssessment(array $data): int
