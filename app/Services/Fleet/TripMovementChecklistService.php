@@ -7,7 +7,7 @@ use DateTimeImmutable;
 
 class TripMovementChecklistService
 {
-    public const RETURN_DISPOSITIONS = ['available', 'needs_cleaning', 'needs_charging', 'maintenance_required', 'claim_review_required', 'offline'];
+    public const EXCEPTION_DISPOSITIONS = ['maintenance_required', 'claim_review_required', 'offline'];
 
     public function __construct(
         private readonly ?MovementChecklistRepository $repository = null,
@@ -110,11 +110,49 @@ class TripMovementChecklistService
 
     public function setDisposition(int $checklistId, string $disposition, ?int $actorUserId = null): bool
     {
-        if (! in_array($disposition, self::RETURN_DISPOSITIONS, true)) {
+        if ($disposition !== '' && ! in_array($disposition, self::EXCEPTION_DISPOSITIONS, true)) {
             return false;
         }
 
-        return $this->repo()->updateChecklist($checklistId, ['vehicle_disposition' => $disposition], $actorUserId);
+        return $this->repo()->updateChecklist($checklistId, ['vehicle_disposition' => $disposition === '' ? null : $disposition], $actorUserId);
+    }
+
+    public function completePickupPhotos(int $checklistId, int $companyId, int $actorUserId): bool
+    {
+        if ($this->scopedPickupChecklist($checklistId, $companyId, $actorUserId) === null) {
+            return false;
+        }
+
+        return $this->repo()->setItemCompletionByCodes($checklistId, ['exterior_photos_completed', 'interior_photos_completed'], true, $actorUserId);
+    }
+
+    public function undoPickupPhotos(int $checklistId, int $companyId, int $actorUserId): bool
+    {
+        if ($this->scopedPickupChecklist($checklistId, $companyId, $actorUserId) === null) {
+            return false;
+        }
+
+        return $this->repo()->setItemCompletionByCodes($checklistId, ['exterior_photos_completed', 'interior_photos_completed'], false, $actorUserId);
+    }
+
+    public function confirmChargingAdapter(int $checklistId, int $companyId, int $actorUserId): bool
+    {
+        $checklist = $this->scopedPickupChecklist($checklistId, $companyId, $actorUserId);
+        if ($checklist === null || ! $this->repo()->vehicleHasCapability((int) $checklist['fleet_vehicle_id'], 'charging_adapter')) {
+            return false;
+        }
+
+        return $this->repo()->completeOrCreateOptionalItem($checklistId, 'charging_adapter_confirmed', 'Charging adapter present', 65, $actorUserId);
+    }
+
+    public function undoChargingAdapter(int $checklistId, int $companyId, int $actorUserId): bool
+    {
+        $checklist = $this->scopedPickupChecklist($checklistId, $companyId, $actorUserId);
+        if ($checklist === null || ! $this->repo()->vehicleHasCapability((int) $checklist['fleet_vehicle_id'], 'charging_adapter')) {
+            return false;
+        }
+
+        return $this->repo()->setItemCompletionByCodes($checklistId, ['charging_adapter_confirmed'], false, $actorUserId);
     }
 
     public function completeChecklist(int $checklistId, ?string $note = null, ?int $actorUserId = null, ?bool $currentReadinessReady = null): bool
@@ -162,6 +200,23 @@ class TripMovementChecklistService
         }
 
         return false;
+    }
+
+    /** @return array<string, mixed>|null */
+    private function scopedPickupChecklist(int $checklistId, int $companyId, int $actorUserId): ?array
+    {
+        if ($checklistId < 1 || $companyId < 1 || $actorUserId < 1) {
+            return null;
+        }
+        $checklist = $this->repo()->checklist($checklistId);
+        if ($checklist === null
+            || (int) ($checklist['company_id'] ?? 0) !== $companyId
+            || ($checklist['movement_type'] ?? null) !== 'pickup'
+            || ($checklist['completed_at'] ?? null) !== null) {
+            return null;
+        }
+
+        return $checklist;
     }
 
     private function repo(): MovementChecklistRepository

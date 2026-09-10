@@ -248,12 +248,15 @@ final class VehicleCapitalServiceTest extends CIUnitTestCase
     public function testVehicleDetailHeaderUsesScopedResponsiveActions(): void
     {
         $view = file_get_contents(__DIR__ . '/../../app/Views/fleet_vehicles/show.php');
+        $currentOperations = file_get_contents(__DIR__ . '/../../app/Views/fleet_vehicles/components/current_operations.php');
         $css = file_get_contents(__DIR__ . '/../../resources/css/app.css');
         $this->assertIsString($view);
+        $this->assertIsString($currentOperations);
         $this->assertIsString($css);
         $this->assertStringContainsString('class="vehicle-detail-actions"', $view);
         $this->assertStringContainsString('class="secondary-action button-link" href="/fleet/vehicles">Back to vehicles</a>', $view);
-        $this->assertStringContainsString('href="/operations/vehicles/<?= (int) $vehicle[\'id\'] ?>/trip-history">Trip history</a>', $view);
+        $this->assertStringNotContainsString('/trip-history', $view);
+        $this->assertStringContainsString('href="/operations/vehicles/<?= (int) $vehicle[\'id\'] ?>/trip-history">Trip History</a>', $currentOperations);
         $this->assertStringContainsString('class="primary-action button-link" href="/fleet/vehicles/<?= (int) $vehicle[\'id\'] ?>/edit">Edit vehicle</a>', $view);
         $this->assertStringContainsString('gap: 14px;', $css);
         $this->assertStringContainsString('.vehicle-detail-actions .button-link', $css);

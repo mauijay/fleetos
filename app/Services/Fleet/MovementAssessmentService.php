@@ -44,10 +44,26 @@ class MovementAssessmentService
         return $this->repo()->assessment($assessmentId);
     }
 
+    public function hasExactActiveCurrent(int $companyId, int $vehicleId, string $cleanliness, mixed $energyPercent, string $capturedAt): bool
+    {
+        $energy = filter_var($energyPercent, FILTER_VALIDATE_INT);
+        if ($energy === false) {
+            return false;
+        }
+
+        return $this->repo()->hasExactActiveReadinessFact([
+            'company_id' => $companyId,
+            'fleet_vehicle_id' => $vehicleId,
+            'cleanliness' => $cleanliness,
+            'energy_percent' => $energy,
+            'captured_at' => (new \DateTimeImmutable($capturedAt))->format('Y-m-d H:i:s'),
+        ]);
+    }
+
     /** @return array<string, mixed> */
     private function assessmentData(int $vehicleId, ?int $tripId, ?int $eventId, string $movementType, ?string $cleanliness, mixed $energyPercent, string $capturedAt, string $source, int $actorUserId, ?string $note): array
     {
-        if (! in_array($movementType, ['pickup', 'return'], true) || ! in_array($cleanliness, ['clean', 'dirty', null], true) || $actorUserId < 1) {
+        if (! in_array($movementType, ['pickup', 'return', 'current'], true) || ! in_array($cleanliness, ['clean', 'dirty', null], true) || $actorUserId < 1) {
             throw new \InvalidArgumentException('Invalid movement assessment.');
         }
         $energy = $energyPercent === null || $energyPercent === '' ? null : filter_var($energyPercent, FILTER_VALIDATE_INT);

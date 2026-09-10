@@ -13,6 +13,11 @@ class VehicleCapital extends BaseController
 {
     public function show(int $vehicleId): string
     {
+        $asOf = new \DateTimeImmutable();
+        $companyId = $this->activeCompanyId($asOf);
+        if (Services::operationalFactsRepository()->vehicleForCompany($companyId, $vehicleId) === null) {
+            throw PageNotFoundException::forPageNotFound();
+        }
         $workspace = Services::vehicleCapitalService()->workspace($vehicleId);
         if ($workspace === null) {
             throw PageNotFoundException::forPageNotFound();
@@ -24,6 +29,14 @@ class VehicleCapital extends BaseController
             'editing_snapshot_id' => max(0, (int) $this->request->getGet('edit_snapshot')),
             'notice' => CoreServices::session()->getFlashdata('vehicle_capital_notice'),
             'errors' => CoreServices::session()->getFlashdata('vehicle_capital_errors') ?? [],
+            'currentStateNotice' => CoreServices::session()->getFlashdata('vehicle_current_state_notice'),
+            'currentStateError' => CoreServices::session()->getFlashdata('vehicle_current_state_error'),
+            'currentPositionData' => CoreServices::session()->getFlashdata('current_position_data') ?? [],
+            'currentReadinessData' => CoreServices::session()->getFlashdata('current_readiness_data') ?? [],
+            'currentLocation' => Services::currentVehicleLocationService()->resolve($vehicleId, $asOf),
+            'currentReadiness' => $this->currentReadiness($companyId, $vehicleId, $asOf),
+            'currentMovementHref' => $this->currentMovementHref($vehicleId, $asOf),
+            'hnlGarages' => (new \App\Services\Fleet\HnlGarageCatalog())->definitions(),
         ]))->render('fleet_vehicles/show');
     }
 
@@ -76,6 +89,46 @@ class VehicleCapital extends BaseController
         }
 
         return (int) $user->id;
+    }
+
+    private function activeCompanyId(\DateTimeImmutable $asOf): int
+    {
+        $companyIds = Services::operationalFactsRepository()->activeFleetCompanyIds($asOf->format('Y-m-d'));
+        if (count($companyIds) !== 1) {
+            throw new RuntimeException('Vehicle Details requires exactly one active fleet company context.');
+        }
+
+        return $companyIds[0];
+    }
+
+    /** @return array<string, mixed>|null */
+    private function currentReadiness(int $companyId, int $vehicleId, \DateTimeImmutable $asOf): ?array
+    {
+        $readiness = Services::operationalFactsRepository()->latestCurrentReadinessAssessment($companyId, $vehicleId, $asOf->format('Y-m-d H:i:s'));
+        $latestHandoff = Services::operationalFactsRepository()->latestActiveHandoffEvent($vehicleId, $asOf->format('Y-m-d H:i:s'));
+        if ($readiness !== null
+            && $latestHandoff !== null
+            && (string) $latestHandoff['occurred_at'] >= (string) $readiness['captured_at']) {
+            return null;
+        }
+
+        return $readiness;
+    }
+
+    private function currentMovementHref(int $vehicleId, \DateTimeImmutable $asOf): ?string
+    {
+        $repository = Services::operationalFactsRepository();
+        $lifecycle = $repository->latestActiveLifecycleEvent($vehicleId, $asOf->format('Y-m-d H:i:s'));
+        if (isset($lifecycle['turo_trip_normalized_id']) && in_array($lifecycle['event_code'] ?? null, ['actual_handoff', 'vehicle_staged'], true)) {
+            $movementType = $lifecycle['event_code'] === 'actual_handoff' ? 'return' : 'pickup';
+            $href = $repository->movementChecklistHref((int) $lifecycle['turo_trip_normalized_id'], $movementType);
+            if ($href !== null) {
+                return $href;
+            }
+        }
+        $nextTrip = Services::nextConfirmedTripService()->forVehicle($vehicleId, $asOf);
+
+        return $nextTrip === null ? null : $repository->movementChecklistHref((int) $nextTrip['id'], 'pickup');
     }
 
     /** @return array<int, array<string, string>> */

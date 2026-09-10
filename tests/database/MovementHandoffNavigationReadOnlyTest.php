@@ -68,7 +68,8 @@ final class MovementHandoffNavigationReadOnlyTest extends CIUnitTestCase
 
         $repository = $this->createMock(OperationalFactsRepository::class);
         $repository->method('tripContext')->willReturn(['previous' => null, 'current' => null, 'next' => null]);
-        $repository->method('vehicle')->willReturn(['id' => 9, 'fleet_code' => 'Test Vehicle 09']);
+        $repository->method('activeFleetCompanyIds')->willReturn([1]);
+        $repository->method('vehicleForCompany')->willReturn(['id' => 9, 'company_id' => 1, 'fleet_code' => 'Test Vehicle 09']);
         $repository->method('vehicleTripHistory')->willReturn([
             ['id' => 101, 'fleet_vehicle_id' => 9, 'guest_name' => 'Test Guest', 'starts_at' => '2026-10-06 21:30:00', 'ends_at' => '2026-10-12 06:00:00', 'movement_href' => '/operations/checklists/41'],
         ]);

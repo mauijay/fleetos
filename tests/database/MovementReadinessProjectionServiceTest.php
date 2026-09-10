@@ -177,7 +177,7 @@ final class MovementReadinessProjectionServiceTest extends CIUnitTestCase
         $this->assertSame('Inspect interior', $this->requirement($projection, 'interior_inspected')['action']['label']);
         $this->assertSame('Check for damage', $this->requirement($projection, 'damage_check_completed')['action']['label']);
         $this->assertSame('Confirm return photos', $this->requirement($projection, 'return_photos_completed')['action']['label']);
-        $this->assertSame('Assign vehicle disposition', $this->requirement($projection, 'vehicle_disposition')['action']['label']);
+        $this->assertNotContains('vehicle_disposition', array_column($projection['requirements'], 'code'));
     }
 
     public function testActiveUnknownLocationCannotBeOverriddenByWeakerLegacyCompletion(): void
@@ -204,12 +204,14 @@ final class MovementReadinessProjectionServiceTest extends CIUnitTestCase
             ['vehicle_inspected', 'Vehicle inspected', 'complete', 'applicable'],
             ['exterior_photos_completed', 'Exterior condition photos completed', 'complete', 'applicable'],
             ['interior_photos_completed', 'Interior condition photos completed', 'complete', 'applicable'],
+            ['charging_adapter_confirmed', 'Charging adapter present', 'complete', 'applicable'],
         ]);
         $this->connection->table('vehicle_operational_profiles')->insert([
             'id' => 1, 'fleet_vehicle_id' => 16, 'energy_kind' => 'electric', 'ready_energy_target_percent' => 80,
         ]);
-        $this->connection->table('vehicle_operational_capabilities')->insert([
-            'id' => 1, 'fleet_vehicle_id' => 16, 'capability_code' => 'key_card', 'is_applicable' => 1,
+        $this->connection->table('vehicle_operational_capabilities')->insertBatch([
+            ['id' => 1, 'fleet_vehicle_id' => 16, 'capability_code' => 'key_card', 'is_applicable' => 1],
+            ['id' => 2, 'fleet_vehicle_id' => 16, 'capability_code' => 'charging_adapter', 'is_applicable' => 1],
         ]);
         $this->insertEvent(306, 1, 16, 1006, 'vehicle_staged', 'pickup', '2026-09-08 15:00:00', 'airport_hnl', null, [
             'airport_garage_code' => 'T2', 'airport_parking_level' => 4, 'airport_parking_row' => 'B',
@@ -227,9 +229,18 @@ final class MovementReadinessProjectionServiceTest extends CIUnitTestCase
         $this->assertSame('movement_assessment_and_profile', $this->requirement($projection, 'energy_ready')['satisfied_by']);
         $this->assertSame('movement_event', $this->requirement($projection, 'airport_staging')['satisfied_by']);
         $this->assertSame('airport_milestone', $this->requirement($projection, 'key_card_confirmed')['satisfied_by']);
+        $this->assertSame('Key card present', $this->requirement($projection, 'key_card_confirmed')['label']);
+        $this->assertSame('satisfied', $this->requirement($projection, 'photos_complete')['status']);
+        $this->assertSame('satisfied', $this->requirement($projection, 'charging_adapter_confirmed')['status']);
         $this->assertSame('satisfied', $this->requirement($projection, 'parking_location_recorded')['status']);
         $this->assertSame('unsatisfied', $this->requirement($projection, 'guest_handoff')['status']);
         $this->assertFalse($this->requirement($projection, 'guest_handoff')['blocking']);
+        $this->assertNotContains('vehicle_inspected', array_column($projection['requirements'], 'code'));
+        $this->assertNotContains('exterior_photos_completed', array_column($projection['requirements'], 'code'));
+        $this->assertNotContains('interior_photos_completed', array_column($projection['requirements'], 'code'));
+        $this->assertNotContains('guest_pickup_instructions_confirmed', array_column($projection['requirements'], 'code'));
+        $this->assertNotContains('turo_access_instructions_confirmed', array_column($projection['requirements'], 'code'));
+        $this->assertContains('vehicle_inspected', array_column($projection['workflow_history']['legacy_items'], 'item_code'));
     }
 
     public function testAirportPickupCountsBlockingAndAdditionalActionsSeparately(): void
@@ -251,11 +262,84 @@ final class MovementReadinessProjectionServiceTest extends CIUnitTestCase
         $blocking = array_filter($pending, static fn (array $requirement): bool => $requirement['blocking']);
         $additional = array_filter($pending, static fn (array $requirement): bool => ! $requirement['blocking']);
 
-        $this->assertCount(4, $blocking);
-        $this->assertCount(2, $additional);
+        $this->assertCount(2, $blocking);
+        $this->assertCount(0, $additional);
         $this->assertSame(count($blocking), $projection['blocking_remaining_count']);
         $this->assertSame(count($additional), $projection['additional_actions_remaining_count']);
-        $this->assertSame(['guest_pickup_instructions_confirmed', 'turo_access_instructions_confirmed'], array_column($additional, 'code'));
+        $this->assertSame(['photos_complete', 'vehicle_clean'], array_column($blocking, 'code'));
+        $this->assertNotContains('guest_pickup_instructions_confirmed', array_column($projection['requirements'], 'code'));
+        $this->assertNotContains('turo_access_instructions_confirmed', array_column($projection['requirements'], 'code'));
+    }
+
+    public function testConventionalVehicleUsesKeysAndDoesNotReceiveChargingAdapterWork(): void
+    {
+        $this->insertChecklist(108, 1008, 18, 'pickup');
+        $this->insertItems(108, [
+            ['exterior_photos_completed', 'Exterior condition photos completed', 'complete', 'applicable'],
+            ['interior_photos_completed', 'Interior condition photos completed', 'complete', 'applicable'],
+            ['key_card_confirmed', 'Key card confirmed', 'open', 'applicable'],
+        ]);
+        $this->connection->table('vehicle_operational_profiles')->insert([
+            'id' => 3, 'fleet_vehicle_id' => 18, 'energy_kind' => 'gasoline', 'ready_energy_target_percent' => 75,
+        ]);
+        $this->insertEvent(308, 1, 18, 1008, 'vehicle_staged', 'pickup', '2026-09-08 15:00:00', 'home');
+        $this->insertAssessment(408, 1, 18, 1008, 308, 'pickup', 'clean', 80, '2026-09-08 15:05:00');
+
+        $itemCount = $this->connection->table('trip_movement_checklist_items')->countAllResults();
+        $projection = $this->service->forCompany(1, [108])[108];
+        $keys = $this->requirement($projection, 'key_card_confirmed');
+
+        $this->assertSame('Keys present', $keys['label']);
+        $this->assertSame('Keys present', $keys['action']['label']);
+        $this->assertTrue($keys['blocking']);
+        $this->assertSame('not_applicable', $this->requirement($projection, 'charging_adapter_confirmed')['status']);
+        $this->assertSame($itemCount, $this->connection->table('trip_movement_checklist_items')->countAllResults());
+    }
+
+    public function testRoutineTurnaroundWorkIsDerivedWithoutManualDisposition(): void
+    {
+        $this->insertChecklist(108, 1008, 18, 'return');
+        $this->insertItems(108, [
+            ['exterior_inspected', 'Exterior inspected', 'complete', 'applicable'],
+            ['interior_inspected', 'Interior inspected', 'complete', 'applicable'],
+            ['damage_check_completed', 'Damage check completed', 'complete', 'applicable'],
+            ['return_photos_completed', 'Return photos completed', 'complete', 'applicable'],
+        ]);
+        $this->connection->table('turo_trips_normalized')->insert([
+            'id' => 1208, 'fleet_vehicle_id' => 18, 'starts_at' => '2026-09-09 09:00:00', 'ends_at' => '2026-09-09 12:00:00',
+        ]);
+        $this->connection->table('vehicle_operational_profiles')->insert([
+            'id' => 4, 'fleet_vehicle_id' => 18, 'energy_kind' => 'electric', 'ready_energy_target_percent' => 80,
+        ]);
+        $this->insertEvent(309, 1, 18, 1008, 'actual_return', 'return', '2026-09-08 15:00:00', 'home');
+        $this->insertAssessment(409, 1, 18, 1008, 309, 'return', 'dirty', 37, '2026-09-08 15:05:00');
+
+        $projection = $this->service->forCompany(1, [108])[108];
+
+        $this->assertTrue($projection['ready']);
+        $this->assertSame(0, $projection['blocking_remaining_count']);
+        $this->assertSame('unsatisfied', $this->requirement($projection, 'vehicle_clean')['status']);
+        $this->assertSame('unsatisfied', $this->requirement($projection, 'energy_ready')['status']);
+        $this->assertNotContains('vehicle_disposition', array_column($projection['requirements'], 'code'));
+        $this->assertSame([
+            'maintenance_required' => 'Maintenance required',
+            'claim_review_required' => 'Claim / damage review required',
+            'offline' => 'Offline / unavailable',
+        ], $projection['exceptional_dispositions']);
+        $this->assertNull($projection['workflow_history']['vehicle_disposition']);
+    }
+
+    public function testExceptionalAndHistoricalDispositionRemainReadableWithoutBecomingBlockers(): void
+    {
+        $this->insertChecklist(108, 1008, 18, 'return', ['vehicle_disposition' => 'maintenance_required']);
+        $this->insertEvent(310, 1, 18, 1008, 'actual_return', 'return', '2026-09-08 15:00:00', 'home');
+        $this->insertAssessment(410, 1, 18, 1008, 310, 'return', 'clean', 90, '2026-09-08 15:05:00');
+
+        $projection = $this->service->forCompany(1, [108])[108];
+
+        $this->assertSame('maintenance_required', $projection['workflow_history']['vehicle_disposition']);
+        $this->assertSame('Maintenance required', $projection['exceptional_dispositions']['maintenance_required']);
+        $this->assertNotContains('vehicle_disposition', array_column($projection['requirements'], 'code'));
     }
 
     public function testCompanyScopeAndQueryCountAreBoundedForBatch(): void
@@ -276,9 +360,94 @@ final class MovementReadinessProjectionServiceTest extends CIUnitTestCase
         }
 
         $this->assertSame([107, 108], array_keys($projections));
-        $this->assertSame(10, $queryCount);
+        $this->assertSame(11, $queryCount);
         $this->assertSame(1, $projections[107]['company_id']);
         $this->assertArrayNotHasKey(207, $projections);
+    }
+
+    public function testCurrentReadinessOverridesReturnForNextPickupButNotReturnIntake(): void
+    {
+        $this->insertChecklist(101, 1001, 11, 'return');
+        $this->connection->table('turo_trips_normalized')->insert([
+            'id' => 1201, 'fleet_vehicle_id' => 11, 'starts_at' => '2026-09-08 19:00:00', 'ends_at' => '2026-09-08 22:00:00',
+        ]);
+        $this->insertEvent(301, 1, 11, 1001, 'actual_return', 'return', '2026-09-08 13:00:00', 'airport_hnl');
+        $this->insertAssessment(401, 1, 11, 1001, 301, 'return', 'dirty', 60, '2026-09-08 13:00:00');
+        $this->insertEvent(302, 1, 11, null, 'vehicle_readiness_observed', null, '2026-09-08 16:45:00', null);
+        $this->insertAssessment(402, 1, 11, null, 302, 'current', 'clean', 88, '2026-09-08 16:45:00');
+        $this->connection->table('vehicle_operational_profiles')->insert([
+            'id' => 1, 'fleet_vehicle_id' => 11, 'energy_kind' => 'electric', 'ready_energy_target_percent' => 80,
+        ]);
+
+        $projection = $this->service->forCompany(1, [101], new DateTimeImmutable('2026-09-08 17:00:00'))[101];
+
+        $this->assertSame('movement_assessment', $this->requirement($projection, 'cleaning_status_known')['satisfied_by']);
+        $this->assertSame('current_readiness_assessment', $this->requirement($projection, 'vehicle_clean')['satisfied_by']);
+        $this->assertSame('current_readiness_assessment_and_profile', $this->requirement($projection, 'energy_ready')['satisfied_by']);
+        $this->assertSame('clean', $projection['preparation_assessment']['cleanliness']);
+        $this->assertSame(88, (int) $projection['preparation_assessment']['energy_percent']);
+    }
+
+    public function testNewestApplicableCurrentReadinessWins(): void
+    {
+        $this->insertChecklist(101, 1001, 11, 'return');
+        $this->connection->table('turo_trips_normalized')->insert([
+            'id' => 1201, 'fleet_vehicle_id' => 11, 'starts_at' => '2026-09-08 19:00:00', 'ends_at' => '2026-09-08 22:00:00',
+        ]);
+        $this->insertEvent(301, 1, 11, 1001, 'actual_return', 'return', '2026-09-08 13:00:00', 'home');
+        $this->insertAssessment(401, 1, 11, 1001, 301, 'return', 'dirty', 60, '2026-09-08 13:00:00');
+        $this->insertEvent(302, 1, 11, null, 'vehicle_readiness_observed', null, '2026-09-08 15:00:00', null);
+        $this->insertAssessment(402, 1, 11, null, 302, 'current', 'clean', 88, '2026-09-08 15:00:00');
+        $this->insertEvent(303, 1, 11, null, 'vehicle_readiness_observed', null, '2026-09-08 16:00:00', null);
+        $this->insertAssessment(403, 1, 11, null, 303, 'current', 'dirty', 70, '2026-09-08 16:00:00');
+
+        $projection = $this->service->forCompany(1, [101], new DateTimeImmutable('2026-09-08 17:00:00'))[101];
+
+        $this->assertSame('current_readiness_assessment', $projection['preparation_assessment']['_authority']);
+        $this->assertSame('dirty', $projection['preparation_assessment']['cleanliness']);
+        $this->assertSame(70, (int) $projection['preparation_assessment']['energy_percent']);
+    }
+
+    public function testLaterTargetPickupWinsAndEqualTimestampFavorsTripSpecificAssessment(): void
+    {
+        $this->insertChecklist(101, 1001, 11, 'return');
+        $this->connection->table('turo_trips_normalized')->insert([
+            'id' => 1201, 'fleet_vehicle_id' => 11, 'starts_at' => '2026-09-08 19:00:00', 'ends_at' => '2026-09-08 22:00:00',
+        ]);
+        $this->insertEvent(301, 1, 11, 1001, 'actual_return', 'return', '2026-09-08 13:00:00', 'home');
+        $this->insertAssessment(401, 1, 11, 1001, 301, 'return', 'dirty', 60, '2026-09-08 13:00:00');
+        $this->insertEvent(302, 1, 11, null, 'vehicle_readiness_observed', null, '2026-09-08 16:45:00', null);
+        $this->insertAssessment(402, 1, 11, null, 302, 'current', 'clean', 88, '2026-09-08 16:45:00');
+        $this->insertEvent(303, 1, 11, 1201, 'vehicle_staged', 'pickup', '2026-09-08 16:45:00', 'airport_hnl');
+        $this->insertAssessment(403, 1, 11, 1201, 303, 'pickup', 'dirty', 70, '2026-09-08 16:45:00');
+        $this->connection->table('vehicle_operational_profiles')->insert([
+            'id' => 1, 'fleet_vehicle_id' => 11, 'energy_kind' => 'electric', 'ready_energy_target_percent' => 80,
+        ]);
+
+        $projection = $this->service->forCompany(1, [101], new DateTimeImmutable('2026-09-08 17:00:00'))[101];
+
+        $this->assertSame('target_pickup_assessment', $projection['preparation_assessment']['_authority']);
+        $this->assertSame('unsatisfied', $this->requirement($projection, 'vehicle_clean')['status']);
+        $this->assertSame('unsatisfied', $this->requirement($projection, 'energy_ready')['status']);
+    }
+
+    public function testFutureAndVoidedCurrentReadinessAreExcludedAtAsOf(): void
+    {
+        $this->insertChecklist(101, 1001, 11, 'return');
+        $this->connection->table('turo_trips_normalized')->insert([
+            'id' => 1201, 'fleet_vehicle_id' => 11, 'starts_at' => '2026-09-08 19:00:00', 'ends_at' => '2026-09-08 22:00:00',
+        ]);
+        $this->insertEvent(301, 1, 11, 1001, 'actual_return', 'return', '2026-09-08 13:00:00', 'home');
+        $this->insertAssessment(401, 1, 11, 1001, 301, 'return', 'dirty', 60, '2026-09-08 13:00:00');
+        $this->insertEvent(302, 1, 11, null, 'vehicle_readiness_observed', null, '2026-09-08 16:00:00', null, '2026-09-08 16:30:00');
+        $this->insertAssessment(402, 1, 11, null, 302, 'current', 'clean', 88, '2026-09-08 16:00:00');
+        $this->insertEvent(303, 1, 11, null, 'vehicle_readiness_observed', null, '2026-09-08 18:00:00', null);
+        $this->insertAssessment(403, 1, 11, null, 303, 'current', 'clean', 95, '2026-09-08 18:00:00');
+
+        $projection = $this->service->forCompany(1, [101], new DateTimeImmutable('2026-09-08 17:00:00'))[101];
+
+        $this->assertSame('movement_assessment', $projection['preparation_assessment']['_authority']);
+        $this->assertSame(60, (int) $projection['preparation_assessment']['energy_percent']);
     }
 
     private function dropTables(): void
@@ -351,7 +520,7 @@ final class MovementReadinessProjectionServiceTest extends CIUnitTestCase
     }
 
     /** @param array<string, mixed> $overrides */
-    private function insertEvent(int $id, int $companyId, int $vehicleId, int $tripId, string $eventCode, string $movementType, string $occurredAt, ?string $locationClass, ?string $voidedAt = null, array $overrides = []): void
+    private function insertEvent(int $id, int $companyId, int $vehicleId, ?int $tripId, string $eventCode, ?string $movementType, string $occurredAt, ?string $locationClass, ?string $voidedAt = null, array $overrides = []): void
     {
         $this->connection->table('trip_movement_events')->insert(array_merge([
             'id' => $id,
@@ -368,7 +537,7 @@ final class MovementReadinessProjectionServiceTest extends CIUnitTestCase
         ], $overrides));
     }
 
-    private function insertAssessment(int $id, int $companyId, int $vehicleId, int $tripId, int $eventId, string $movementType, string $cleanliness, int $energyPercent, string $capturedAt): void
+    private function insertAssessment(int $id, int $companyId, int $vehicleId, ?int $tripId, int $eventId, string $movementType, string $cleanliness, int $energyPercent, string $capturedAt): void
     {
         $this->connection->table('movement_assessments')->insert([
             'id' => $id,

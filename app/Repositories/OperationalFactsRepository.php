@@ -444,6 +444,23 @@ class OperationalFactsRepository
         return $row === null ? null : $row;
     }
 
+    /** @return array<string, mixed>|null */
+    public function vehicleForCompany(int $companyId, int $vehicleId): ?array
+    {
+        if ($companyId < 1 || $vehicleId < 1) {
+            return null;
+        }
+
+        $row = $this->db->table('fleet_vehicles')
+            ->where('id', $vehicleId)
+            ->where('company_id', $companyId)
+            ->where('deleted_at', null)
+            ->get()
+            ->getRowArray();
+
+        return $row === null ? null : $row;
+    }
+
     public function createEvent(array $data): int
     {
         $now = date('Y-m-d H:i:s');
@@ -515,6 +532,24 @@ class OperationalFactsRepository
         }
 
         return $builder->countAllResults() > 0;
+    }
+
+    /** @param array<string, mixed> $fact */
+    public function hasExactActiveReadinessFact(array $fact): bool
+    {
+        return $this->db->table('movement_assessments assessments')
+            ->join('trip_movement_events events', 'events.id = assessments.trip_movement_event_id')
+            ->where('assessments.company_id', $fact['company_id'])
+            ->where('assessments.fleet_vehicle_id', $fact['fleet_vehicle_id'])
+            ->where('assessments.turo_trip_normalized_id', null)
+            ->where('assessments.movement_type', 'current')
+            ->where('assessments.cleanliness', $fact['cleanliness'])
+            ->where('assessments.energy_percent', $fact['energy_percent'])
+            ->where('assessments.captured_at', $fact['captured_at'])
+            ->where('assessments.voided_at', null)
+            ->where('events.event_code', 'vehicle_readiness_observed')
+            ->where('events.voided_at', null)
+            ->countAllResults() > 0;
     }
 
     public function correctEvent(int $eventId, array $replacement, int $actorUserId, string $reason, bool $manageTransaction = true): int
@@ -591,6 +626,7 @@ class OperationalFactsRepository
         $builder = $this->db->table('trip_movement_events')
             ->select($this->movementEventSelect())
             ->where('fleet_vehicle_id', $vehicleId)
+            ->whereIn('event_code', self::CURRENT_STATE_EVENT_CODES)
             ->where('voided_at', null);
         if ($asOf !== null) {
             $builder->where('occurred_at <=', $asOf);
@@ -606,7 +642,7 @@ class OperationalFactsRepository
         $builder = $this->db->table('trip_movement_events')
             ->select($this->movementEventSelect())
             ->where('fleet_vehicle_id', $vehicleId)
-            ->whereIn('event_code', ['vehicle_staged', 'actual_handoff', 'actual_return'])
+            ->whereIn('event_code', ['vehicle_staged', 'actual_handoff', 'actual_return', 'vehicle_recovered'])
             ->where('voided_at', null);
         if ($asOf !== null) {
             $builder->where('occurred_at <=', $asOf);
@@ -614,6 +650,60 @@ class OperationalFactsRepository
         $row = $builder->orderBy('occurred_at', 'DESC')->orderBy('id', 'DESC')->get(1)->getRowArray();
 
         return $row === null ? null : $row;
+    }
+
+    /** @return array<string, mixed>|null */
+    public function latestActiveHandoffEvent(int $vehicleId, ?string $asOf = null): ?array
+    {
+        $builder = $this->db->table('trip_movement_events')
+            ->select($this->movementEventSelect())
+            ->where('fleet_vehicle_id', $vehicleId)
+            ->where('event_code', 'actual_handoff')
+            ->where('voided_at', null);
+        if ($asOf !== null) {
+            $builder->where('occurred_at <=', $asOf);
+        }
+        $row = $builder->orderBy('occurred_at', 'DESC')->orderBy('id', 'DESC')->get(1)->getRowArray();
+
+        return $row === null ? null : $row;
+    }
+
+    /** @return array<string, mixed>|null */
+    public function latestCurrentReadinessAssessment(int $companyId, int $vehicleId, ?string $asOf = null): ?array
+    {
+        return $this->latestCurrentReadinessAssessmentsForCompany($companyId, [$vehicleId], $asOf)[$vehicleId] ?? null;
+    }
+
+    /** @return array<int, array<string, mixed>> keyed by fleet vehicle id */
+    public function latestCurrentReadinessAssessmentsForCompany(int $companyId, array $vehicleIds, ?string $asOf = null): array
+    {
+        $vehicleIds = array_values(array_unique(array_filter(array_map('intval', $vehicleIds), static fn (int $id): bool => $id > 0)));
+        if ($companyId < 1 || $vehicleIds === []) {
+            return [];
+        }
+
+        $builder = $this->db->table('movement_assessments assessments')
+            ->select('assessments.*, events.occurred_at AS event_occurred_at, events.event_code')
+            ->join('trip_movement_events events', 'events.id = assessments.trip_movement_event_id')
+            ->where('assessments.company_id', $companyId)
+            ->whereIn('assessments.fleet_vehicle_id', $vehicleIds)
+            ->where('assessments.turo_trip_normalized_id', null)
+            ->where('assessments.movement_type', 'current')
+            ->where('assessments.voided_at', null)
+            ->where('events.event_code', 'vehicle_readiness_observed')
+            ->where('events.voided_at', null);
+        if ($asOf !== null) {
+            $builder->where('assessments.captured_at <=', $asOf)
+                ->where('events.occurred_at <=', $asOf);
+        }
+
+        $latest = [];
+        foreach ($builder->orderBy('assessments.captured_at', 'DESC')->orderBy('assessments.id', 'DESC')->get()->getResultArray() as $row) {
+            $vehicleId = (int) $row['fleet_vehicle_id'];
+            $latest[$vehicleId] ??= $row;
+        }
+
+        return $latest;
     }
 
     /** @return array<string, mixed>|null */

@@ -14,11 +14,17 @@ class MovementReadinessProjectionService
     public const STATUS_SATISFIED = 'satisfied';
     public const STATUS_UNSATISFIED = 'unsatisfied';
     public const STATUS_NOT_APPLICABLE = 'not_applicable';
+    public const EXCEPTIONAL_DISPOSITIONS = [
+        'maintenance_required' => 'Maintenance required',
+        'claim_review_required' => 'Claim / damage review required',
+        'offline' => 'Offline / unavailable',
+    ];
 
     /** @param array<string, mixed> $context @return array<string, mixed> */
     public function project(array $context): array
     {
         $movementType = (string) $context['movement_type'];
+        $preparationAssessment = $this->preparationAssessment($context, $movementType === 'return');
         $requirements = $movementType === 'return'
             ? $this->returnRequirements($context)
             : $this->pickupRequirements($context);
@@ -63,10 +69,13 @@ class MovementReadinessProjectionService
             'next_trip' => $context['next_trip'] ?? null,
             'is_same_day_turnaround' => ($context['next_trip']['is_same_day_turnaround'] ?? false) === true,
             'positioning_plan' => $context['positioning_plan'],
+            'preparation_assessment' => $preparationAssessment,
+            'exceptional_dispositions' => self::EXCEPTIONAL_DISPOSITIONS,
             'workflow_history' => [
                 'historically_completed' => $context['completed_at'] !== null,
                 'completed_at' => $context['completed_at'],
                 'stored_readiness_status' => $context['readiness_status'],
+                'vehicle_disposition' => $context['vehicle_disposition'] ?? null,
                 'legacy_items' => array_values($context['items_by_code']),
             ],
         ];
@@ -79,7 +88,8 @@ class MovementReadinessProjectionService
         $staged = $events['vehicle_staged'] ?? null;
         $handoff = $events['actual_handoff'] ?? null;
         $actualLocation = $handoff ?? $staged;
-        $assessment = $context['active_assessment'];
+        $assessment = $this->preparationAssessment($context, false);
+        $assessmentAuthority = $assessment['_authority'] ?? 'movement_assessment';
         $profile = $context['profile'] ?? [];
         $target = isset($profile['ready_energy_target_percent']) ? (int) $profile['ready_energy_target_percent'] : null;
         $energy = isset($assessment['energy_percent']) ? (int) $assessment['energy_percent'] : null;
@@ -91,20 +101,17 @@ class MovementReadinessProjectionService
             || $workflow !== null;
 
         $requirements = [
-            $this->humanRequirement($context, 'vehicle_inspected', 'Vehicle inspected', self::PHASE_PICKUP_PREPARATION),
-            $this->humanRequirement($context, 'exterior_photos_completed', 'Exterior condition photos completed', self::PHASE_PICKUP_PREPARATION),
-            $this->humanRequirement($context, 'interior_photos_completed', 'Interior condition photos completed', self::PHASE_PICKUP_PREPARATION),
-            $this->derivedRequirement('vehicle_clean', 'Vehicle clean', self::PHASE_PICKUP_PREPARATION, $clean, true, $clean ? 'movement_assessment' : null, $assessment['captured_at'] ?? null, 'Record clean pickup condition'),
-            $this->derivedRequirement('energy_known', 'Energy known', self::PHASE_PICKUP_PREPARATION, $energy !== null, true, $energy !== null ? 'movement_assessment' : null, $assessment['captured_at'] ?? null, 'Record Charge/Fuel percentage'),
+            $this->photosRequirement($context),
+            $this->derivedRequirement('vehicle_clean', 'Vehicle clean', self::PHASE_PICKUP_PREPARATION, $clean, true, $clean ? $assessmentAuthority : null, $assessment['captured_at'] ?? null, 'Record clean pickup condition'),
+            $this->derivedRequirement('energy_known', 'Energy known', self::PHASE_PICKUP_PREPARATION, $energy !== null, true, $energy !== null ? $assessmentAuthority : null, $assessment['captured_at'] ?? null, 'Record Charge/Fuel percentage'),
             $target === null
                 ? $this->notApplicableRequirement('energy_ready', 'Energy ready', self::PHASE_PICKUP_PREPARATION)
-                : $this->derivedRequirement('energy_ready', 'Energy ready', self::PHASE_PICKUP_PREPARATION, $energy !== null && $energy >= $target, true, $energy !== null ? 'movement_assessment_and_profile' : null, $assessment['captured_at'] ?? null, 'Charge/Fuel to ' . $target . '%'),
+                : $this->derivedRequirement('energy_ready', 'Energy ready', self::PHASE_PICKUP_PREPARATION, $energy !== null && $energy >= $target, true, $energy !== null ? $assessmentAuthority . '_and_profile' : null, $assessment['captured_at'] ?? null, 'Charge/Fuel to ' . $target . '%'),
             $this->locationRequirement($context, $actualLocation),
-            $this->keyCardRequirement($context, $workflow, $isAirport),
+            $this->keyRequirement($context, $workflow),
+            $this->chargingAdapterRequirement($context),
             $this->airportStagingRequirement($staged, $workflow, $isAirport),
             $this->airportMilestoneRequirement('parking_location_recorded', 'Parking location recorded', $staged, $workflow, $isAirport, $this->hasStructuredParking($staged) || $this->hasWorkflowParking($workflow), 'Record parking location'),
-            $this->airportMilestoneRequirement('guest_pickup_instructions_confirmed', 'Guest pickup instructions confirmed', null, $workflow, $isAirport, ($workflow['guest_instructions_sent_at'] ?? null) !== null, 'Confirm guest pickup instructions'),
-            $this->airportMilestoneRequirement('turo_access_instructions_confirmed', 'Turo Access instructions confirmed', null, $workflow, $isAirport, ($workflow['guest_instructions_sent_at'] ?? null) !== null, 'Confirm Turo Access instructions'),
             $this->derivedRequirement('guest_handoff', 'Guest handoff', self::PHASE_PICKUP_LIFECYCLE, $handoff !== null, false, $handoff !== null ? 'movement_event' : null, $handoff['occurred_at'] ?? null, 'Record actual guest handoff'),
         ];
 
@@ -123,9 +130,11 @@ class MovementReadinessProjectionService
         $target = isset($profile['ready_energy_target_percent']) ? (int) $profile['ready_energy_target_percent'] : null;
         $energy = isset($assessment['energy_percent']) ? (int) $assessment['energy_percent'] : null;
         $cleanlinessKnown = ($assessment['cleanliness'] ?? null) !== null;
-        $clean = ($assessment['cleanliness'] ?? null) === 'clean';
-        $disposition = trim((string) ($context['vehicle_disposition'] ?? ''));
         $nextTrip = $context['next_trip'] ?? null;
+        $nextPickupAssessment = $this->preparationAssessment($context, true);
+        $nextPickupAuthority = $nextPickupAssessment['_authority'] ?? 'movement_assessment';
+        $nextPickupEnergy = isset($nextPickupAssessment['energy_percent']) ? (int) $nextPickupAssessment['energy_percent'] : null;
+        $nextPickupClean = ($nextPickupAssessment['cleanliness'] ?? null) === 'clean';
 
         $requirements = [
             $this->derivedRequirement('vehicle_received', 'Vehicle returned or recovered', self::PHASE_RETURN_INTAKE, $received !== null, true, $received !== null ? 'movement_event' : null, $received['occurred_at'] ?? null, 'Record actual return or recovery'),
@@ -136,23 +145,53 @@ class MovementReadinessProjectionService
             $this->humanRequirement($context, 'interior_inspected', 'Interior inspected', self::PHASE_RETURN_INTAKE),
             $this->humanRequirement($context, 'damage_check_completed', 'Damage check completed', self::PHASE_RETURN_INTAKE),
             $this->humanRequirement($context, 'return_photos_completed', 'Return photos completed', self::PHASE_RETURN_INTAKE),
-            $this->derivedRequirement('vehicle_disposition', 'Vehicle disposition assigned', self::PHASE_RETURN_INTAKE, $disposition !== '', true, $disposition !== '' ? 'vehicle_disposition' : null, null, 'Assign vehicle disposition'),
         ];
 
         if ($nextTrip !== null) {
             $requirements[] = $this->nextPickupRequirement(
-                $this->derivedRequirement('vehicle_clean', 'Vehicle clean for next pickup', self::PHASE_NEXT_PICKUP_PREPARATION, $clean, true, $clean ? 'movement_assessment' : null, $assessment['captured_at'] ?? null, 'Clean vehicle'),
+                $this->derivedRequirement('vehicle_clean', 'Vehicle clean for next pickup', self::PHASE_NEXT_PICKUP_PREPARATION, $nextPickupClean, true, $nextPickupClean ? $nextPickupAuthority : null, $nextPickupAssessment['captured_at'] ?? null, 'Clean vehicle'),
                 $nextTrip,
             );
             $requirements[] = $this->nextPickupRequirement(
                 $target === null
                     ? $this->notApplicableRequirement('energy_ready', 'Energy ready for next pickup', self::PHASE_NEXT_PICKUP_PREPARATION)
-                    : $this->derivedRequirement('energy_ready', 'Energy ready for next pickup', self::PHASE_NEXT_PICKUP_PREPARATION, $energy !== null && $energy >= $target, true, $energy !== null ? 'movement_assessment_and_profile' : null, $assessment['captured_at'] ?? null, 'Charge/Fuel to ' . $target . '%'),
+                    : $this->derivedRequirement('energy_ready', 'Energy ready for next pickup', self::PHASE_NEXT_PICKUP_PREPARATION, $nextPickupEnergy !== null && $nextPickupEnergy >= $target, true, $nextPickupEnergy !== null ? $nextPickupAuthority . '_and_profile' : null, $nextPickupAssessment['captured_at'] ?? null, 'Charge/Fuel to ' . $target . '%'),
                 $nextTrip,
             );
         }
 
         return $requirements;
+    }
+
+    /** @param array<string, mixed> $context @return array<string, mixed>|null */
+    private function preparationAssessment(array $context, bool $forNextPickup): ?array
+    {
+        $candidates = $forNextPickup
+            ? [
+                [3, 'target_pickup_assessment', $context['target_pickup_assessment'] ?? null],
+                [2, 'current_readiness_assessment', $context['current_readiness_assessment'] ?? null],
+                [1, 'movement_assessment', $context['active_assessment'] ?? null],
+            ]
+            : [
+                [3, 'movement_assessment', $context['active_assessment'] ?? null],
+                [2, 'current_readiness_assessment', $context['current_readiness_assessment'] ?? null],
+            ];
+        $selected = null;
+        $selectedTimestamp = '';
+        $selectedPriority = 0;
+        foreach ($candidates as [$priority, $authority, $assessment]) {
+            if (! is_array($assessment)) {
+                continue;
+            }
+            $timestamp = (string) ($assessment['captured_at'] ?? '');
+            if ($timestamp > $selectedTimestamp || ($timestamp === $selectedTimestamp && $priority > $selectedPriority)) {
+                $selected = array_merge($assessment, ['_authority' => $authority]);
+                $selectedTimestamp = $timestamp;
+                $selectedPriority = $priority;
+            }
+        }
+
+        return $selected;
     }
 
     /** @param array<string, mixed> $context @return array<string, mixed> */
@@ -183,8 +222,38 @@ class MovementReadinessProjectionService
             'interior_inspected' => 'Inspect interior',
             'damage_check_completed' => 'Check for damage',
             'return_photos_completed' => 'Confirm return photos',
+            'key_card_confirmed' => $label,
             default => 'Confirm ' . strtolower($label),
         };
+    }
+
+    /** @param array<string, mixed> $context @return array<string, mixed> */
+    private function photosRequirement(array $context): array
+    {
+        $items = array_map(static fn (string $code): mixed => $context['items_by_code'][$code] ?? null, ['exterior_photos_completed', 'interior_photos_completed']);
+        $satisfied = count(array_filter($items, static fn (mixed $item): bool => is_array($item)
+            && ($item['applicability'] ?? 'applicable') === 'applicable'
+            && ($item['completion_state'] ?? 'open') === 'complete')) === 2;
+        $completedAt = null;
+        if ($satisfied) {
+            foreach ($items as $item) {
+                if (is_array($item) && (string) ($item['completed_at'] ?? '') > (string) $completedAt) {
+                    $completedAt = (string) $item['completed_at'];
+                }
+            }
+        }
+
+        return $this->requirement(
+            'photos_complete',
+            'Photos complete',
+            self::PHASE_PICKUP_PREPARATION,
+            self::KIND_HUMAN,
+            $satisfied ? self::STATUS_SATISFIED : self::STATUS_UNSATISFIED,
+            true,
+            $satisfied ? 'human_checklist' : null,
+            $completedAt,
+            ['type' => 'photos_composite', 'checklist_id' => (int) $context['id'], 'label' => 'Photos complete'],
+        );
     }
 
     /** @param array<string, mixed> $requirement @param array<string, mixed> $nextTrip @return array<string, mixed> */
@@ -214,20 +283,42 @@ class MovementReadinessProjectionService
     }
 
     /** @param array<string, mixed> $context @param array<string, mixed>|null $workflow @return array<string, mixed> */
-    private function keyCardRequirement(array $context, ?array $workflow, bool $isAirport): array
+    private function keyRequirement(array $context, ?array $workflow): array
     {
-        $applicable = $isAirport || in_array('key_card', $context['capabilities'], true);
-        if (! $applicable) {
-            return $this->notApplicableRequirement('key_card_confirmed', 'Key card confirmed', self::PHASE_PICKUP_PREPARATION);
-        }
-        if (($workflow['key_card_confirmed_at'] ?? null) !== null) {
-            return $this->derivedRequirement('key_card_confirmed', 'Key card confirmed', self::PHASE_PICKUP_PREPARATION, true, true, 'airport_milestone', $workflow['key_card_confirmed_at'], 'Confirm key card');
+        $usesKeyCard = in_array('key_card', $context['capabilities'], true);
+        $label = $usesKeyCard ? 'Key card present' : 'Keys present';
+        if ($usesKeyCard && ($workflow['key_card_confirmed_at'] ?? null) !== null) {
+            return $this->derivedRequirement('key_card_confirmed', $label, self::PHASE_PICKUP_PREPARATION, true, true, 'airport_milestone', $workflow['key_card_confirmed_at'], $label);
         }
 
-        $human = $this->humanRequirement($context, 'key_card_confirmed', 'Key card confirmed', self::PHASE_PICKUP_PREPARATION);
+        $human = $this->humanRequirement($context, 'key_card_confirmed', $label, self::PHASE_PICKUP_PREPARATION);
         $human['kind'] = self::KIND_HYBRID;
 
         return $human;
+    }
+
+    /** @param array<string, mixed> $context @return array<string, mixed> */
+    private function chargingAdapterRequirement(array $context): array
+    {
+        if (! in_array('charging_adapter', $context['capabilities'], true)) {
+            return $this->notApplicableRequirement('charging_adapter_confirmed', 'Charging adapter present', self::PHASE_PICKUP_PREPARATION);
+        }
+        $item = $context['items_by_code']['charging_adapter_confirmed'] ?? null;
+        $satisfied = is_array($item)
+            && ($item['applicability'] ?? 'applicable') === 'applicable'
+            && ($item['completion_state'] ?? 'open') === 'complete';
+
+        return $this->requirement(
+            'charging_adapter_confirmed',
+            'Charging adapter present',
+            self::PHASE_PICKUP_PREPARATION,
+            self::KIND_HUMAN,
+            $satisfied ? self::STATUS_SATISFIED : self::STATUS_UNSATISFIED,
+            true,
+            $satisfied ? 'human_checklist' : null,
+            $satisfied ? ($item['completed_at'] ?? null) : null,
+            ['type' => 'charging_adapter', 'checklist_id' => (int) $context['id'], 'label' => 'Charging adapter present'],
+        );
     }
 
     /** @param array<string, mixed>|null $staged @param array<string, mixed>|null $workflow @return array<string, mixed> */

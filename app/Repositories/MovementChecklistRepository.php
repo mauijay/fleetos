@@ -4,6 +4,7 @@ namespace App\Repositories;
 
 use CodeIgniter\Database\BaseConnection;
 use Config\Database;
+use RuntimeException;
 
 class MovementChecklistRepository
 {
@@ -108,6 +109,115 @@ class MovementChecklistRepository
         $this->audit($checklistId, null, 'checklist_updated', $old, array_merge($old, $data), $actorUserId);
 
         return $this->db->affectedRows() > 0;
+    }
+
+    /** @param list<string> $itemCodes */
+    public function setItemCompletionByCodes(int $checklistId, array $itemCodes, bool $complete, int $actorUserId): bool
+    {
+        $this->db->transBegin();
+        try {
+            $items = $this->db->table('trip_movement_checklist_items')
+                ->where('trip_movement_checklist_id', $checklistId)
+                ->whereIn('item_code', $itemCodes)
+                ->get()
+                ->getResultArray();
+            $itemsByCode = array_column($items, null, 'item_code');
+            if (count($itemsByCode) !== count($itemCodes)) {
+                $this->db->transRollback();
+
+                return false;
+            }
+
+            $changed = false;
+            $now = date('Y-m-d H:i:s');
+            foreach ($itemCodes as $itemCode) {
+                $old = $itemsByCode[$itemCode];
+                $isComplete = ($old['completion_state'] ?? 'open') === 'complete';
+                if ($isComplete === $complete) {
+                    continue;
+                }
+                $data = $complete
+                    ? ['completion_state' => 'complete', 'completion_source' => 'manual', 'completed_at' => $now]
+                    : ['completion_state' => 'open', 'completion_source' => null, 'completed_at' => null];
+                $this->db->table('trip_movement_checklist_items')->where('id', $old['id'])->update(array_merge($data, ['updated_at' => $now]));
+                $this->audit($checklistId, (int) $old['id'], 'item_updated', $old, array_merge($old, $data), $actorUserId);
+                $changed = true;
+            }
+            if (! $changed) {
+                $this->db->transRollback();
+
+                return false;
+            }
+            if ($this->db->transStatus() === false) {
+                throw new RuntimeException('Checklist item transaction failed.');
+            }
+            $this->db->transCommit();
+
+            return true;
+        } catch (\Throwable $exception) {
+            $this->db->transRollback();
+            throw $exception;
+        }
+    }
+
+    public function completeOrCreateOptionalItem(int $checklistId, string $itemCode, string $label, int $sortOrder, int $actorUserId): bool
+    {
+        $this->db->transBegin();
+        try {
+            $old = $this->db->table('trip_movement_checklist_items')
+                ->where('trip_movement_checklist_id', $checklistId)
+                ->where('item_code', $itemCode)
+                ->get()
+                ->getRowArray();
+            if (($old['completion_state'] ?? null) === 'complete') {
+                $this->db->transRollback();
+
+                return false;
+            }
+
+            $now = date('Y-m-d H:i:s');
+            if ($old === null) {
+                $new = [
+                    'trip_movement_checklist_id' => $checklistId,
+                    'item_code' => $itemCode,
+                    'label' => $label,
+                    'is_required' => false,
+                    'is_critical' => false,
+                    'sort_order' => $sortOrder,
+                    'applicability' => 'applicable',
+                    'completion_state' => 'complete',
+                    'completion_source' => 'manual',
+                    'completed_at' => $now,
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ];
+                $this->db->table('trip_movement_checklist_items')->insert($new);
+                $itemId = (int) $this->db->insertID();
+                $this->audit($checklistId, $itemId, 'item_created', [], $new, $actorUserId);
+            } else {
+                $data = ['completion_state' => 'complete', 'completion_source' => 'manual', 'completed_at' => $now];
+                $this->db->table('trip_movement_checklist_items')->where('id', $old['id'])->update(array_merge($data, ['updated_at' => $now]));
+                $this->audit($checklistId, (int) $old['id'], 'item_updated', $old, array_merge($old, $data), $actorUserId);
+            }
+            if ($this->db->transStatus() === false) {
+                throw new RuntimeException('Checklist item transaction failed.');
+            }
+            $this->db->transCommit();
+
+            return true;
+        } catch (\Throwable $exception) {
+            $this->db->transRollback();
+            throw $exception;
+        }
+    }
+
+    public function vehicleHasCapability(int $vehicleId, string $capabilityCode): bool
+    {
+        return $this->db->table('vehicle_operational_capabilities')
+            ->where('fleet_vehicle_id', $vehicleId)
+            ->where('capability_code', $capabilityCode)
+            ->where('is_applicable', true)
+            ->countAllResults() > 0;
     }
 
     private function audit(int $checklistId, ?int $itemId, string $action, array $old, array $new, ?int $actorUserId): void

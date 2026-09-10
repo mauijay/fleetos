@@ -4,6 +4,7 @@
 /** @var array<int, array<string, mixed>> $trips */
 /** @var int|null $selectedTripId */
 $selectedTripId ??= null;
+$navigation ??= [];
 $locationLabel = static fn (?string $code): string => ucwords(str_replace('_', ' ', $code ?? 'Unknown'));
 ?>
 <!doctype html>
@@ -16,7 +17,9 @@ $locationLabel = static fn (?string $code): string => ucwords(str_replace('_', '
 </head>
 <body class="fleet-shell">
     <a class="skip-link" href="#main-content">Skip to main content</a>
-    <main id="main-content" class="command-main import-main" tabindex="-1">
+    <div class="app-frame import-frame">
+    <?= view('fleet_command_center/components/navigation', ['items' => $navigation]) ?>
+    <main id="main-content" class="command-main import-main movement-main" tabindex="-1">
         <header class="top-status">
             <div><p class="eyebrow">Vehicle trip history</p><h1><?= esc((string) ($vehicle['fleet_code'] ?? 'Vehicle')) ?></h1></div>
             <div class="vehicle-detail-actions">
@@ -50,6 +53,7 @@ $locationLabel = static fn (?string $code): string => ucwords(str_replace('_', '
         </section>
         <?= view('fleet_command_center/components/footer') ?>
     </main>
+    </div>
     <?php if ($assets['js'] !== null): ?><script type="module" src="/build/<?= esc($assets['js'], 'attr') ?>"></script><?php endif; ?>
 </body>
 </html>

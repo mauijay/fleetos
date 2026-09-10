@@ -1020,6 +1020,46 @@ h3 {
   max-width: 1180px;
 }
 
+.movement-main {
+  width: 100%;
+  max-width: 1440px;
+  justify-self: center;
+}
+
+.current-operations__summary,
+.current-operations__forms {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.current-operations__summary > div {
+  display: grid;
+  gap: 5px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  padding: 14px;
+}
+
+.current-operations__summary span,
+.current-operations__summary small {
+  color: var(--muted);
+}
+
+.current-operations__forms {
+  margin-top: 16px;
+}
+
+.current-operations__forms .capital-disclosure {
+  align-self: start;
+  margin: 0;
+}
+
+.current-operations__links {
+  margin: 0;
+}
+
 .vehicle-form-layout,
 .vehicle-form-column {
   display: grid;
@@ -1643,9 +1683,23 @@ h3 {
 .inline-disposition select {
   width: 100%;
   min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  padding: 9px 12px;
+}
+.inline-disposition select option {
+  background: var(--surface-2);
+  color: var(--text);
 }
 .inline-disposition button {
   min-height: 42px;
+}
+.exceptional-disposition {
+  display: grid;
+  gap: 8px;
 }
 .visually-hidden {
   position: absolute;
@@ -2239,7 +2293,9 @@ h3 {
   .movement-fact-summary,
   .trip-facts-grid,
   .trip-context-grid,
-  .trip-history-row {
+  .trip-history-row,
+  .current-operations__summary,
+  .current-operations__forms {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -2331,7 +2387,9 @@ h3 {
   .trip-facts-grid,
   .local-datetime-fields,
   .trip-context-grid,
-  .trip-history-row {
+  .trip-history-row,
+  .current-operations__summary,
+  .current-operations__forms {
     grid-template-columns: 1fr;
   }
 

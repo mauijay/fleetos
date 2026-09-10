@@ -20,6 +20,7 @@
 /** @var array<string, mixed> $positionFormData */
 /** @var bool $showPositionForm */
 $hnlGarages ??= (new \App\Services\Fleet\HnlGarageCatalog())->definitions();
+$navigation ??= [];
 $isStagedPickup ??= false;
 $isPickupConfirmed ??= false;
 $pickupConfirmedAt ??= null;
@@ -50,7 +51,9 @@ $tripFacts ??= [
 </head>
 <body class="fleet-shell">
     <a class="skip-link" href="#main-content">Skip to main content</a>
-    <main id="main-content" class="command-main import-main" tabindex="-1">
+    <div class="app-frame import-frame">
+    <?= view('fleet_command_center/components/navigation', ['items' => $navigation]) ?>
+    <main id="main-content" class="command-main import-main movement-main" tabindex="-1">
         <header class="top-status">
             <div>
                 <p class="eyebrow">Movement Checklist</p>
@@ -235,6 +238,7 @@ $energyPercent = $factFormData['energy_percent'] ?? '';
 
         <?= view('fleet_command_center/components/footer') ?>
     </main>
+    </div>
     <?php if ($assets['js'] !== null): ?><script type="module" src="/build/<?= esc($assets['js'], 'attr') ?>"></script><?php endif; ?>
 </body>
 </html>

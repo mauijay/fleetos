@@ -160,6 +160,199 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
         $this->assertSame(1, array_sum(array_column($positioned['buckets'], 'count')));
     }
 
+    public function testVehicleScopedHnlPositionIsPhysicalStorageWithoutTripOrStaging(): void
+    {
+        $this->connection->query('ALTER TABLE ' . $this->table('trip_movement_events') . ' ADD COLUMN airport_garage_code VARCHAR(40) NULL');
+        $this->connection->query('ALTER TABLE ' . $this->table('trip_movement_events') . ' ADD COLUMN airport_parking_level INTEGER NULL');
+        $this->connection->query('ALTER TABLE ' . $this->table('trip_movement_events') . ' ADD COLUMN airport_parking_row VARCHAR(4) NULL');
+        $this->connection->query('CREATE TABLE ' . $this->table('vehicle_positioning_plans') . ' (id INTEGER PRIMARY KEY, company_id INTEGER NOT NULL, fleet_vehicle_id INTEGER NOT NULL, invalidated_at DATETIME NULL, invalidation_reason VARCHAR(80) NULL, invalidated_by_user_id INTEGER NULL)');
+        $repository = new OperationalFactsRepository($this->connection);
+        $events = new MovementEventService($repository);
+        $service = new MovementOperationalFactService($this->connection, $events, new MovementAssessmentService($repository), new VehiclePositioningPlanService($repository));
+        $data = [
+            'occurred_at' => '2026-09-09 16:45:00',
+            'location_class' => 'airport_hnl',
+            'airport_garage_code' => 'international',
+            'airport_parking_level' => 7,
+            'airport_parking_row' => 'F',
+            'note' => 'Fleet storage overflow.',
+        ];
+
+        $this->assertTrue($service->recordCurrentPositionForVehicle(1, 10, $data, 7));
+
+        $event = $repository->latestCurrentStateEvent(10);
+        $this->assertSame('vehicle_positioned', $event['event_code']);
+        $this->assertNull($event['turo_trip_normalized_id']);
+        $this->assertNull($event['movement_type']);
+        $this->assertSame('airport_hnl', $event['location_class']);
+        $this->assertSame('international', $event['airport_garage_code']);
+        $this->assertSame(7, (int) $event['airport_parking_level']);
+        $this->assertSame('F', $event['airport_parking_row']);
+        $this->assertSame('Fleet storage overflow.', $event['note']);
+        $this->assertSame('vehicle_operator', $event['source']);
+        $this->assertSame(7, (int) $event['actor_user_id']);
+        $this->assertSame('parked', (new CurrentVehicleLocationService($repository))->resolve(10)['operational_state']);
+        $this->assertSame(0, $this->connection->table('movement_assessments')->countAllResults());
+        $this->assertSame(0, $this->connection->table('airport_movement_workflows')->countAllResults());
+
+        try {
+            $service->recordCurrentPositionForVehicle(1, 10, $data, 8);
+            $this->fail('Expected an exact replay by another actor to be rejected.');
+        } catch (InvalidArgumentException $exception) {
+            $this->assertSame('This exact vehicle position is already recorded.', $exception->getMessage());
+        }
+        $later = array_merge($data, ['occurred_at' => '2026-09-09 17:00:00']);
+        $this->assertTrue($service->recordCurrentPositionForVehicle(1, 10, $later, 8));
+        $this->assertSame(2, $this->connection->table('trip_movement_events')->countAllResults());
+
+        $laterEvent = $repository->latestCurrentStateEvent(10);
+        $replacementId = $events->correct((int) $laterEvent['id'], ['location_class' => 'other_delivery', 'location_detail' => 'Service center'], 8, 'Corrected current position.');
+        $this->assertSame('other_delivery', (new CurrentVehicleLocationService($repository))->resolve(10)['location_class']);
+        $this->assertTrue($events->void($replacementId, 8, 'Correction was not current.'));
+        $this->assertSame('airport_hnl', (new CurrentVehicleLocationService($repository))->resolve(10)['location_class']);
+    }
+
+    public function testVehicleScopedGenericPositionsSupportHomeAndOther(): void
+    {
+        $this->connection->query('CREATE TABLE ' . $this->table('vehicle_positioning_plans') . ' (id INTEGER PRIMARY KEY, company_id INTEGER NOT NULL, fleet_vehicle_id INTEGER NOT NULL, invalidated_at DATETIME NULL, invalidation_reason VARCHAR(80) NULL, invalidated_by_user_id INTEGER NULL)');
+        $service = new MovementOperationalFactService(
+            $this->connection,
+            $this->events,
+            $this->assessments,
+            new VehiclePositioningPlanService($this->repository),
+        );
+
+        $this->assertTrue($service->recordCurrentPositionForVehicle(1, 10, [
+            'occurred_at' => '2026-09-09 14:00:00',
+            'location_class' => 'home',
+            'location_detail' => 'North driveway',
+        ], 7));
+        $this->assertTrue($service->recordCurrentPositionForVehicle(1, 10, [
+            'occurred_at' => '2026-09-09 15:00:00',
+            'location_class' => 'other_delivery',
+            'location_detail' => 'Service center',
+        ], 8));
+
+        $current = (new CurrentVehicleLocationService($this->repository))->resolve(10);
+        $this->assertSame('other_delivery', $current['location_class']);
+        $this->assertSame('Service center', $current['location_detail']);
+        $this->assertSame(2, $this->connection->table('trip_movement_events')->countAllResults());
+    }
+
+    public function testCurrentPositionTransactionRollsBackWhenPlanInvalidationFails(): void
+    {
+        $this->connection->query('CREATE TABLE ' . $this->table('vehicle_positioning_plans') . ' (id INTEGER PRIMARY KEY, company_id INTEGER NOT NULL, fleet_vehicle_id INTEGER NOT NULL, invalidated_at DATETIME NULL, invalidation_reason VARCHAR(80) NULL, invalidated_by_user_id INTEGER NULL)');
+        $failingPlans = new class ($this->repository) extends VehiclePositioningPlanService {
+            public function invalidateForWrite(int $vehicleId, string $reason, ?int $actorUserId): int
+            {
+                throw new RuntimeException('Injected positioning-plan failure.');
+            }
+        };
+        $service = new MovementOperationalFactService($this->connection, $this->events, $this->assessments, $failingPlans);
+
+        try {
+            $service->recordCurrentPositionForVehicle(1, 10, [
+                'occurred_at' => '2026-09-09 16:45:00',
+                'location_class' => 'home',
+            ], 7);
+            $this->fail('Expected the injected positioning-plan failure.');
+        } catch (RuntimeException $exception) {
+            $this->assertSame('Injected positioning-plan failure.', $exception->getMessage());
+        }
+
+        $this->assertSame(0, $this->connection->table('trip_movement_events')->countAllResults());
+    }
+
+    public function testVehicleScopedCurrentStateRejectsCompanyMismatchAndGuestPossession(): void
+    {
+        $service = new MovementOperationalFactService($this->connection, $this->events, $this->assessments);
+        $position = ['occurred_at' => '2026-09-09 16:45:00', 'location_class' => 'home'];
+
+        try {
+            $service->recordCurrentPositionForVehicle(1, 20, $position, 7);
+            $this->fail('Expected cross-company positioning to be rejected.');
+        } catch (InvalidArgumentException $exception) {
+            $this->assertStringContainsString('active fleet company', $exception->getMessage());
+        }
+        try {
+            $service->recordCurrentReadinessForVehicle(1, 20, [
+                'occurred_at' => '2026-09-09 16:45:00',
+                'cleanliness' => 'clean',
+                'energy_percent' => 88,
+            ], 7);
+            $this->fail('Expected cross-company readiness to be rejected.');
+        } catch (InvalidArgumentException $exception) {
+            $this->assertStringContainsString('active fleet company', $exception->getMessage());
+        }
+
+        $this->events->record(10, 100, 'actual_handoff', 'pickup', '2026-09-09 15:00:00', 'home', null, 'operator', 7);
+        foreach (['position' => $position, 'readiness' => ['occurred_at' => '2026-09-09 16:45:00', 'cleanliness' => 'clean', 'energy_percent' => 88]] as $kind => $data) {
+            try {
+                $kind === 'position'
+                    ? $service->recordCurrentPositionForVehicle(1, 10, $data, 7)
+                    : $service->recordCurrentReadinessForVehicle(1, 10, $data, 7);
+                $this->fail('Expected guest possession to reject ' . $kind . '.');
+            } catch (InvalidArgumentException $exception) {
+                $this->assertStringContainsString('actual return or recovery', $exception->getMessage());
+            }
+        }
+        $this->assertSame(1, $this->connection->table('trip_movement_events')->countAllResults());
+    }
+
+    public function testCurrentReadinessIsSeparateFromHistoricalReturnAndLocation(): void
+    {
+        $this->connection->query('CREATE TABLE ' . $this->table('vehicle_positioning_plans') . ' (id INTEGER PRIMARY KEY, company_id INTEGER NOT NULL, fleet_vehicle_id INTEGER NOT NULL, invalidated_at DATETIME NULL, invalidation_reason VARCHAR(80) NULL, invalidated_by_user_id INTEGER NULL)');
+        $this->connection->table('vehicle_positioning_plans')->insert(['id' => 1, 'company_id' => 1, 'fleet_vehicle_id' => 10]);
+        $returnId = $this->events->record(10, 100, 'actual_return', 'return', '2026-09-09 13:00:00', 'airport_hnl', 'International Garage', 'operator', 7);
+        $this->assessments->record(10, 100, $returnId, 'return', 'dirty', 60, '2026-09-09 13:00:00', 'operator', 7);
+        $positionId = $this->events->record(10, null, 'vehicle_positioned', null, '2026-09-09 14:00:00', 'home', null, 'vehicle_operator', 7);
+        $service = new MovementOperationalFactService($this->connection, $this->events, $this->assessments);
+        $data = ['occurred_at' => '2026-09-09 16:45:00', 'cleanliness' => 'clean', 'energy_percent' => 88, 'note' => 'Turnaround complete.'];
+
+        $this->assertTrue($service->recordCurrentReadinessForVehicle(1, 10, $data, 8));
+
+        $current = $this->repository->latestCurrentReadinessAssessment(1, 10);
+        $this->assertSame('current', $current['movement_type']);
+        $this->assertNull($current['turo_trip_normalized_id']);
+        $this->assertSame('clean', $current['cleanliness']);
+        $this->assertSame(88, (int) $current['energy_percent']);
+        $this->assertSame('vehicle_operator', $current['source']);
+        $this->assertSame(8, (int) $current['actor_user_id']);
+        $this->assertSame('vehicle_readiness_observed', $this->repository->event((int) $current['trip_movement_event_id'])['event_code']);
+        $this->assertSame($positionId, $this->repository->latestActiveMovementEvent(10)['id']);
+        $this->assertSame('home', (new CurrentVehicleLocationService($this->repository))->resolve(10)['location_class']);
+        $historical = (new MovementOperationalFactPresentationService($this->repository))->latestForTrip(100);
+        $this->assertSame('Dirty', $historical['cleanliness_label']);
+        $this->assertSame('60%', $historical['energy_value']);
+        $plan = $this->connection->table('vehicle_positioning_plans')->where('id', 1)->get()->getRowArray();
+        $this->assertNull($plan['invalidated_at']);
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('exact current readiness observation');
+        $service->recordCurrentReadinessForVehicle(1, 10, $data, 7);
+    }
+
+    public function testCurrentReadinessTransactionRollsBackWhenAssessmentFails(): void
+    {
+        $failingAssessments = new class ($this->repository) extends MovementAssessmentService {
+            public function record(int $vehicleId, ?int $tripId, ?int $eventId, string $movementType, ?string $cleanliness, mixed $energyPercent, string $capturedAt, string $source, int $actorUserId, ?string $note = null): int
+            {
+                throw new RuntimeException('Injected assessment failure.');
+            }
+        };
+        $service = new MovementOperationalFactService($this->connection, $this->events, $failingAssessments);
+
+        try {
+            $service->recordCurrentReadinessForVehicle(1, 10, ['occurred_at' => '2026-09-09 16:45:00', 'cleanliness' => 'clean', 'energy_percent' => 88], 7);
+            $this->fail('Expected the injected assessment failure.');
+        } catch (RuntimeException $exception) {
+            $this->assertSame('Injected assessment failure.', $exception->getMessage());
+        }
+
+        $this->assertSame(0, $this->connection->table('trip_movement_events')->countAllResults());
+        $this->assertSame(0, $this->connection->table('movement_assessments')->countAllResults());
+    }
+
     public function testRecordVehiclePositionAppendsOnlyPositionFactAndInvalidatesPlan(): void
     {
         $this->connection->query('CREATE TABLE ' . $this->table('vehicle_positioning_plans') . ' (id INTEGER PRIMARY KEY, company_id INTEGER NOT NULL, fleet_vehicle_id INTEGER NOT NULL, invalidated_at DATETIME NULL, invalidation_reason VARCHAR(80) NULL, invalidated_by_user_id INTEGER NULL)');

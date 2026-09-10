@@ -17,9 +17,9 @@ class FleetVehicleService
     }
 
     /** @return array<int, array<string, mixed>> */
-    public function vehicles(): array
+    public function vehicles(?int $companyId = null): array
     {
-        return $this->db->table('fleet_vehicles fv')
+        $builder = $this->db->table('fleet_vehicles fv')
             ->select('fv.*, vs.code AS status_code, vs.name AS status_name, vtl.name AS trim_name')
             ->select('vsp.model_year, vm.name AS model_name, vma.name AS make_name')
             ->select('listings.turo_vehicle_id')
@@ -29,7 +29,12 @@ class FleetVehicleService
             ->join('vehicle_models vm', 'vm.id = vsp.vehicle_model_id')
             ->join('vehicle_makes vma', 'vma.id = vm.vehicle_make_id')
             ->join('vehicle_turo_listings listings', 'listings.fleet_vehicle_id = fv.id AND listings.is_active = 1', 'left')
-            ->where('fv.deleted_at', null)
+            ->where('fv.deleted_at', null);
+        if ($companyId !== null) {
+            $builder->where('fv.company_id', $companyId);
+        }
+
+        return $builder
             ->orderBy('fv.fleet_number IS NULL', 'ASC', false)
             ->orderBy('fv.fleet_number', 'ASC')
             ->orderBy('fv.fleet_code', 'ASC')
@@ -37,16 +42,20 @@ class FleetVehicleService
     }
 
     /** @return array<string, mixed>|null */
-    public function vehicle(int $id): ?array
+    public function vehicle(int $id, ?int $companyId = null): ?array
     {
-        $row = $this->db->table('fleet_vehicles fv')
+        $builder = $this->db->table('fleet_vehicles fv')
             ->select('fv.*, vsp.model_year, vsp.vehicle_body_style_id, vsp.exterior_vehicle_color_id, vsp.interior_vehicle_color_id, vsp.battery_description, vsp.seating_capacity')
             ->select('vm.name AS model_name, vma.name AS make_name, listings.turo_vehicle_id')
             ->join('vehicle_specs vsp', 'vsp.id = fv.vehicle_spec_id')
             ->join('vehicle_models vm', 'vm.id = vsp.vehicle_model_id')
             ->join('vehicle_makes vma', 'vma.id = vm.vehicle_make_id')
             ->join('vehicle_turo_listings listings', 'listings.fleet_vehicle_id = fv.id AND listings.is_active = 1', 'left')
-            ->where('fv.id', $id)->where('fv.deleted_at', null)->get()->getRowArray();
+            ->where('fv.id', $id)->where('fv.deleted_at', null);
+        if ($companyId !== null) {
+            $builder->where('fv.company_id', $companyId);
+        }
+        $row = $builder->get()->getRowArray();
 
         if ($row === null) {
             return null;

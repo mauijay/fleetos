@@ -11,12 +11,9 @@ class MovementReadinessService
             return 'completed';
         }
 
-        $applicable = array_values(array_filter($items, static fn (array $item): bool => ($item['applicability'] ?? 'applicable') === 'applicable'));
+        $applicable = array_values(array_filter($items, static fn (array $item): bool => ($item['applicability'] ?? 'applicable') === 'applicable'
+            && ($movementType !== 'return' || ($item['item_code'] ?? null) !== 'vehicle_disposition_selected')));
         $criticalOpen = array_values(array_filter($applicable, static fn (array $item): bool => (bool) ($item['is_critical'] ?? false) && ($item['completion_state'] ?? 'open') !== 'complete'));
-
-        if ($movementType === 'return' && $disposition === null) {
-            return 'blocked';
-        }
 
         if ($criticalOpen !== []) {
             return count($criticalOpen) === count(array_filter($applicable, static fn (array $item): bool => (bool) ($item['is_critical'] ?? false))) ? 'not_started' : 'in_progress';

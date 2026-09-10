@@ -42,6 +42,7 @@ class TripMovementChecklists extends BaseController
             : ($correctingFacts ? $selectedFacts['form_data'] : (is_array($flashedFormData) ? $flashedFormData : []));
         return view('trip_movement_checklists/show', [
             'assets' => Services::assetManifestService()->appAssets(),
+            'navigation' => $this->navigation(),
             'checklist' => $checklist,
             'readiness' => $readiness,
             'currentLocation' => ($checklist['exists'] ?? false) ? Services::currentVehicleLocationService()->resolve((int) $checklist['fleet_vehicle_id']) : null,
@@ -69,7 +70,8 @@ class TripMovementChecklists extends BaseController
 
     public function vehicleTripHistory(int $vehicleId): string
     {
-        $vehicle = Services::operationalFactsRepository()->vehicle($vehicleId);
+        $companyId = $this->activeCompanyId();
+        $vehicle = Services::operationalFactsRepository()->vehicleForCompany($companyId, $vehicleId);
         $trips = $vehicle === null ? [] : Services::operationalFactsRepository()->vehicleTripHistory($vehicleId);
         $requestedTripId = (int) $this->request->getGet('trip');
         $selectedTripId = in_array($requestedTripId, array_map(static fn (array $trip): int => (int) $trip['id'], $trips), true)
@@ -81,6 +83,7 @@ class TripMovementChecklists extends BaseController
             'vehicle' => $vehicle,
             'trips' => $trips,
             'selectedTripId' => $selectedTripId,
+            'navigation' => $this->navigation(),
         ])->render('trip_movement_checklists/history');
     }
 
@@ -99,9 +102,29 @@ class TripMovementChecklists extends BaseController
         return $this->back(Services::tripMovementChecklistService()->markNotApplicable($id, $this->request->getPost('note'), $this->actorUserId()), 'Item marked not applicable.', 'That checklist item could not be changed.');
     }
 
+    public function completePhotos(int $id): RedirectResponse
+    {
+        return $this->back(Services::tripMovementChecklistService()->completePickupPhotos($id, $this->activeCompanyId(), $this->actorUserId()), 'Photos marked complete.', 'Pickup photos could not be completed.');
+    }
+
+    public function undoPhotos(int $id): RedirectResponse
+    {
+        return $this->back(Services::tripMovementChecklistService()->undoPickupPhotos($id, $this->activeCompanyId(), $this->actorUserId()), 'Photos reopened.', 'Pickup photos could not be reopened.');
+    }
+
+    public function confirmChargingAdapter(int $id): RedirectResponse
+    {
+        return $this->back(Services::tripMovementChecklistService()->confirmChargingAdapter($id, $this->activeCompanyId(), $this->actorUserId()), 'Charging adapter confirmed.', 'Charging adapter could not be confirmed.');
+    }
+
+    public function undoChargingAdapter(int $id): RedirectResponse
+    {
+        return $this->back(Services::tripMovementChecklistService()->undoChargingAdapter($id, $this->activeCompanyId(), $this->actorUserId()), 'Charging adapter reopened.', 'Charging adapter could not be reopened.');
+    }
+
     public function setDisposition(int $id): RedirectResponse
     {
-        return $this->back(Services::tripMovementChecklistService()->setDisposition($id, (string) $this->request->getPost('vehicle_disposition'), $this->actorUserId()), 'Vehicle disposition saved.', 'Choose a valid vehicle disposition.');
+        return $this->back(Services::tripMovementChecklistService()->setDisposition($id, (string) $this->request->getPost('vehicle_disposition'), $this->actorUserId()), 'Exceptional hold saved.', 'Choose a valid exceptional hold.');
     }
 
     public function complete(int $id): RedirectResponse
@@ -231,6 +254,29 @@ class TripMovementChecklists extends BaseController
         }
 
         return (int) $user->id;
+    }
+
+    private function activeCompanyId(): int
+    {
+        $companyIds = Services::operationalFactsRepository()->activeFleetCompanyIds(date('Y-m-d'));
+        if (count($companyIds) !== 1) {
+            throw new \RuntimeException('Movement operations require exactly one active fleet company context.');
+        }
+
+        return $companyIds[0];
+    }
+
+    /** @return array<int, array<string, string>> */
+    private function navigation(): array
+    {
+        return [
+            ['label' => 'Fleet Command Center', 'href' => '/', 'active' => 'false'],
+            ['label' => 'Fleet Activity', 'href' => '/#fleet-activity', 'active' => 'false'],
+            ['label' => 'Vehicles', 'href' => '/fleet/vehicles', 'active' => 'false'],
+            ['label' => 'Turo Import', 'href' => '/turo/imports', 'active' => 'false'],
+            ['label' => 'Import Issues', 'href' => '/turo/import-issues', 'active' => 'false'],
+            ['label' => 'Vehicle Matching', 'href' => '/turo/vehicle-matches', 'active' => 'false'],
+        ];
     }
 
     private function factTarget(string $target): ?string

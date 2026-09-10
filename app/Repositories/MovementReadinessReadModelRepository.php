@@ -43,6 +43,20 @@ class MovementReadinessReadModelRepository
         $tripIds = array_values(array_unique(array_map('intval', array_column($checklists, 'turo_trip_normalized_id'))));
         $vehicleIds = array_values(array_unique(array_map('intval', array_column($checklists, 'fleet_vehicle_id'))));
         $nextTripsByVehicle = $this->nextTripCandidates($checklists, $vehicleIds);
+        $nextTripByChecklist = [];
+        $readinessTripIds = $tripIds;
+        foreach ($checklists as $checklist) {
+            if (($checklist['movement_type'] ?? null) !== 'return') {
+                continue;
+            }
+            $nextTrip = $this->eligibleNextTrip($checklist, $nextTripsByVehicle[(int) $checklist['fleet_vehicle_id']] ?? []);
+            $nextTripByChecklist[(int) $checklist['id']] = $nextTrip;
+            if ($nextTrip !== null) {
+                $readinessTripIds[] = (int) $nextTrip['id'];
+            }
+        }
+        $readinessTripIds = array_values(array_unique($readinessTripIds));
+        $asOfTimestamp = $asOf->format('Y-m-d H:i:s');
 
         $items = $this->db->table('trip_movement_checklist_items')
             ->whereIn('trip_movement_checklist_id', $scopedChecklistIds)
@@ -54,6 +68,7 @@ class MovementReadinessReadModelRepository
             ->where('company_id', $companyId)
             ->whereIn('turo_trip_normalized_id', $tripIds)
             ->where('voided_at', null)
+            ->where('occurred_at <=', $asOfTimestamp)
             ->orderBy('occurred_at', 'DESC')
             ->orderBy('id', 'DESC')
             ->get()
@@ -63,7 +78,25 @@ class MovementReadinessReadModelRepository
             ->join('trip_movement_events events', 'events.id = assessments.trip_movement_event_id AND events.voided_at IS NULL')
             ->where('assessments.company_id', $companyId)
             ->where('assessments.voided_at', null)
-            ->whereIn('assessments.turo_trip_normalized_id', $tripIds)
+            ->whereIn('assessments.turo_trip_normalized_id', $readinessTripIds)
+            ->where('assessments.captured_at <=', $asOfTimestamp)
+            ->where('events.occurred_at <=', $asOfTimestamp)
+            ->orderBy('assessments.captured_at', 'DESC')
+            ->orderBy('assessments.id', 'DESC')
+            ->get()
+            ->getResultArray();
+        $currentReadiness = $this->db->table('movement_assessments assessments')
+            ->select('assessments.*, events.occurred_at AS event_occurred_at, events.event_code')
+            ->join('trip_movement_events events', 'events.id = assessments.trip_movement_event_id')
+            ->where('assessments.company_id', $companyId)
+            ->whereIn('assessments.fleet_vehicle_id', $vehicleIds)
+            ->where('assessments.turo_trip_normalized_id', null)
+            ->where('assessments.movement_type', 'current')
+            ->where('assessments.voided_at', null)
+            ->where('assessments.captured_at <=', $asOfTimestamp)
+            ->where('events.event_code', 'vehicle_readiness_observed')
+            ->where('events.voided_at', null)
+            ->where('events.occurred_at <=', $asOfTimestamp)
             ->orderBy('assessments.captured_at', 'DESC')
             ->orderBy('assessments.id', 'DESC')
             ->get()
@@ -127,6 +160,10 @@ class MovementReadinessReadModelRepository
             $movementType = (string) $assessment['movement_type'];
             $assessmentsByTrip[$tripId][$movementType] ??= $assessment;
         }
+        $currentReadinessByVehicle = [];
+        foreach ($currentReadiness as $assessment) {
+            $currentReadinessByVehicle[(int) $assessment['fleet_vehicle_id']] ??= $assessment;
+        }
         $profilesByVehicle = [];
         foreach ($profiles as $profile) {
             $profilesByVehicle[(int) $profile['fleet_vehicle_id']] = $profile;
@@ -156,16 +193,19 @@ class MovementReadinessReadModelRepository
             $tripId = (int) $checklist['turo_trip_normalized_id'];
             $vehicleId = (int) $checklist['fleet_vehicle_id'];
             $movementType = (string) $checklist['movement_type'];
+            $nextTrip = $nextTripByChecklist[$checklistId] ?? null;
             $contexts[$checklistId] = array_merge($checklist, [
                 'items_by_code' => $itemsByChecklist[$checklistId] ?? [],
                 'active_events' => $eventsByTrip[$tripId][$movementType] ?? [],
                 'active_assessment' => $assessmentsByTrip[$tripId][$movementType] ?? null,
+                'current_readiness_assessment' => $currentReadinessByVehicle[$vehicleId] ?? null,
+                'target_pickup_assessment' => $nextTrip === null ? null : ($assessmentsByTrip[(int) $nextTrip['id']]['pickup'] ?? null),
                 'profile' => $profilesByVehicle[$vehicleId] ?? null,
                 'capabilities' => $capabilitiesByVehicle[$vehicleId] ?? [],
                 'scheduled_location' => $locationsByTrip[$tripId][$movementType] ?? null,
                 'airport_workflow' => $airportByTrip[$tripId][$movementType] ?? null,
                 'positioning_plan' => $plansByVehicle[$vehicleId] ?? null,
-                'next_trip' => $movementType === 'return' ? $this->eligibleNextTrip($checklist, $nextTripsByVehicle[$vehicleId] ?? []) : null,
+                'next_trip' => $nextTrip,
             ]);
         }
 

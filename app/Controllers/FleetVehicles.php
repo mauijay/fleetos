@@ -11,10 +11,11 @@ class FleetVehicles extends BaseController
 {
     public function index(): string
     {
+        $companyId = $this->activeCompanyId();
         return CoreServices::renderer()->setData([
             'assets' => Services::assetManifestService()->appAssets(),
             'navigation' => $this->navigation(),
-            'vehicles' => Services::fleetVehicleService()->vehicles(),
+            'vehicles' => Services::fleetVehicleService()->vehicles($companyId),
             'notice' => CoreServices::session()->getFlashdata('fleet_vehicle_notice'),
         ])->render('fleet_vehicles/index');
     }
@@ -67,7 +68,7 @@ class FleetVehicles extends BaseController
 
     public function edit(int $id): string
     {
-        $vehicle = Services::fleetVehicleService()->vehicle($id);
+        $vehicle = Services::fleetVehicleService()->vehicle($id, $this->activeCompanyId());
         if ($vehicle === null) {
             throw \CodeIgniter\Exceptions\PageNotFoundException::forPageNotFound();
         }
@@ -125,6 +126,16 @@ class FleetVehicles extends BaseController
         }
 
         return (int) $user->id;
+    }
+
+    private function activeCompanyId(): int
+    {
+        $companyIds = Services::operationalFactsRepository()->activeFleetCompanyIds(date('Y-m-d'));
+        if (count($companyIds) !== 1) {
+            throw new \RuntimeException('Fleet Vehicles requires exactly one active fleet company context.');
+        }
+
+        return $companyIds[0];
     }
 
     /** @return array<string, mixed> */

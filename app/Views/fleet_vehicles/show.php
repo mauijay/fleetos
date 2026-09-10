@@ -49,12 +49,21 @@ $fundingMethodCode = (string) ($acquisition['funding_method_code'] ?? '');
 $acquisitionLoanPrincipal = $acquisition['acquisition_loan_original_principal'] ?? null;
 $acquisitionLoanLabel = trim((string) ($acquisition['acquisition_loan_name'] ?? '')) ?: 'Vehicle financing';
 $acquisitionLoanSource = $acquisitionLoanLabel . ' / ' . (string) ($acquisition['acquisition_lender_name'] ?? 'Lender not entered');
+$currentLocation ??= ['location_class' => 'unknown', 'operational_state' => 'unknown'];
+$currentReadiness ??= null;
+$currentMovementHref ??= null;
+$hnlGarages ??= (new \App\Services\Fleet\HnlGarageCatalog())->definitions();
+$currentStateNotice ??= null;
+$currentStateError ??= null;
+$currentPositionData ??= [];
+$currentReadinessData ??= [];
 ?>
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title><?= esc((string) $vehicle['fleet_code']) ?> | FleetOS</title><?php if ($assets['css'] !== null): ?><link rel="stylesheet" href="/build/<?= esc($assets['css'], 'attr') ?>"><?php endif; ?></head>
 <body class="fleet-shell"><a class="skip-link" href="#main-content">Skip to main content</a><div class="app-frame import-frame"><?= view('fleet_command_center/components/navigation', ['items' => $navigation]) ?><main id="main-content" class="command-main import-main vehicle-main" tabindex="-1">
-<header class="top-status"><div><p class="eyebrow">Fleet / Vehicles / <?= esc((string) $vehicle['fleet_code']) ?></p><h1><?= esc((string) $vehicle['display_name']) ?></h1><p class="status-copy"><?= esc(trim((string) $vehicle['model_year'] . ' ' . (string) $vehicle['make_name'] . ' ' . (string) $vehicle['model_name'])) ?></p></div><div class="vehicle-detail-actions"><a class="secondary-action button-link" href="/fleet/vehicles">Back to vehicles</a><a class="secondary-action button-link" href="/operations/vehicles/<?= (int) $vehicle['id'] ?>/trip-history">Trip history</a><a class="primary-action button-link" href="/fleet/vehicles/<?= (int) $vehicle['id'] ?>/edit">Edit vehicle</a></div></header>
+<header class="top-status"><div><p class="eyebrow">Fleet / Vehicles / <?= esc((string) $vehicle['fleet_code']) ?></p><h1><?= esc((string) $vehicle['display_name']) ?></h1><p class="status-copy"><?= esc(trim((string) $vehicle['model_year'] . ' ' . (string) $vehicle['make_name'] . ' ' . (string) $vehicle['model_name'])) ?></p></div><div class="vehicle-detail-actions"><a class="secondary-action button-link" href="/fleet/vehicles">Back to vehicles</a><a class="primary-action button-link" href="/fleet/vehicles/<?= (int) $vehicle['id'] ?>/edit">Edit vehicle</a></div></header>
 <?php if ($notice !== null): ?><section class="section import-message tone-success"><strong><?= esc($notice) ?></strong></section><?php endif; ?>
 <?php if ($errors !== []): ?><section class="section import-message tone-danger"><strong>Financial details were not saved.</strong><ul><?php foreach ($errors as $error): ?><li><?= esc($error) ?></li><?php endforeach; ?></ul></section><?php endif; ?>
+<?= view('fleet_vehicles/components/current_operations', compact('vehicle', 'currentLocation', 'currentReadiness', 'currentMovementHref', 'hnlGarages', 'currentStateNotice', 'currentStateError', 'currentPositionData', 'currentReadinessData')) ?>
 <nav class="capital-tabs" aria-label="Vehicle detail sections"><a href="#overview">Overview</a><a href="#acquisition">Acquisition</a><a href="#financing">Financing</a><a href="#performance">Financial Performance</a><a href="#documents">Notes &amp; Documents</a></nav>
 
 <section class="section" id="overview"><div class="section-heading"><p class="eyebrow">Vehicle detail</p><h2>Overview</h2></div><dl class="issue-facts capital-facts"><div><dt>Fleet code</dt><dd><?= esc((string) $vehicle['fleet_code']) ?></dd></div><div><dt>Status</dt><dd><?= esc((string) $vehicle['status_name']) ?></dd></div><div><dt>Acquired</dt><dd><?= esc($date($vehicle['purchase_date'] ?? null)) ?></dd></div><div><dt>Funding</dt><dd><span class="status-badge tone-info"><?= esc((string) ($acquisition['funding_method_name'] ?? 'Not entered')) ?></span></dd></div><div><dt>Loan status</dt><dd><span class="status-badge tone-info"><?= esc($label($financing_state)) ?></span></dd></div><div><dt>Agreements</dt><dd><?= count($loans) ?></dd></div></dl><?= view('fleet_vehicles/components/compliance_summary', ['vehicle' => $vehicle, 'date' => $date]) ?></section>

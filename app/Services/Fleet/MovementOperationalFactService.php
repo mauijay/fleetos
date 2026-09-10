@@ -121,6 +121,102 @@ class MovementOperationalFactService
         }
     }
 
+    public function recordCurrentPositionForVehicle(int $companyId, int $vehicleId, array $data, int $actorUserId): bool
+    {
+        $this->requireCompanyVehicle($companyId, $vehicleId, $actorUserId);
+        $occurredAt = $this->requiredPastTimestamp($data, 'Actual position time');
+        $locationClass = trim((string) ($data['location_class'] ?? ''));
+        if (! in_array($locationClass, ['home', 'airport_hnl', 'other_delivery'], true)) {
+            throw new \InvalidArgumentException('Choose Home, Airport HNL, or Other for the current position.');
+        }
+        $this->rejectGuestPossession($vehicleId);
+        $this->rejectExactVehiclePositionReplay($vehicleId, $data, $actorUserId);
+
+        $this->db->transBegin();
+        try {
+            $this->rejectGuestPossession($vehicleId);
+            $this->rejectExactVehiclePositionReplay($vehicleId, $data, $actorUserId);
+            $this->events->record(
+                $vehicleId,
+                null,
+                'vehicle_positioned',
+                null,
+                $occurredAt,
+                $locationClass,
+                $data['location_detail'] ?? null,
+                'vehicle_operator',
+                $actorUserId,
+                $data['note'] ?? null,
+                $this->airportParkingData($data),
+            );
+            $this->plans()->invalidateForWrite($vehicleId, 'actual_vehicle_position_recorded', $actorUserId);
+            if ($this->db->transStatus() === false) {
+                throw new RuntimeException('Vehicle position transaction failed.');
+            }
+            $this->db->transCommit();
+
+            return true;
+        } catch (\Throwable $exception) {
+            $this->db->transRollback();
+            throw $exception;
+        }
+    }
+
+    public function recordCurrentReadinessForVehicle(int $companyId, int $vehicleId, array $data, int $actorUserId): bool
+    {
+        $this->requireCompanyVehicle($companyId, $vehicleId, $actorUserId);
+        $observedAt = $this->requiredPastTimestamp($data, 'Readiness observation time');
+        $cleanliness = (string) ($data['cleanliness'] ?? '');
+        if (! in_array($cleanliness, ['clean', 'dirty'], true)) {
+            throw new \InvalidArgumentException('Choose Clean or Dirty for current readiness.');
+        }
+        $energy = filter_var($data['energy_percent'] ?? null, FILTER_VALIDATE_INT);
+        if ($energy === false || $energy < 0 || $energy > 100) {
+            throw new \InvalidArgumentException('Energy must be between 0 and 100.');
+        }
+        $this->rejectGuestPossession($vehicleId);
+        $this->rejectExactReadinessReplay($companyId, $vehicleId, $cleanliness, $energy, $observedAt);
+
+        $this->db->transBegin();
+        try {
+            $this->rejectGuestPossession($vehicleId);
+            $this->rejectExactReadinessReplay($companyId, $vehicleId, $cleanliness, $energy, $observedAt);
+            $eventId = $this->events->record(
+                $vehicleId,
+                null,
+                'vehicle_readiness_observed',
+                null,
+                $observedAt,
+                null,
+                null,
+                'vehicle_operator',
+                $actorUserId,
+                $data['note'] ?? null,
+            );
+            $this->assessments->record(
+                $vehicleId,
+                null,
+                $eventId,
+                'current',
+                $cleanliness,
+                $energy,
+                $observedAt,
+                'vehicle_operator',
+                $actorUserId,
+                $data['note'] ?? null,
+            );
+            if ($this->db->transStatus() === false) {
+                throw new RuntimeException('Current readiness transaction failed.');
+            }
+            $this->db->transCommit();
+
+            return true;
+        } catch (\Throwable $exception) {
+            $this->db->transRollback();
+            throw $exception;
+        }
+    }
+
     private function rejectExactPositionReplay(array $checklist, array $data, int $actorUserId): void
     {
         if ($this->events->hasExactActivePosition(
@@ -139,6 +235,73 @@ class MovementOperationalFactService
         )) {
             throw new \InvalidArgumentException('This exact vehicle position is already recorded.');
         }
+    }
+
+    private function rejectExactVehiclePositionReplay(int $vehicleId, array $data, int $actorUserId): void
+    {
+        if ($this->events->hasExactActivePosition(
+            $vehicleId,
+            null,
+            (string) $data['occurred_at'],
+            (string) $data['location_class'],
+            $data['location_detail'] ?? null,
+            $actorUserId,
+            $this->airportParkingData($data),
+            'vehicle_operator',
+        )) {
+            throw new \InvalidArgumentException('This exact vehicle position is already recorded.');
+        }
+    }
+
+    private function rejectExactReadinessReplay(int $companyId, int $vehicleId, string $cleanliness, int $energy, string $observedAt): void
+    {
+        if ($this->assessments->hasExactActiveCurrent($companyId, $vehicleId, $cleanliness, $energy, $observedAt)) {
+            throw new \InvalidArgumentException('This exact current readiness observation is already recorded.');
+        }
+    }
+
+    /** @return array<string, mixed> */
+    private function airportParkingData(array $data): array
+    {
+        return [
+            'garage_code' => $data['airport_garage_code'] ?? null,
+            'level' => $data['airport_parking_level'] ?? null,
+            'row' => $data['airport_parking_row'] ?? null,
+            'structured_input_present' => array_key_exists('airport_garage_code', $data),
+        ];
+    }
+
+    private function requireCompanyVehicle(int $companyId, int $vehicleId, int $actorUserId): void
+    {
+        if ($actorUserId < 1 || $this->repo()->vehicleForCompany($companyId, $vehicleId) === null) {
+            throw new \InvalidArgumentException('Vehicle not found in the active fleet company.');
+        }
+    }
+
+    private function rejectGuestPossession(int $vehicleId): void
+    {
+        $lifecycle = $this->repo()->latestActiveLifecycleEvent($vehicleId);
+        if (($lifecycle['event_code'] ?? null) === 'actual_handoff') {
+            throw new \InvalidArgumentException('Record the actual return or recovery before updating current vehicle state.');
+        }
+    }
+
+    private function requiredPastTimestamp(array $data, string $label): string
+    {
+        $value = trim((string) ($data['occurred_at'] ?? ''));
+        if ($value === '') {
+            throw new \InvalidArgumentException($label . ' is required.');
+        }
+        try {
+            $timestamp = new \DateTimeImmutable($value);
+        } catch (\Exception) {
+            throw new \InvalidArgumentException('Choose a valid ' . strtolower($label) . '.');
+        }
+        if ($timestamp > new \DateTimeImmutable()) {
+            throw new \InvalidArgumentException($label . ' cannot be in the future.');
+        }
+
+        return $value;
     }
 
     public function confirmGuestPickup(array $checklist, array $data, int $actorUserId): bool

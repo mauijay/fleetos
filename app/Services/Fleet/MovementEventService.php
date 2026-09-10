@@ -6,7 +6,7 @@ use App\Repositories\OperationalFactsRepository;
 
 class MovementEventService
 {
-    public const EVENT_CODES = ['vehicle_staged', 'actual_handoff', 'actual_return', 'vehicle_recovered', 'vehicle_positioned'];
+    public const EVENT_CODES = ['vehicle_staged', 'actual_handoff', 'actual_return', 'vehicle_recovered', 'vehicle_positioned', 'vehicle_readiness_observed'];
 
     public function __construct(
         private readonly ?OperationalFactsRepository $repository = null,
@@ -63,9 +63,9 @@ class MovementEventService
         return $this->repo()->activeMovementConflict($tripId, $eventCodes);
     }
 
-    public function hasExactActivePosition(int $vehicleId, int $tripId, string $occurredAt, string $locationClass, ?string $locationDetail, int $actorUserId, array $airportParking = []): bool
+    public function hasExactActivePosition(int $vehicleId, ?int $tripId, string $occurredAt, string $locationClass, ?string $locationDetail, int $actorUserId, array $airportParking = [], string $source = 'checklist_operator'): bool
     {
-        $fact = $this->eventData($vehicleId, $tripId, 'vehicle_positioned', null, $occurredAt, $locationClass, $locationDetail, 'checklist_operator', $actorUserId, null, $airportParking);
+        $fact = $this->eventData($vehicleId, $tripId, 'vehicle_positioned', null, $occurredAt, $locationClass, $locationDetail, $source, $actorUserId, null, $airportParking);
 
         return $this->repo()->hasExactActivePositionFact($fact);
     }

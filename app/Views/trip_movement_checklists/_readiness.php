@@ -17,12 +17,13 @@ $blockingRemaining = count($blockingPending);
 $additionalRemaining = count($additionalPending);
 $lifecycle = array_values(array_filter($requirements, static fn (array $requirement): bool => $requirement['phase'] === 'pickup_lifecycle'));
 $nextPickupPreparation = array_values(array_filter($requirements, static fn (array $requirement): bool => $requirement['phase'] === 'next_pickup_preparation'));
+$exceptionalDispositions = $readiness['exceptional_dispositions'] ?? [];
+$currentDisposition = trim((string) ($checklist['vehicle_disposition'] ?? ''));
 $pendingLabels = [
     'exterior_inspected' => 'Inspect exterior',
     'interior_inspected' => 'Inspect interior',
     'damage_check_completed' => 'Check for damage',
     'return_photos_completed' => 'Confirm return photos',
-    'vehicle_disposition' => 'Assign vehicle disposition',
 ];
 $activeFacts = $tripFacts[(string) ($checklist['movement_type'] ?? '')] ?? null;
 $factDetail = static function (array $requirement) use ($activeFacts): ?string {
@@ -66,12 +67,19 @@ $factDetail = static function (array $requirement) use ($activeFacts): ?string {
                 <?php if ($actionGroup['requirements'] !== []): ?><p class="eyebrow readiness-action-kind"><?= esc($actionGroup['label']) ?></p><?php endif; ?>
                 <ul class="readiness-list readiness-actions">
                     <?php foreach ($actionGroup['requirements'] as $requirement): ?>
-                        <?php $item = $itemsByCode[$requirement['code']] ?? null; $itemId = (int) ($item['id'] ?? $requirement['action']['item_id'] ?? 0); $isDisposition = $requirement['code'] === 'vehicle_disposition'; ?>
-                        <li class="is-pending<?= $isDisposition ? ' readiness-compound-action' : '' ?>"><span aria-hidden="true">○</span><div><strong><?= esc((string) ($pendingLabels[$requirement['code']] ?? $requirement['action']['label'] ?? $requirement['label'])) ?></strong><?php if ($isDisposition): ?><small>Choose what happens to the vehicle next</small><?php endif; ?></div>
-                            <?php if (! $closed && $itemId > 0): ?>
+                        <?php
+                        $item = $itemsByCode[$requirement['code']] ?? null;
+                        $itemId = (int) ($item['id'] ?? $requirement['action']['item_id'] ?? 0);
+                        $actionType = (string) ($requirement['action']['type'] ?? '');
+                        $isSpecialAction = in_array($actionType, ['photos_composite', 'charging_adapter'], true);
+                        ?>
+                        <li class="is-pending<?= $isSpecialAction ? ' readiness-compound-action' : '' ?>"><span aria-hidden="true">○</span><div><strong><?= esc((string) ($pendingLabels[$requirement['code']] ?? $requirement['action']['label'] ?? $requirement['label'])) ?></strong></div>
+                            <?php if (! $closed && $actionType === 'photos_composite'): ?>
+                                <div class="readiness-action-controls"><form action="/operations/checklists/<?= (int) $checklist['id'] ?>/photos-complete" method="post"><?= csrf_field() ?><button class="primary-action" type="submit">Confirm</button></form></div>
+                            <?php elseif (! $closed && $actionType === 'charging_adapter'): ?>
+                                <div class="readiness-action-controls"><form action="/operations/checklists/<?= (int) $checklist['id'] ?>/charging-adapter-present" method="post"><?= csrf_field() ?><button class="primary-action" type="submit">Confirm</button></form></div>
+                            <?php elseif (! $closed && $itemId > 0): ?>
                                 <div class="readiness-action-controls"><form action="/operations/checklist-items/<?= $itemId ?>/complete" method="post"><?= csrf_field() ?><button class="primary-action" type="submit">Confirm</button></form><?php if ($requirement['allows_na'] ?? false): ?><form action="/operations/checklist-items/<?= $itemId ?>/not-applicable" method="post"><?= csrf_field() ?><button class="action-link" type="submit">Not applicable</button></form><?php endif; ?></div>
-                            <?php elseif (! $closed && $isDisposition): ?>
-                                <form class="readiness-compound-controls inline-disposition" action="/operations/checklists/<?= (int) $checklist['id'] ?>/disposition" method="post"><?= csrf_field() ?><label><span class="visually-hidden">Choose vehicle disposition</span><select name="vehicle_disposition" required><option value="">Choose disposition</option><?php foreach (['available', 'needs_cleaning', 'needs_charging', 'maintenance_required', 'claim_review_required', 'offline'] as $disposition): ?><option value="<?= esc($disposition, 'attr') ?>"><?= esc(ucwords(str_replace('_', ' ', $disposition))) ?></option><?php endforeach; ?></select></label><button class="primary-action" type="submit">Assign</button></form>
                             <?php elseif (! $closed): ?><a class="action-link" href="#handoff-entry">Record facts</a><?php endif; ?>
                         </li>
                     <?php endforeach; ?>
@@ -80,12 +88,25 @@ $factDetail = static function (array $requirement) use ($activeFacts): ?string {
             <?php if ($completedHuman !== []): ?><p class="eyebrow readiness-action-kind">Completed checks</p><?php endif; ?>
             <ul class="readiness-list readiness-actions">
                 <?php foreach ($completedHuman as $requirement): ?>
-                    <?php $item = $itemsByCode[$requirement['code']] ?? null; $itemId = (int) ($item['id'] ?? 0); ?>
-                    <li class="is-complete"><span aria-hidden="true">✓</span><div><strong><?= esc((string) $requirement['label']) ?></strong><?php if ($requirement['basis_at'] !== null): ?><small><?= esc(ucfirst((string) ($item['completion_source'] ?? 'manual'))) ?> · <?= esc(date('M j, g:i A', strtotime((string) $requirement['basis_at']))) ?></small><?php endif; ?></div><?php if (! $closed && $itemId > 0): ?><div class="readiness-action-controls"><form action="/operations/checklist-items/<?= $itemId ?>/undo" method="post"><?= csrf_field() ?><button class="action-link" type="submit">Undo</button></form></div><?php endif; ?></li>
+                    <?php
+                    $item = $itemsByCode[$requirement['code']] ?? null;
+                    $itemId = (int) ($item['id'] ?? 0);
+                    $actionType = (string) ($requirement['action']['type'] ?? '');
+                    ?>
+                    <li class="is-complete"><span aria-hidden="true">✓</span><div><strong><?= esc((string) $requirement['label']) ?></strong><?php if ($requirement['basis_at'] !== null): ?><small><?= esc(ucfirst((string) ($item['completion_source'] ?? 'manual'))) ?> · <?= esc(date('M j, g:i A', strtotime((string) $requirement['basis_at']))) ?></small><?php endif; ?></div><?php if (! $closed && $actionType === 'photos_composite'): ?><div class="readiness-action-controls"><form action="/operations/checklists/<?= (int) $checklist['id'] ?>/photos-undo" method="post"><?= csrf_field() ?><button class="action-link" type="submit">Undo</button></form></div><?php elseif (! $closed && $actionType === 'charging_adapter'): ?><div class="readiness-action-controls"><form action="/operations/checklists/<?= (int) $checklist['id'] ?>/charging-adapter-undo" method="post"><?= csrf_field() ?><button class="action-link" type="submit">Undo</button></form></div><?php elseif (! $closed && $itemId > 0): ?><div class="readiness-action-controls"><form action="/operations/checklist-items/<?= $itemId ?>/undo" method="post"><?= csrf_field() ?><button class="action-link" type="submit">Undo</button></form></div><?php endif; ?></li>
                 <?php endforeach; ?>
             </ul>
         </div>
     </div>
+
+    <?php if (($checklist['movement_type'] ?? '') === 'return'): ?>
+        <div class="readiness-subgroup exceptional-disposition">
+            <p class="eyebrow">Exceptional hold</p>
+            <p class="muted">Optional. Normal turnaround is driven by recorded condition and energy.</p>
+            <?php if ($currentDisposition !== ''): ?><p>Recorded: <strong><?= esc((string) ($exceptionalDispositions[$currentDisposition] ?? ucwords(str_replace('_', ' ', $currentDisposition)))) ?></strong></p><?php endif; ?>
+            <?php if (! $closed): ?><form class="readiness-compound-controls inline-disposition" action="/operations/checklists/<?= (int) $checklist['id'] ?>/disposition" method="post"><?= csrf_field() ?><label><span class="visually-hidden">Choose exceptional hold</span><select name="vehicle_disposition"><option value="">No exceptional hold</option><?php foreach ($exceptionalDispositions as $disposition => $label): ?><option value="<?= esc((string) $disposition, 'attr') ?>" <?= $currentDisposition === $disposition ? 'selected' : '' ?>><?= esc((string) $label) ?></option><?php endforeach; ?></select></label><button class="secondary-action" type="submit">Save hold</button></form><?php endif; ?>
+        </div>
+    <?php endif; ?>
 
     <?php if ($lifecycle !== []): ?>
         <div class="readiness-subgroup"><p class="eyebrow">Lifecycle</p><ul class="readiness-list"><?php foreach ($lifecycle as $requirement): ?><li class="<?= $requirement['status'] === 'satisfied' ? 'is-complete' : 'is-pending' ?>"><span aria-hidden="true"><?= $requirement['status'] === 'satisfied' ? '✓' : '○' ?></span><div><strong><?= esc((string) $requirement['label']) ?></strong><small>Does not gate pickup preparation</small></div></li><?php endforeach; ?></ul></div>
@@ -102,6 +123,7 @@ $factDetail = static function (array $requirement) use ($activeFacts): ?string {
 
     <details class="checklist-history"><summary>Checklist history</summary><div class="history-list">
         <?php foreach (($readiness['workflow_history']['legacy_items'] ?? $checklist['items']) as $item): ?><div><strong><?= esc((string) $item['label']) ?></strong><span><?= esc(ucwords(str_replace('_', ' ', (string) (($item['applicability'] ?? 'applicable') === 'not_applicable' ? 'not_applicable' : $item['completion_state'])))) ?><?php if (($item['completion_source'] ?? null) !== null): ?> · <?= esc(ucwords(str_replace('_', ' ', (string) $item['completion_source']))) ?><?php endif; ?><?php if (($item['completed_at'] ?? null) !== null): ?> · <?= esc(date('M j, Y g:i A', strtotime((string) $item['completed_at']))) ?><?php endif; ?></span><?php if (trim((string) ($item['note'] ?? '')) !== ''): ?><small><?= esc((string) $item['note']) ?></small><?php endif; ?></div><?php endforeach; ?>
+        <?php if (trim((string) ($readiness['workflow_history']['vehicle_disposition'] ?? '')) !== ''): ?><div><strong>Recorded vehicle disposition</strong><span><?= esc(ucwords(str_replace('_', ' ', (string) $readiness['workflow_history']['vehicle_disposition']))) ?></span></div><?php endif; ?>
         <?php if (($readiness['workflow_history']['historically_completed'] ?? false)): ?><div><strong>Workflow completed</strong><span><?= esc(date('M j, Y g:i A', strtotime((string) $readiness['workflow_history']['completed_at']))) ?></span><?php if (trim((string) ($checklist['completion_note'] ?? '')) !== ''): ?><small><?= esc((string) $checklist['completion_note']) ?></small><?php endif; ?></div><?php endif; ?>
     </div></details>
 </section>
