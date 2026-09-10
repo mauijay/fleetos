@@ -1,5 +1,58 @@
 # Changelog
 
+## v0.9.4 — Operational Readiness & Command Center
+
+Release date: 2026-09-09
+
+### Derived Readiness
+
+- Readiness derives from authoritative operational facts and genuine human actions rather than ceremonial checklist completion counts.
+- Historical checklist completion remains auditable without overriding current operational truth.
+- Pickup preparation, guest handoff, return intake, and turnaround work remain distinct lifecycle concepts.
+- Blocking and additional actions are reported separately.
+
+### Movement Workflow
+
+- The active checklist wall is replaced with compact Known, Action Required, Lifecycle, and preparation or turnaround presentation.
+- Authoritative return, time, charge or fuel, cleanliness, location, and staging facts automatically satisfy corresponding readiness knowledge.
+- Inspections, condition photos, damage checks, and disposition remain explicit operator actions with operator-oriented wording.
+- Historical checklist evidence remains available in collapsed history.
+
+### Vehicle Positioning
+
+- Historical movement locations remain attached to their events while current physical position is tracked separately.
+- Later positioning can move a vehicle Home without rewriting an earlier Waikiki return or other trip fact.
+- HNL staging preserves structured Garage, Level, and Row details without implying guest handoff.
+- Positioning plans and scheduled locations remain intent only; canonical Row terminology is retained while legacy stall storage remains hidden compatibility data.
+
+### Command Center
+
+- Fleet Snapshot appears at the top of the activity panel with mutually exclusive Rented, Home, HNL, Other, and Unknown buckets.
+- Snapshot and Fleet Status share authoritative current-state semantics rather than future schedules.
+- Later authoritative return, recovery, or positioning facts correctly end rented possession.
+
+### Movement Board
+
+- Shared readiness projections replace stale legacy checklist counts.
+- Cards show compact blocking and additional counts plus one highest-priority next action; full detail remains on the Movement page.
+- True same-day turnaround semantics remain preserved.
+
+### Operations Queue
+
+- Today, Tomorrow, and Urgent scopes use bookmarkable, read-only GET navigation.
+- Actionable movement work links to filtered Movement Board views, while import issues, vehicle matching, airport operations, and Airport Receipts use canonical domain routes.
+- Entries appear only when measurable work exists, keeping the queue focused on operator action.
+
+### Safety & Performance
+
+- Dashboard and movement navigation remain GET read-only, with company-scoped batched reads for readiness and Fleet Snapshot.
+- No synthetic checklist completion writes were introduced, and duplicate guest handoff and exact position replay protections remain intact.
+- Responsive behavior is validated across mobile and desktop.
+
+### Backlog
+
+- Broader Receipts & Expenses / Operating Expenses discovery is recorded for Slice 3B while Airport Receipts remains specialized.
+
 ## v0.9.3 — Operator Flow Polish
 
 Release date: 2026-09-08
