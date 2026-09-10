@@ -1,5 +1,58 @@
 # Changelog
 
+## v0.9.5 — Current State & Operator Ergonomics
+
+Release date: 2026-09-10
+
+### Current Vehicle Position
+
+- Record vehicle-scoped Home, HNL, or Other positions independently of trips.
+- HNL storage captures structured Garage, Level, and Row details while remaining distinct from reservation staging or guest possession.
+- Active guest possession blocks generic positioning.
+
+### Current Readiness
+
+- Record current cleanliness and charge or fuel without rewriting historical trip facts or changing physical location.
+- Later current-readiness observations can drive future pickup preparation while historical pickup and return observations remain preserved.
+
+### Readiness Logic
+
+- Shared readiness projection prioritizes target pickup or staging facts, then later current readiness, then prior return fallback.
+- Voided, superseded, and future facts remain excluded, and vehicle energy targets remain separate from recorded observations.
+
+### Pickup Preparation
+
+- Photos complete replaces redundant inspection and separate exterior/interior photo actions while preserving auditable legacy rows.
+- Tesla workflows use Key card present; conventional keyed vehicles use Keys present; charging-adapter work appears only where applicable.
+- Guest pickup and Turo Access instructions are no longer routine manual blockers, while Guest handoff remains a separate lifecycle event.
+
+### Return Workflow
+
+- Routine returns no longer require manual disposition; recorded cleanliness and energy drive cleaning, charging, or fueling work.
+- Disposition is reserved for exceptional Maintenance, Claim or damage review, and Offline or unavailable holds.
+- Historical disposition values remain readable.
+
+### Vehicle Operations & Navigation
+
+- Vehicle Details now combines current position and readiness in a compact Current Operations section.
+- Trip History is directly accessible from Vehicles and Vehicle Details, with contextual Open Movement navigation where relevant.
+- Current-location labels use canonical presentation, including Waikiki Hotel and genuine Unknown states.
+
+### Operator Ergonomics
+
+- Movement and Trip History pages use a centered, approximately 1440px workflow width on large and ultrawide displays.
+- Mobile and standard desktop layouts remain responsive without excessively stretched forms.
+
+### Safety & Performance
+
+- New writes retain session, admin permission, CSRF, company scope, authenticated actor, transaction, and replay protections.
+- Capability reads remain batched, readiness remains bounded at 11 queries, and no migration is required.
+
+### Backlog
+
+- Existing airport POST-route security hardening remains deferred.
+- Slice 3B remains Reimbursement & Deadline Protection and broader expense design.
+
 ## v0.9.4 — Operational Readiness & Command Center
 
 Release date: 2026-09-09
