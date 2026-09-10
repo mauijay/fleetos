@@ -71,14 +71,15 @@ class MovementChecklistRepository
     public function summariesForDate(string $start, string $end): array
     {
         return $this->db->table('trip_movement_checklists checklists')
-            ->select('checklists.id, checklists.turo_trip_normalized_id, checklists.fleet_vehicle_id, checklists.movement_type, checklists.scheduled_at, checklists.readiness_status, checklists.vehicle_disposition, checklists.completed_at')
+            ->select('checklists.id, checklists.turo_trip_normalized_id, checklists.fleet_vehicle_id, checklists.movement_type, checklists.scheduled_at, checklists.readiness_status, checklists.vehicle_disposition, checklists.completed_at, vehicles.company_id')
             ->select('SUM(CASE WHEN items.is_required = 1 AND items.applicability = \'applicable\' THEN 1 ELSE 0 END) AS required_count', false)
             ->select('SUM(CASE WHEN items.is_required = 1 AND items.applicability = \'applicable\' AND items.completion_state = \'complete\' THEN 1 ELSE 0 END) AS required_complete_count', false)
             ->select('SUM(CASE WHEN items.is_critical = 1 AND items.applicability = \'applicable\' AND items.completion_state != \'complete\' THEN 1 ELSE 0 END) AS critical_open_count', false)
             ->join('trip_movement_checklist_items items', 'items.trip_movement_checklist_id = checklists.id', 'left')
+            ->join('fleet_vehicles vehicles', 'vehicles.id = checklists.fleet_vehicle_id')
             ->where('checklists.scheduled_at >=', $start)
             ->where('checklists.scheduled_at <', $end)
-            ->groupBy('checklists.id, checklists.turo_trip_normalized_id, checklists.fleet_vehicle_id, checklists.movement_type, checklists.scheduled_at, checklists.readiness_status, checklists.vehicle_disposition, checklists.completed_at')
+            ->groupBy('checklists.id, checklists.turo_trip_normalized_id, checklists.fleet_vehicle_id, checklists.movement_type, checklists.scheduled_at, checklists.readiness_status, checklists.vehicle_disposition, checklists.completed_at, vehicles.company_id')
             ->get()
             ->getResultArray();
     }

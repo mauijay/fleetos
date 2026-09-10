@@ -26,7 +26,7 @@ class FleetCommandCenterViewModelService
     }
 
     /** Returns the complete display model for the Fleet Command Center. */
-    public function forToday(?DateTimeImmutable $asOf = null): array
+    public function forToday(?DateTimeImmutable $asOf = null, ?string $queueScope = null, ?string $movementFilter = null): array
     {
         $asOf ??= new DateTimeImmutable();
         $command = $this->command()->snapshot($asOf);
@@ -43,13 +43,15 @@ class FleetCommandCenterViewModelService
         $importIssues = $this->importIssues()->attentionSummary();
         $vehicleMappings = $this->vehicleMappings()->attentionSummary();
         $tripReconciliation = $this->tripReconciliation()->attentionSummary();
-        $dailyOperations = $this->dailyOperations()->forToday($asOf);
+        $dailyOperations = $this->dailyOperations()->forToday($asOf, $movementFilter);
+        $queueView = $this->queueView($queueScope, $today, $tomorrow, $command['urgent_items'], $dailyOperations['operational_queue']);
+        $dailyOperations['queue_view'] = $queueView;
 
         return [
             'page_title' => 'Fleet Command Center',
             'as_of' => $asOf->format('M j, Y g:i A'),
             'navigation' => $this->navigation(),
-            'fleet_status' => $this->fleetStatusCards($statistics, $command),
+            'fleet_status' => $this->fleetStatusCards($statistics, $dailyOperations['fleet_snapshot']),
             'mission' => $this->missionCards($today),
             'mission_clear' => $this->missionClear($today),
             'import_issues' => $importIssues,
@@ -62,7 +64,7 @@ class FleetCommandCenterViewModelService
             'financial' => $this->financialSnapshot($currentMonth, $statistics),
             'health_alerts' => $this->healthAlerts($health),
             'executive_kpis' => $this->executiveKpis($statistics, $tripAnalytics, $vehiclePerformance),
-            'activity' => $this->activityPanel($today, $tomorrow, $health, $command),
+            'activity' => $this->activityPanel($today, $tomorrow, $health, $command, $dailyOperations['fleet_snapshot'], $queueView),
             'future_integrations' => $this->futureIntegrations(),
         ];
     }
@@ -95,16 +97,18 @@ class FleetCommandCenterViewModelService
     }
 
     /** @return array<int, array<string, mixed>> */
-    private function fleetStatusCards(array $statistics, array $command): array
+    private function fleetStatusCards(array $statistics, array $fleetSnapshot): array
     {
+        $counts = array_column($fleetSnapshot['buckets'], 'count', 'code');
+
         return [
-            $this->metricCard('Fleet Size', $statistics['fleet_size'], 'Total active fleet', '#fleet-activity', 'neutral'),
-            $this->metricCard('Available', $command['fleet_status']['available'], 'Ready for booking', '#fleet-activity', 'success'),
-            $this->metricCard('Reserved', $command['fleet_status']['reserved'], 'Currently reserved', '#fleet-timeline', 'info'),
-            $this->metricCard('In Progress', $command['fleet_status']['in_progress'], 'Trips underway', '#fleet-timeline', 'info'),
-            $this->metricCard('Needs Cleaning', $command['fleet_status']['cleaning'], 'Turnaround required', '#todays-mission', 'warning'),
-            $this->metricCard('Maintenance', $command['fleet_status']['maintenance'], 'Service attention', '#fleet-health', 'danger'),
-            $this->metricCard('Out of Service', $command['fleet_status']['out_of_service'], 'Unavailable vehicles', '#fleet-health', 'danger'),
+            $this->metricCard('Fleet Size', $fleetSnapshot['total'], 'Active vehicles in current snapshot', '#fleet-snapshot', 'neutral'),
+            $this->metricCard('Rented', $counts['rented'] ?? 0, 'Confirmed guest possession', '#fleet-snapshot', 'info'),
+            $this->metricCard('Home', $counts['home'] ?? 0, 'Current position', '#fleet-snapshot', 'success'),
+            $this->metricCard('HNL', $counts['hnl'] ?? 0, 'Current position', '#fleet-snapshot', 'info'),
+            $this->metricCard('Other', $counts['other'] ?? 0, 'Current position outside Home/HNL', '#fleet-snapshot', 'warning'),
+            $this->metricCard('Unknown', $counts['unknown'] ?? 0, 'Current position not recorded', '#fleet-snapshot', 'warning'),
+            $this->metricCard('Maintenance', $statistics['maintenance_required'], 'Service attention', '#fleet-health', 'danger'),
             $this->metricCard('Claims Open', $statistics['claim_open'], 'Follow-up queue', '#fleet-health', 'warning'),
         ];
     }
@@ -238,12 +242,14 @@ class FleetCommandCenterViewModelService
     }
 
     /** @return array<string, mixed> */
-    private function activityPanel(array $today, array $tomorrow, array $health, array $command): array
+    private function activityPanel(array $today, array $tomorrow, array $health, array $command, array $fleetSnapshot, array $queueView): array
     {
         return [
-            'today_count' => count(array_merge(...array_values(array_filter($today, 'is_array')))),
-            'tomorrow_count' => count(array_merge(...array_values(array_filter($tomorrow, 'is_array')))),
-            'urgent_count' => count(array_merge(...array_values(array_filter($command['urgent_items'], 'is_array')))),
+            'fleet_snapshot' => $fleetSnapshot,
+            'today_count' => $this->taskCount($today),
+            'tomorrow_count' => $this->taskCount($tomorrow),
+            'urgent_count' => $this->taskCount($command['urgent_items']),
+            'queue_scopes' => $queueView['scopes'],
             'weather_alerts' => $command['weather_alerts'],
             'traffic_alerts' => $command['traffic_alerts'],
             'battery_alerts' => $health['vehicles_below_battery_threshold'],
@@ -251,6 +257,87 @@ class FleetCommandCenterViewModelService
             'traffic_status' => $command['traffic_alerts'] === [] ? 'Reserved' : 'Active',
             'battery_status' => $health['vehicles_below_battery_threshold'] === [] ? 'Reserved' : 'Active',
         ];
+    }
+
+    /** @return array<string, mixed> */
+    private function queueView(?string $activeScope, array $today, array $tomorrow, array $urgent, array $defaultActions): array
+    {
+        $activeScope = in_array($activeScope, ['today', 'tomorrow', 'urgent'], true) ? $activeScope : null;
+        $scopes = [
+            ['code' => 'all', 'label' => 'All', 'count' => null, 'href' => '/#operational-queue', 'active' => $activeScope === null, 'actionable' => true],
+            ['code' => 'today', 'label' => 'Today', 'count' => $this->taskCount($today), 'href' => '/?queue=today#operational-queue', 'active' => $activeScope === 'today'],
+            ['code' => 'tomorrow', 'label' => 'Tomorrow', 'count' => $this->taskCount($tomorrow), 'href' => '/?queue=tomorrow#operational-queue', 'active' => $activeScope === 'tomorrow'],
+            ['code' => 'urgent', 'label' => 'Urgent', 'count' => $this->taskCount($urgent), 'href' => '/?queue=urgent#operational-queue', 'active' => $activeScope === 'urgent'],
+        ];
+        $scopes = array_map(static fn (array $scope): array => array_merge($scope, [
+            'actionable' => ($scope['count'] ?? null) === null || (int) $scope['count'] > 0,
+        ]), $scopes);
+
+        $items = match ($activeScope) {
+            'today' => $this->timeScopedActions($today, 'today'),
+            'tomorrow' => $this->timeScopedActions($tomorrow, 'tomorrow'),
+            'urgent' => $this->urgentActions($urgent),
+            default => $defaultActions,
+        };
+
+        return [
+            'active_scope' => $activeScope,
+            'label' => $activeScope === null ? 'All operational work' : ucfirst($activeScope) . ' work',
+            'items' => $items,
+            'scopes' => $scopes,
+        ];
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function timeScopedActions(array $tasks, string $scope): array
+    {
+        $dayLabel = $scope === 'tomorrow' ? 'Tomorrow\'s' : 'Today\'s';
+        $definitions = [
+            'todays_pickups' => [$dayLabel . ' Pickups', $scope === 'today' ? '/?queue=today&movement=pickup#movement-board' : '/?queue=tomorrow#fleet-timeline'],
+            'todays_returns' => [$dayLabel . ' Returns', $scope === 'today' ? '/?queue=today&movement=return#movement-board' : '/?queue=tomorrow#fleet-timeline'],
+            'cleaning_tasks' => ['Cleaning Tasks', '/#todays-mission'],
+            'charging_tasks' => ['Charging Tasks', '/#todays-mission'],
+            'airport_deliveries' => [$dayLabel . ' Airport Deliveries', '/operations/airport'],
+            'maintenance_tasks' => ['Maintenance Tasks', '/#fleet-health'],
+            'registration_renewals' => ['Registration Renewals', '/#fleet-health'],
+            'insurance_renewals' => ['Insurance Renewals', '/#fleet-health'],
+            'loan_payments' => ['Loan Payments', '/#financial-snapshot'],
+            'claims' => ['Claims Follow-up', '/#fleet-health'],
+        ];
+
+        return $this->scopedActions($tasks, $definitions);
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function urgentActions(array $tasks): array
+    {
+        return $this->scopedActions($tasks, [
+            'claims' => ['Claims Follow-up', '/#fleet-health'],
+            'maintenance_tasks' => ['Maintenance Attention', '/#fleet-health'],
+            'registration_renewals' => ['Registration Renewals', '/#fleet-health'],
+            'insurance_renewals' => ['Insurance Renewals', '/#fleet-health'],
+            'battery_alerts' => ['Battery Attention', '/#fleet-health'],
+        ]);
+    }
+
+    /** @param array<string, array{string, string}> $definitions @return list<array<string, mixed>> */
+    private function scopedActions(array $tasks, array $definitions): array
+    {
+        $actions = [];
+        foreach ($definitions as $code => [$label, $href]) {
+            $count = count(is_array($tasks[$code] ?? null) ? $tasks[$code] : []);
+            if ($count === 0) {
+                continue;
+            }
+            $actions[] = ['code' => $code, 'label' => $label, 'count' => $count, 'detail' => $count . ' item' . ($count === 1 ? '' : 's'), 'href' => $href, 'actionable' => true];
+        }
+
+        return $actions;
+    }
+
+    private function taskCount(array $tasks): int
+    {
+        return array_sum(array_map(static fn (mixed $items): int => is_array($items) ? count($items) : 0, $tasks));
     }
 
     /** @return array<int, array<string, string>> */

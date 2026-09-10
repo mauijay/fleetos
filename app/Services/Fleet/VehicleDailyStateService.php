@@ -88,11 +88,20 @@ class VehicleDailyStateService
     }
 
     /** @return array<string, int> */
-    public function statusCounts(array $board, float $utilization): array
+    public function statusCounts(array $board, float $utilization, ?array $fleetSnapshot = null): array
     {
+        $snapshotCounts = [];
+        foreach ($fleetSnapshot['buckets'] ?? [] as $bucket) {
+            $snapshotCounts[(string) $bucket['code']] = (int) $bucket['count'];
+        }
+
         return [
-            'fleet_size' => count($board),
-            'currently_rented' => count(array_filter($board, static fn (array $item): bool => in_array('currently_rented', $item['flags'], true))),
+            'fleet_size' => $fleetSnapshot === null ? count($board) : (int) $fleetSnapshot['total'],
+            'currently_rented' => $fleetSnapshot === null ? count(array_filter($board, static fn (array $item): bool => in_array('currently_rented', $item['flags'], true))) : ($snapshotCounts['rented'] ?? 0),
+            'home' => $snapshotCounts['home'] ?? 0,
+            'hnl' => $snapshotCounts['hnl'] ?? 0,
+            'other_location' => $snapshotCounts['other'] ?? 0,
+            'unknown_location' => $snapshotCounts['unknown'] ?? 0,
             'available_now' => count(array_filter($board, static fn (array $item): bool => $item['primary_status'] === 'available')),
             'going_out_today' => count(array_filter($board, static fn (array $item): bool => in_array('departing_today', $item['flags'], true))),
             'returning_today' => count(array_filter($board, static fn (array $item): bool => in_array('returning_today', $item['flags'], true))),
@@ -119,12 +128,15 @@ class VehicleDailyStateService
                 $items[] = $this->attention('today', $vehicle['fleet_code'] . ' has a tight same-day turnaround.', $vehicle['turnaround']['label'], '#movement-board');
             }
 
-            if (in_array('cleaning_required', $vehicle['flags'], true)) {
-                $items[] = $this->attention('today', $vehicle['fleet_code'] . ' needs cleaning confirmation.', 'Cleaning status is not fully tracked yet.', '#movement-board');
-            }
-
-            if (in_array('charging_required', $vehicle['flags'], true)) {
-                $items[] = $this->attention('today', $vehicle['fleet_code'] . ' needs charge confirmation.', 'Battery telemetry is not connected yet.', '#movement-board');
+            $readinessAction = trim((string) ($vehicle['readiness_primary_action'] ?? ''));
+            $remaining = (int) ($vehicle['readiness_display_remaining'] ?? $vehicle['readiness_blocking_remaining'] ?? 0);
+            if ($remaining > 0 && $readinessAction !== '') {
+                $items[] = $this->attention(
+                    'today',
+                    $vehicle['fleet_code'] . ': ' . $readinessAction . '.',
+                    $remaining . ' blocking action' . ($remaining === 1 ? '' : 's') . ' remaining.',
+                    (string) ($vehicle['checklist_href'] ?? '#movement-board'),
+                );
             }
         }
 

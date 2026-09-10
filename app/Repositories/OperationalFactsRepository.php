@@ -8,11 +8,95 @@ use RuntimeException;
 
 class OperationalFactsRepository
 {
+    private const CURRENT_STATE_EVENT_CODES = ['actual_handoff', 'actual_return', 'vehicle_recovered', 'vehicle_positioned', 'vehicle_staged'];
+
     private BaseConnection $db;
 
     public function __construct(?BaseConnection $db = null)
     {
         $this->db = $db ?? Database::connect();
+    }
+
+    /** @return list<int> */
+    public function activeFleetCompanyIds(?string $asOfDate = null): array
+    {
+        $builder = $this->db->table('fleet_vehicles')
+            ->select('company_id')
+            ->where('deleted_at', null);
+        if ($asOfDate !== null) {
+            $builder->groupStart()
+                ->where('in_service_date', null)
+                ->orWhere('in_service_date <=', $asOfDate)
+            ->groupEnd()
+            ->groupStart()
+                ->where('out_of_service_date', null)
+                ->orWhere('out_of_service_date >=', $asOfDate)
+            ->groupEnd();
+        }
+
+        return array_map('intval', array_column(
+            $builder->groupBy('company_id')->orderBy('company_id', 'ASC')->get()->getResultArray(),
+            'company_id',
+        ));
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    public function activeFleetVehiclesForCompany(int $companyId, ?string $asOfDate = null): array
+    {
+        if ($companyId < 1) {
+            return [];
+        }
+
+        $builder = $this->db->table('fleet_vehicles')
+            ->select('id, company_id, fleet_number, fleet_code, display_name')
+            ->where('company_id', $companyId)
+            ->where('deleted_at', null);
+        if ($asOfDate !== null) {
+            $builder->groupStart()
+                ->where('in_service_date', null)
+                ->orWhere('in_service_date <=', $asOfDate)
+            ->groupEnd()
+            ->groupStart()
+                ->where('out_of_service_date', null)
+                ->orWhere('out_of_service_date >=', $asOfDate)
+            ->groupEnd();
+        }
+
+        return $builder
+            ->orderBy('fleet_number IS NULL', 'ASC', false)
+            ->orderBy('fleet_number', 'ASC')
+            ->orderBy('fleet_code', 'ASC')
+            ->orderBy('id', 'ASC')
+            ->get()
+            ->getResultArray();
+    }
+
+    /** @return array<int, array<string, mixed>> keyed by fleet vehicle id */
+    public function latestCurrentStateEventsForCompany(int $companyId, array $vehicleIds, string $asOf): array
+    {
+        $vehicleIds = array_values(array_unique(array_filter(array_map('intval', $vehicleIds), static fn (int $id): bool => $id > 0)));
+        if ($companyId < 1 || $vehicleIds === []) {
+            return [];
+        }
+
+        $rows = $this->db->table('trip_movement_events')
+            ->where('company_id', $companyId)
+            ->whereIn('fleet_vehicle_id', $vehicleIds)
+            ->whereIn('event_code', self::CURRENT_STATE_EVENT_CODES)
+            ->where('voided_at', null)
+            ->where('occurred_at <=', $asOf)
+            ->orderBy('occurred_at', 'DESC')
+            ->orderBy('id', 'DESC')
+            ->get()
+            ->getResultArray();
+
+        $latest = [];
+        foreach ($rows as $row) {
+            $vehicleId = (int) $row['fleet_vehicle_id'];
+            $latest[$vehicleId] ??= $this->normalizeMovementEvent($row);
+        }
+
+        return $latest;
     }
 
     public function upsertScheduledLocation(int $tripId, ?int $vehicleId, string $movementType, array $classification): int
@@ -483,6 +567,21 @@ class OperationalFactsRepository
             $builder->where('occurred_at <=', $asOf);
         }
         $row = $builder->orderBy('occurred_at', 'DESC')->orderBy('id', 'DESC')->get(1)->getRowArray();
+        return $this->normalizeMovementEvent($row);
+    }
+
+    /** @return array<string, mixed>|null */
+    public function latestCurrentStateEvent(int $vehicleId, ?string $asOf = null): ?array
+    {
+        $builder = $this->db->table('trip_movement_events')
+            ->where('fleet_vehicle_id', $vehicleId)
+            ->whereIn('event_code', self::CURRENT_STATE_EVENT_CODES)
+            ->where('voided_at', null);
+        if ($asOf !== null) {
+            $builder->where('occurred_at <=', $asOf);
+        }
+        $row = $builder->orderBy('occurred_at', 'DESC')->orderBy('id', 'DESC')->get(1)->getRowArray();
+
         return $this->normalizeMovementEvent($row);
     }
 

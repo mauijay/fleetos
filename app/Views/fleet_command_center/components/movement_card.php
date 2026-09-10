@@ -7,7 +7,12 @@ $nextTrip = $vehicle['next_trip'];
 $recommendation = $vehicle['recommendation'];
 $operatorPlan = $vehicle['operator_plan'];
 $freshness = $vehicle['freshness'];
-$blockers = $vehicle['blockers'];
+$readiness = $vehicle['readiness_compact'] ?? [
+    'blocking_count' => (int) ($vehicle['readiness_display_remaining'] ?? 0),
+    'additional_count' => (int) ($vehicle['readiness_additional_remaining'] ?? 0),
+    'summary' => (string) ($vehicle['readiness_summary'] ?? 'Readiness not available'),
+    'next_actions' => [],
+];
 ?>
 <article class="movement-card movement-card--structured tone-<?= esc($state['tone'], 'attr') ?>">
     <header class="movement-card__header">
@@ -67,20 +72,15 @@ $blockers = $vehicle['blockers'];
         </div>
     </dl>
 
-    <section class="movement-card__blockers" aria-label="Movement blockers">
+    <section class="movement-card__blockers" aria-label="Movement readiness">
         <div class="movement-card__subheading">
-            <h4>Blockers</h4>
-            <span><?= esc((string) count($blockers)) ?></span>
+            <h4>Readiness</h4>
+            <span><?= (int) $readiness['blocking_count'] === 0 ? 'Ready' : esc((string) $readiness['blocking_count']) ?></span>
         </div>
-        <?php if ($blockers === []): ?>
-            <p>None identified</p>
-        <?php else: ?>
-            <ul>
-                <?php foreach ($blockers as $blocker): ?>
-                    <li><?= esc($blocker['label']) ?></li>
-                <?php endforeach; ?>
-            </ul>
-        <?php endif; ?>
+        <p><strong><?= esc((string) $readiness['summary']) ?></strong></p>
+        <?php foreach ($readiness['next_actions'] as $nextAction): ?>
+            <p class="movement-card__next-action">Next: <strong><?= esc((string) $nextAction['label']) ?></strong></p>
+        <?php endforeach; ?>
     </section>
 
     <section class="movement-card__recommendation" aria-label="FleetOS recommendation">

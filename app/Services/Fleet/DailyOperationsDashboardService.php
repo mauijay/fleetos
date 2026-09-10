@@ -5,6 +5,7 @@ namespace App\Services\Fleet;
 use App\Services\Turo\TuroImportIssueService;
 use App\Services\Turo\TuroTripReconciliationService;
 use App\Services\Turo\TuroVehicleMappingService;
+use Config\Services;
 use DateTimeImmutable;
 
 class DailyOperationsDashboardService
@@ -22,13 +23,15 @@ class DailyOperationsDashboardService
         private readonly ?AirportMovementWorkflowService $airportWorkflowService = null,
         private readonly ?TuroAccessReimbursementService $turoAccessReimbursementService = null,
         private readonly ?MovementBoardIntelligenceService $movementBoardIntelligenceService = null,
+        private readonly ?MovementReadinessReadService $movementReadinessReadService = null,
+        private readonly ?FleetSnapshotService $fleetSnapshotService = null,
         private readonly VehicleDailyStateService $stateService = new VehicleDailyStateService(),
         private readonly MorningBriefingService $briefingService = new MorningBriefingService(),
     ) {
     }
 
     /** @return array<string, mixed> */
-    public function forToday(?DateTimeImmutable $asOf = null): array
+    public function forToday(?DateTimeImmutable $asOf = null, ?string $movementFilter = null): array
     {
         $asOf ??= new DateTimeImmutable();
         $today = $this->tasks()->today($asOf);
@@ -40,21 +43,26 @@ class DailyOperationsDashboardService
         $reconciliation = $this->reconciliation()->attentionSummary();
         $airport = $this->airport()->attentionSummary($asOf);
         $reimbursements = $this->reimbursements()->attentionSummary();
-        $checklists = $this->checklists()->summariesForDay($asOf);
+        $checklists = $this->attachReadinessProjections($this->checklists()->summariesForDay($asOf), $asOf);
+        $fleetSnapshot = $this->fleetSnapshot()->forSingleFleetCompany($asOf);
         $board = $this->stateService->movementBoard($vehicles, $today, $health, $asOf);
+        $board = $this->attachCurrentPositions($board, $fleetSnapshot['vehicles']);
         $board = $this->attachChecklistSummaries($board, $checklists);
         $board = $this->movementBoardIntelligence()->enrich($board, $asOf);
 
         $externalAlerts = $this->externalAlerts($importIssues, $vehicleMappings, $reconciliation, $airport, $reimbursements, $health);
         $attention = $this->stateService->immediateAttention($board, $externalAlerts);
+        $filteredBoard = $this->filterMovementBoard($board, $movementFilter);
 
         return [
             'briefing' => $this->briefingService->briefing($board, $attention, count($today['todays_pickups']), count($today['todays_returns'])),
-            'movement_board' => $board,
+            'fleet_snapshot' => $fleetSnapshot,
+            'movement_board' => $filteredBoard,
+            'movement_filter' => $this->movementFilterView($movementFilter, count($board), count($filteredBoard)),
             'timeline' => $this->attachChecklistTimeline($this->stateService->timeline($today, $asOf), $checklists),
             'attention' => $attention,
-            'fleet_status' => $this->stateService->statusCounts($board, (float) $currentMonth['fleet_utilization']),
-            'operational_queue' => $this->operationalQueue($today, $attention, $importIssues, $vehicleMappings, $reconciliation, $airport, $reimbursements),
+            'fleet_status' => $this->stateService->statusCounts($board, (float) $currentMonth['fleet_utilization'], $fleetSnapshot),
+            'operational_queue' => $this->operationalQueue($today, $attention, $importIssues, $vehicleMappings, $reconciliation, $airport, $reimbursements, $checklists),
             'financial' => [
                 'current_month_revenue' => '$' . number_format((float) $currentMonth['completed_revenue'], 2),
                 'forecast_revenue' => '$' . number_format((float) $currentMonth['forecast_revenue'], 0),
@@ -65,7 +73,7 @@ class DailyOperationsDashboardService
             ],
             'data_honesty' => [
                 'Condition and energy are shown from the latest recorded movement assessment; missing observations remain explicitly not captured.',
-                'Current and last-known locations require recorded movement events; planned locations come from normalized trip schedules and are labeled separately.',
+                'Current locations and rented possession come from active authoritative movement events; scheduled and planned locations never replace current position.',
                 'Confirmed future trips and recommendation strength depend on Turo import freshness; stale snapshots require operator review.',
                 'Positioning recommendations do not include live GPS, traffic, travel time, or automatic transportation availability.',
             ],
@@ -87,20 +95,71 @@ class DailyOperationsDashboardService
         ], static fn (array $alert): bool => (int) $alert['count'] > 0));
     }
 
-    private function operationalQueue(array $today, array $attention, array $importIssues, array $vehicleMappings, array $reconciliation, array $airport, array $reimbursements): array
+    private function operationalQueue(array $today, array $attention, array $importIssues, array $vehicleMappings, array $reconciliation, array $airport, array $reimbursements, array $checklists): array
     {
-        return array_values(array_filter([
-            ['label' => 'Review Today\'s Pickups', 'count' => count($today['todays_pickups']), 'href' => '#daily-timeline'],
-            ['label' => 'Review Today\'s Returns', 'count' => count($today['todays_returns']), 'href' => '#daily-timeline'],
-            ['label' => 'Review Same-Day Turnarounds', 'count' => count(array_filter($attention, static fn (array $item): bool => str_contains($item['label'], 'turnaround'))), 'href' => '#movement-board'],
-            ['label' => 'Prepare Airport Deliveries', 'count' => count($today['airport_deliveries']), 'href' => '#daily-timeline'],
-            ['label' => 'Review Import Issues', 'count' => (int) $importIssues['total_unresolved'], 'href' => $importIssues['href']],
-            ['label' => 'Map Turo Vehicles', 'count' => (int) $vehicleMappings['unique_unmatched_vehicles'], 'href' => $vehicleMappings['href']],
-            ['label' => 'Reprocess Import Rows', 'count' => (int) $reconciliation['awaiting_reconciliation'], 'href' => $reconciliation['href']],
-            ['label' => 'Today\'s Airport Deliveries', 'count' => (int) $airport['airport_workflows_requiring_action'], 'href' => $airport['href']],
-            ['label' => 'Airport Receipt Inbox', 'count' => (int) $reimbursements['needs_classification'] + (int) $reimbursements['ready_to_file'] + (int) $reimbursements['filed_pending'] + (int) $reimbursements['expenses_missing_run'], 'href' => $reimbursements['href']],
-            ['label' => 'Import Turo Trips', 'count' => 1, 'href' => '/turo/imports'],
-        ], static fn (array $action): bool => (int) $action['count'] > 0 || in_array($action['label'], ['Airport Receipt Inbox', 'Import Turo Trips'], true)));
+        $blockingActions = array_sum(array_map(static fn (array $checklist): int => (int) ($checklist['blocking_remaining_count'] ?? 0), $checklists));
+        $additionalActions = array_sum(array_map(static fn (array $checklist): int => (int) ($checklist['additional_actions_remaining_count'] ?? 0), $checklists));
+        $pendingAirportDeliveries = count(array_filter($today['airport_deliveries'], static fn (array $delivery): bool => ($delivery['completed_at'] ?? null) === null));
+
+        $actions = [
+            ['code' => 'readiness', 'label' => 'Complete Movement Readiness', 'count' => $blockingActions, 'href' => '/?movement=readiness#movement-board'],
+            ['code' => 'additional', 'label' => 'Review Additional Movement Actions', 'count' => $additionalActions, 'href' => '/?movement=additional#movement-board'],
+            ['code' => 'pickup', 'label' => 'Review Today\'s Pickups', 'count' => count($today['todays_pickups']), 'href' => '/?movement=pickup#movement-board'],
+            ['code' => 'return', 'label' => 'Review Today\'s Returns', 'count' => count($today['todays_returns']), 'href' => '/?movement=return#movement-board'],
+            ['code' => 'turnaround', 'label' => 'Review Same-Day Turnarounds', 'count' => count(array_filter($attention, static fn (array $item): bool => str_contains($item['label'], 'turnaround'))), 'href' => '/?movement=turnaround#movement-board'],
+            ['code' => 'airport_preparation', 'label' => 'Prepare Airport Deliveries', 'count' => $pendingAirportDeliveries, 'href' => '/operations/airport'],
+            ['code' => 'import_issues', 'label' => 'Review Import Issues', 'count' => (int) $importIssues['total_unresolved'], 'href' => $importIssues['href']],
+            ['code' => 'vehicle_mapping', 'label' => 'Map Turo Vehicles', 'count' => (int) $vehicleMappings['unique_unmatched_vehicles'], 'href' => $vehicleMappings['href']],
+            ['code' => 'reconciliation', 'label' => 'Reprocess Import Rows', 'count' => (int) $reconciliation['awaiting_reconciliation'], 'href' => $reconciliation['href']],
+            ['code' => 'airport_workflows', 'label' => 'Today\'s Airport Deliveries', 'count' => (int) $airport['airport_workflows_requiring_action'], 'href' => $airport['href']],
+            ['code' => 'airport_receipts', 'label' => 'Airport Receipt Inbox', 'count' => (int) $reimbursements['needs_classification'] + (int) $reimbursements['ready_to_file'] + (int) $reimbursements['filed_pending'] + (int) $reimbursements['expenses_missing_run'], 'href' => $reimbursements['href']],
+        ];
+
+        return array_values(array_map(static function (array $action): array {
+            $count = (int) $action['count'];
+
+            return array_merge($action, [
+                'actionable' => true,
+                'detail' => $count . ' item' . ($count === 1 ? '' : 's'),
+            ]);
+        }, array_filter($actions, static fn (array $action): bool => (int) $action['count'] > 0)));
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    public function filterMovementBoard(array $board, ?string $filter): array
+    {
+        if ($filter === null) {
+            return $board;
+        }
+
+        return array_values(array_filter($board, static fn (array $vehicle): bool => match ($filter) {
+            'readiness' => (int) ($vehicle['readiness_display_remaining'] ?? 0) > 0,
+            'additional' => (int) ($vehicle['readiness_additional_remaining'] ?? 0) > 0,
+            'pickup' => ($vehicle['pickup'] ?? null) !== null,
+            'return' => ($vehicle['return'] ?? null) !== null,
+            'turnaround' => ($vehicle['turnaround'] ?? null) !== null,
+            default => true,
+        }));
+    }
+
+    /** @return array{active:?string,label:?string,total_count:int,visible_count:int,clear_href:string} */
+    private function movementFilterView(?string $filter, int $totalCount, int $visibleCount): array
+    {
+        $labels = [
+            'readiness' => 'Blocking readiness work',
+            'additional' => 'Additional movement actions',
+            'pickup' => 'Today\'s pickups',
+            'return' => 'Today\'s returns',
+            'turnaround' => 'Same-day turnarounds',
+        ];
+
+        return [
+            'active' => isset($labels[$filter ?? '']) ? $filter : null,
+            'label' => $labels[$filter ?? ''] ?? null,
+            'total_count' => $totalCount,
+            'visible_count' => $visibleCount,
+            'clear_href' => '/#movement-board',
+        ];
     }
 
     private function tasks(): TaskService
@@ -148,6 +207,50 @@ class DailyOperationsDashboardService
         return $this->movementBoardIntelligenceService ?? new MovementBoardIntelligenceService();
     }
 
+    private function movementReadiness(): MovementReadinessReadService
+    {
+        return $this->movementReadinessReadService ?? Services::movementReadinessReadService();
+    }
+
+    private function fleetSnapshot(): FleetSnapshotService
+    {
+        return $this->fleetSnapshotService ?? Services::fleetSnapshotService();
+    }
+
+    /** @param array<int, array<string, mixed>> $checklists @return array<int, array<string, mixed>> */
+    private function attachReadinessProjections(array $checklists, DateTimeImmutable $asOf): array
+    {
+        $idsByCompany = [];
+        foreach ($checklists as $checklist) {
+            $companyId = (int) ($checklist['company_id'] ?? 0);
+            if ($companyId < 1) {
+                throw new \RuntimeException('Dashboard readiness requires a company-scoped checklist.');
+            }
+            $idsByCompany[$companyId][] = (int) $checklist['id'];
+        }
+
+        $projections = [];
+        foreach ($idsByCompany as $companyId => $checklistIds) {
+            $projections += $this->movementReadiness()->forCompany($companyId, $checklistIds, $asOf);
+        }
+
+        return array_map(static function (array $checklist) use ($projections): array {
+            $projection = $projections[(int) $checklist['id']] ?? null;
+            if ($projection === null) {
+                throw new \RuntimeException('A company-scoped readiness projection is missing for a dashboard checklist.');
+            }
+            $blocking = (int) $projection['blocking_remaining_count'];
+            $additional = (int) $projection['additional_actions_remaining_count'];
+
+            return array_merge($checklist, [
+                'readiness_projection' => $projection,
+                'blocking_remaining_count' => $blocking,
+                'additional_actions_remaining_count' => $additional,
+                'status_label' => $blocking === 0 ? 'Ready' : $blocking . ' blocking action' . ($blocking === 1 ? '' : 's') . ' remaining',
+            ]);
+        }, $checklists);
+    }
+
     private function attachChecklistSummaries(array $board, array $checklists): array
     {
         $byVehicle = [];
@@ -157,19 +260,53 @@ class DailyOperationsDashboardService
 
         return array_map(static function (array $vehicle) use ($byVehicle): array {
             $vehicleChecklists = $byVehicle[(int) $vehicle['fleet_vehicle_id']] ?? [];
-            $remaining = array_sum(array_map(static fn (array $summary): int => (int) $summary['required_remaining_count'], $vehicleChecklists));
-            $critical = array_sum(array_map(static fn (array $summary): int => (int) $summary['critical_open_count'], $vehicleChecklists));
+            $remaining = array_sum(array_map(static fn (array $summary): int => (int) $summary['blocking_remaining_count'], $vehicleChecklists));
+            $additional = array_sum(array_map(static fn (array $summary): int => (int) $summary['additional_actions_remaining_count'], $vehicleChecklists));
+            $blockers = [];
+            $turnaroundRemaining = 0;
+            foreach ($vehicleChecklists as $summary) {
+                $projection = $summary['readiness_projection'];
+                foreach ($projection['requirements'] as $requirement) {
+                    if (($requirement['phase'] ?? null) === ($projection['readiness_phase'] ?? null)
+                        && ($requirement['blocking'] ?? false)
+                        && ($requirement['status'] ?? null) === MovementReadinessProjectionService::STATUS_UNSATISFIED) {
+                        $blockers[] = array_merge($requirement, ['href' => $summary['href']]);
+                    }
+                    if (($projection['is_same_day_turnaround'] ?? false)
+                        && ($requirement['phase'] ?? null) === MovementReadinessProjectionService::PHASE_NEXT_PICKUP_PREPARATION
+                        && ($requirement['blocking'] ?? false)
+                        && ($requirement['status'] ?? null) === MovementReadinessProjectionService::STATUS_UNSATISFIED) {
+                        $turnaroundRemaining++;
+                        $blockers[] = array_merge($requirement, ['href' => $summary['href']]);
+                    }
+                }
+            }
             $first = $vehicleChecklists[0] ?? null;
 
             return array_merge($vehicle, [
                 'checklists' => $vehicleChecklists,
-                'checklist_progress_label' => $vehicleChecklists === [] ? 'No movement checklist today' : ($remaining === 0 ? 'Ready for movement' : $remaining . ' required checklist item' . ($remaining === 1 ? '' : 's') . ' remaining'),
+                'checklist_progress_label' => $vehicleChecklists === [] ? 'No movement workflow today' : ($remaining === 0 ? 'Ready' : $remaining . ' blocking action' . ($remaining === 1 ? '' : 's') . ' remaining'),
                 'checklist_ready' => $vehicleChecklists !== [] && $remaining === 0,
                 'checklist_required_remaining' => $remaining,
-                'checklist_critical_open' => $critical,
+                'checklist_critical_open' => $remaining,
+                'readiness_blocking_remaining' => $remaining,
+                'readiness_additional_remaining' => $additional,
+                'readiness_blockers' => $blockers,
+                'readiness_primary_action' => $blockers[0]['action']['label'] ?? null,
+                'turnaround_readiness_remaining' => $turnaroundRemaining,
                 'checklist_href' => $first['href'] ?? null,
             ]);
         }, $board);
+    }
+
+    /** @param array<int, array<string, mixed>> $board @param array<int, array<string, mixed>> $positions @return array<int, array<string, mixed>> */
+    private function attachCurrentPositions(array $board, array $positions): array
+    {
+        $byVehicle = array_column($positions, null, 'id');
+
+        return array_map(static fn (array $vehicle): array => array_merge($vehicle, [
+            'current_position' => $byVehicle[(int) $vehicle['fleet_vehicle_id']] ?? null,
+        ]), $board);
     }
 
     private function attachChecklistTimeline(array $timeline, array $checklists): array

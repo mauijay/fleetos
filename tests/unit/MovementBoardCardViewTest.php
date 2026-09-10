@@ -40,8 +40,30 @@ final class MovementBoardCardViewTest extends CIUnitTestCase
         $this->assertStringContainsString('href="/turo/imports"', $html);
         $this->assertStringContainsString('href="&#x2F;operations&#x2F;checklists&#x2F;41"', $html);
         $this->assertSame(1, substr_count($html, 'movement-card__action'));
-        $this->assertSame(1, substr_count($html, '<li>Critical checklist items open</li>'));
+        $this->assertStringContainsString('12 blocking', $html);
+        $this->assertStringContainsString('3 additional', $html);
+        $this->assertStringContainsString('Next: <strong>Record actual return</strong>', $html);
+        $this->assertStringNotContainsString('Complete action 2', $html);
+        $this->assertStringNotContainsString('<li>', $html);
         $this->assertStringNotContainsString('4 required checklist items', $html);
+    }
+
+    public function testReadyCardKeepsReadinessSectionToOneCompactStatusLine(): void
+    {
+        $vehicle = $this->vehicle();
+        $vehicle['readiness_compact'] = [
+            'blocking_count' => 0,
+            'additional_count' => 0,
+            'summary' => 'Ready',
+            'next_actions' => [],
+        ];
+
+        $html = $this->render($vehicle);
+
+        $this->assertStringContainsString('<h4>Readiness</h4>', $html);
+        $this->assertSame(2, substr_count($html, '>Ready<'));
+        $this->assertStringNotContainsString('Next:', $html);
+        $this->assertStringNotContainsString('<li>', $html);
     }
 
     public function testCardKeepsActualLocationSemanticsAndNoUpcomingTripExplicit(): void
@@ -131,7 +153,13 @@ final class MovementBoardCardViewTest extends CIUnitTestCase
             'condition_label' => 'Dirty',
             'energy_label' => 'Charge',
             'energy_value' => '24%',
-            'blockers' => [['code' => 'critical_checklist_items', 'label' => 'Critical checklist items open', 'severity' => 'critical']],
+            'blockers' => array_map(static fn (int $index): array => ['code' => 'requirement_' . $index, 'label' => 'Complete action ' . $index, 'severity' => 'critical'], range(1, 12)),
+            'readiness_compact' => [
+                'blocking_count' => 12,
+                'additional_count' => 3,
+                'summary' => '12 blocking · 3 additional',
+                'next_actions' => [['code' => 'vehicle_received', 'label' => 'Record actual return', 'href' => '/operations/checklists/41']],
+            ],
             'recommendation' => ['display_label' => 'Recommended: Leave at HNL', 'reason_labels' => ['Already at HNL.', 'Clean and charge on site.']],
             'operator_plan' => ['label' => 'Hold at home', 'status_label' => 'Stale - needs review', 'is_basis_stale' => true, 'note' => 'Prior shift plan', 'actor_label' => 'jlamping', 'created_at_label' => 'Sep 3, 11:45 AM'],
             'positioning_plan_href' => '/fleet/vehicles/9/positioning-plan',

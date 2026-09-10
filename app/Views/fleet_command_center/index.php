@@ -46,11 +46,21 @@
                     </div>
                     <span class="count-pill"><?= esc((string) count($commandCenter['daily_operations']['movement_board'])) ?> vehicles</span>
                 </div>
-                <div class="movement-board-grid">
-                    <?php foreach ($commandCenter['daily_operations']['movement_board'] as $vehicle): ?>
-                        <?= view('fleet_command_center/components/movement_card', ['vehicle' => $vehicle]) ?>
-                    <?php endforeach; ?>
-                </div>
+                <?php if ($commandCenter['daily_operations']['movement_filter']['active'] !== null): ?>
+                    <div class="movement-filter-status" role="status">
+                        <span>Showing <?= esc($commandCenter['daily_operations']['movement_filter']['label']) ?>: <?= esc((string) $commandCenter['daily_operations']['movement_filter']['visible_count']) ?> of <?= esc((string) $commandCenter['daily_operations']['movement_filter']['total_count']) ?> vehicles</span>
+                        <a href="<?= esc($commandCenter['daily_operations']['movement_filter']['clear_href'], 'attr') ?>">Clear filter</a>
+                    </div>
+                <?php endif; ?>
+                <?php if ($commandCenter['daily_operations']['movement_board'] === []): ?>
+                    <div class="empty-state">No vehicles match this movement queue.</div>
+                <?php else: ?>
+                    <div class="movement-board-grid">
+                        <?php foreach ($commandCenter['daily_operations']['movement_board'] as $vehicle): ?>
+                            <?= view('fleet_command_center/components/movement_card', ['vehicle' => $vehicle]) ?>
+                        <?php endforeach; ?>
+                    </div>
+                <?php endif; ?>
             </section>
 
             <section class="section" id="daily-timeline" aria-labelledby="daily-timeline-heading">
@@ -114,14 +124,7 @@
                     <p class="eyebrow">Direct Actions</p>
                     <h2 id="queue-heading">Operational Queue</h2>
                 </div>
-                <div class="operational-action-grid">
-                    <?php foreach ($commandCenter['daily_operations']['operational_queue'] as $action): ?>
-                        <a class="task-card" href="<?= esc($action['href'], 'attr') ?>">
-                            <h3><?= esc($action['label']) ?></h3>
-                            <p><?= esc((string) $action['count']) ?> item<?= (int) $action['count'] === 1 ? '' : 's' ?></p>
-                        </a>
-                    <?php endforeach; ?>
-                </div>
+                <?= view('fleet_command_center/components/operational_queue', ['queueView' => $commandCenter['daily_operations']['queue_view']]) ?>
             </section>
 
             <section class="section" id="operations-financial" aria-labelledby="operations-financial-heading">

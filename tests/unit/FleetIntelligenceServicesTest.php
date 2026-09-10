@@ -421,7 +421,9 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
         $statistics->method('vehiclePerformance')->willReturn([['fleet_code' => 'Spaceship-008', 'utilization' => 0.75]]);
         $health->method('summary')->willReturn($this->healthSummary());
         $tasks->method('today')->willReturn($this->emptyTasks());
-        $tasks->method('tomorrow')->willReturn($this->emptyTasks());
+        $tomorrowTasks = $this->emptyTasks();
+        $tomorrowTasks['todays_returns'] = [['fleet_vehicle_id' => 8]];
+        $tasks->method('tomorrow')->willReturn($tomorrowTasks);
         $availability->method('timeline')->willReturn([]);
         $analytics->method('summary')->willReturn(['average_trip_length' => 2.5, 'utilization' => 0.6]);
         $decisionSupport->method('recommendations')->willReturn([
@@ -453,8 +455,9 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
         ]);
         $dailyOperations->method('forToday')->willReturn($this->dailyOperations());
 
-        $viewModel = (new FleetCommandCenterViewModelService($command, $statistics, $health, $tasks, $availability, $analytics, $decisionSupport, $importIssues, $vehicleMappings, $tripReconciliation, $dailyOperations))
-            ->forToday(new DateTimeImmutable('2026-06-15 08:00:00'));
+        $service = new FleetCommandCenterViewModelService($command, $statistics, $health, $tasks, $availability, $analytics, $decisionSupport, $importIssues, $vehicleMappings, $tripReconciliation, $dailyOperations);
+        $viewModel = $service->forToday(new DateTimeImmutable('2026-06-15 08:00:00'));
+        $tomorrowViewModel = $service->forToday(new DateTimeImmutable('2026-06-15 08:00:00'), 'tomorrow', 'return');
 
         $this->assertSame('Fleet Command Center', $viewModel['page_title']);
         $this->assertSame([
@@ -477,6 +480,12 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
         $this->assertSame('Reserved', $viewModel['activity']['weather_status']);
         $this->assertSame('Reserved', $viewModel['activity']['traffic_status']);
         $this->assertSame('Reserved', $viewModel['activity']['battery_status']);
+        $this->assertSame(1, $viewModel['activity']['tomorrow_count']);
+        $this->assertSame('/?queue=tomorrow#operational-queue', $viewModel['activity']['queue_scopes'][2]['href']);
+        $this->assertTrue($tomorrowViewModel['daily_operations']['queue_view']['scopes'][2]['active']);
+        $this->assertSame('Tomorrow work', $tomorrowViewModel['daily_operations']['queue_view']['label']);
+        $this->assertSame('Tomorrow\'s Returns', $tomorrowViewModel['daily_operations']['queue_view']['items'][0]['label']);
+        $this->assertSame('/?queue=tomorrow#fleet-timeline', $tomorrowViewModel['daily_operations']['queue_view']['items'][0]['href']);
         $this->assertSame('Pricing rec', $viewModel['decision_support']['todays_recommendations'][0]['title']);
         $this->assertFalse($viewModel['import_issues']['has_unresolved']);
         $this->assertFalse($viewModel['vehicle_mappings']['has_unmatched']);
@@ -583,6 +592,18 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
     {
         return [
             'briefing' => ['greeting' => 'Good Morning, Jay.', 'message' => 'No urgent issues.'],
+            'fleet_snapshot' => [
+                'company_id' => 1,
+                'total' => 1,
+                'buckets' => [
+                    ['code' => 'rented', 'label' => 'Rented', 'count' => 0, 'vehicles' => []],
+                    ['code' => 'home', 'label' => 'Home', 'count' => 1, 'vehicles' => [['id' => 8, 'label' => '8', 'href' => '/fleet/vehicles/8']]],
+                    ['code' => 'hnl', 'label' => 'HNL', 'count' => 0, 'vehicles' => []],
+                    ['code' => 'other', 'label' => 'Other', 'count' => 0, 'vehicles' => []],
+                    ['code' => 'unknown', 'label' => 'Unknown', 'count' => 0, 'vehicles' => []],
+                ],
+                'vehicles' => [],
+            ],
             'movement_board' => [],
             'timeline' => [],
             'attention' => [],

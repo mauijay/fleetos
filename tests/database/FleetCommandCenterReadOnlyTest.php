@@ -7,6 +7,7 @@ use CodeIgniter\Test\FeatureTestTrait;
 use CodeIgniter\View\View;
 use Config\Database;
 use Config\Services;
+use PHPUnit\Framework\MockObject\MockObject;
 
 /** @internal */
 final class FleetCommandCenterReadOnlyTest extends CIUnitTestCase
@@ -14,6 +15,7 @@ final class FleetCommandCenterReadOnlyTest extends CIUnitTestCase
     use FeatureTestTrait;
 
     private BaseConnection $connection;
+    private FleetCommandCenterViewModelService&MockObject $viewModel;
 
     protected function setUp(): void
     {
@@ -25,13 +27,12 @@ final class FleetCommandCenterReadOnlyTest extends CIUnitTestCase
             $this->connection->query('CREATE TABLE ' . $prefixed . ' (id INTEGER PRIMARY KEY AUTOINCREMENT)');
         }
 
-        $viewModel = $this->createMock(FleetCommandCenterViewModelService::class);
-        $viewModel->expects($this->exactly(5))->method('forToday')->willReturn([]);
-        Services::injectMock('fleetCommandCenterViewModelService', $viewModel);
+        $this->viewModel = $this->createMock(FleetCommandCenterViewModelService::class);
+        Services::injectMock('fleetCommandCenterViewModelService', $this->viewModel);
 
         $renderer = $this->createMock(View::class);
-        $renderer->expects($this->exactly(5))->method('setData')->willReturnSelf();
-        $renderer->expects($this->exactly(5))->method('render')->with('fleet_command_center/index')->willReturn('<!doctype html><title>Fleet Command Center</title>');
+        $renderer->method('setData')->willReturnSelf();
+        $renderer->expects($this->any())->method('render')->with('fleet_command_center/index')->willReturn('<!doctype html><title>Fleet Command Center</title>');
         Services::injectMock('renderer', $renderer);
     }
 
@@ -43,6 +44,7 @@ final class FleetCommandCenterReadOnlyTest extends CIUnitTestCase
 
     public function testRepeatedGetDoesNotMaterializeMovementRows(): void
     {
+        $this->viewModel->expects($this->exactly(5))->method('forToday')->willReturn([]);
         $this->withRoutes([['GET', '/', 'Home::index']]);
         $tables = $this->protectedTables();
         $before = $this->counts($tables);
@@ -51,6 +53,34 @@ final class FleetCommandCenterReadOnlyTest extends CIUnitTestCase
             $this->call('GET', '/')->assertOK();
         }
 
+        $this->assertSame($before, $this->counts($tables));
+    }
+
+    public function testFilteredGetIsBookmarkableAndDoesNotMaterializeMovementRows(): void
+    {
+        $received = [];
+        $this->viewModel->expects($this->exactly(4))->method('forToday')->willReturnCallback(
+            static function (?\DateTimeImmutable $asOf, ?string $queueScope, ?string $movementFilter) use (&$received): array {
+                $received[] = [$asOf, $queueScope, $movementFilter];
+
+                return [];
+            },
+        );
+        $this->withRoutes([['GET', '/', 'Home::index']]);
+        $tables = $this->protectedTables();
+        $before = $this->counts($tables);
+
+        $this->call('GET', '/?queue=today&movement=pickup')->assertOK();
+        $this->call('GET', '/?queue=today&movement=pickup')->assertOK();
+        $this->call('GET', '/?queue=tomorrow&movement=return')->assertOK();
+        $this->call('GET', '/?movement=additional')->assertOK();
+
+        $this->assertSame([
+            [null, 'today', 'pickup'],
+            [null, 'today', 'pickup'],
+            [null, 'tomorrow', 'return'],
+            [null, null, 'additional'],
+        ], $received);
         $this->assertSame($before, $this->counts($tables));
     }
 

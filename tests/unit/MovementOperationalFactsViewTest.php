@@ -439,6 +439,31 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
         $this->assertStringNotContainsString('movement-checklist-list', $html);
     }
 
+    public function testMovementPageRetainsTheCompleteProjectedActionList(): void
+    {
+        $data = $this->readinessViewData();
+        $data['readiness']['blocking_remaining_count'] = 12;
+        $data['readiness']['requirements'] = array_map(static fn (int $index): array => [
+            'code' => 'full_action_' . $index,
+            'label' => 'Full requirement ' . $index,
+            'phase' => 'return_intake',
+            'kind' => 'derived',
+            'status' => 'unsatisfied',
+            'blocking' => true,
+            'satisfied_by' => null,
+            'basis_at' => null,
+            'action' => ['type' => 'record_fact', 'label' => 'Complete full action ' . $index],
+            'allows_na' => false,
+        ], range(1, 12));
+
+        $html = $this->render('return', $this->facts(), false, [], $data);
+
+        $this->assertStringContainsString('12 blocking actions remaining', $html);
+        $this->assertSame(12, substr_count($html, 'Complete full action'));
+        $this->assertStringContainsString('Complete full action 1', $html);
+        $this->assertStringContainsString('Complete full action 12', $html);
+    }
+
     public function testClosedWorkflowLocksHumanControlsUntilExplicitReopen(): void
     {
         $data = $this->readinessViewData();

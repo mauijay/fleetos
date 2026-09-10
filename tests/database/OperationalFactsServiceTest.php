@@ -3,6 +3,7 @@
 use App\Database\Migrations\CreateMovementOperationalFacts;
 use App\Repositories\OperationalFactsRepository;
 use App\Services\Fleet\CurrentVehicleLocationService;
+use App\Services\Fleet\FleetSnapshotService;
 use App\Services\Fleet\ImportFreshnessService;
 use App\Services\Fleet\MovementAssessmentService;
 use App\Services\Fleet\MovementBoardIntelligenceService;
@@ -40,7 +41,7 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
         foreach (['operational_fact_audits', 'vehicle_positioning_plans', 'vehicle_operational_capabilities', 'vehicle_operational_profiles', 'movement_assessments', 'trip_movement_events', 'scheduled_movement_locations', 'airport_movement_workflows', 'airports', 'turo_trips_normalized', 'turo_trip_raw', 'turo_import_batches', 'lookup_values', 'fleet_vehicles', 'users'] as $table) {
             $this->connection->query('DROP TABLE IF EXISTS ' . $this->table($table));
         }
-        $this->connection->query('CREATE TABLE ' . $this->table('fleet_vehicles') . ' (id INTEGER PRIMARY KEY, company_id INTEGER, deleted_at DATETIME NULL)');
+        $this->connection->query('CREATE TABLE ' . $this->table('fleet_vehicles') . ' (id INTEGER PRIMARY KEY, company_id INTEGER, fleet_number INTEGER NULL, fleet_code VARCHAR(80) NULL, display_name VARCHAR(190) NULL, in_service_date DATE NULL, out_of_service_date DATE NULL, deleted_at DATETIME NULL)');
         $this->connection->query('CREATE TABLE ' . $this->table('users') . ' (id INTEGER PRIMARY KEY, username VARCHAR(30) NULL)');
         $this->connection->query('CREATE TABLE ' . $this->table('lookup_values') . ' (id INTEGER PRIMARY KEY, code VARCHAR(80))');
         $this->connection->query('CREATE TABLE ' . $this->table('turo_import_batches') . ' (id INTEGER PRIMARY KEY, import_status_lookup_value_id INTEGER NULL, source_filename VARCHAR(190) NULL, completed_at DATETIME NULL)');
@@ -118,6 +119,45 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
         $this->events->record(10, 100, 'vehicle_staged', 'pickup', '2026-09-02 12:00:00', 'airport_hnl', 'Future staging', 'operator', 7);
         $beforeFutureEvent = $resolver->resolve(10, new DateTimeImmutable('2026-09-01 13:00:00'));
         $this->assertSame('actual_handoff', $beforeFutureEvent['event_code']);
+    }
+
+    public function testFleetSnapshotPossessionUsesLatestActiveAuthoritativeFact(): void
+    {
+        $snapshot = new FleetSnapshotService(new CurrentVehicleLocationService($this->repository), $this->repository);
+        $bucket = static function (array $result): string {
+            foreach ($result['buckets'] as $candidate) {
+                if ($candidate['count'] === 1) {
+                    return $candidate['code'];
+                }
+            }
+
+            return 'missing';
+        };
+        $at = static fn (string $time): DateTimeImmutable => new DateTimeImmutable('2026-09-01 ' . $time);
+
+        $this->events->record(10, 100, 'actual_handoff', 'pickup', '2026-09-01 10:00:00', 'airport_hnl', 'Terminal 2', 'operator', 7);
+        $this->assertSame('rented', $bucket($snapshot->forCompany(1, $at('10:30:00'))));
+
+        $returnId = $this->events->record(10, 100, 'actual_return', 'return', '2026-09-01 11:00:00', null, null, 'operator', 7);
+        $afterReturn = $snapshot->forCompany(1, $at('11:30:00'));
+        $this->assertSame('unknown', $bucket($afterReturn));
+        $this->assertSame('parked', (new CurrentVehicleLocationService($this->repository))->resolve(10, $at('11:30:00'))['operational_state']);
+        $this->assertSame(1, array_sum(array_column($afterReturn['buckets'], 'count')));
+
+        $this->assertTrue($this->events->void($returnId, 8, 'Return was recorded for the wrong vehicle.'));
+        $this->assertSame('rented', $bucket($snapshot->forCompany(1, $at('11:30:00'))));
+
+        $recoveryId = $this->events->record(10, 100, 'vehicle_recovered', 'return', '2026-09-01 12:00:00', null, null, 'operator', 7);
+        $this->assertSame('unknown', $bucket($snapshot->forCompany(1, $at('12:30:00'))));
+        $this->assertSame('parked', (new CurrentVehicleLocationService($this->repository))->resolve(10, $at('12:30:00'))['operational_state']);
+
+        $this->events->correct($recoveryId, ['occurred_at' => '2026-09-01 09:00:00'], 8, 'Corrected recovery chronology.');
+        $this->assertSame('rented', $bucket($snapshot->forCompany(1, $at('12:30:00'))));
+
+        $this->events->record(10, 100, 'vehicle_positioned', null, '2026-09-01 13:00:00', 'home', null, 'operator', 7);
+        $positioned = $snapshot->forCompany(1, $at('13:30:00'));
+        $this->assertSame('home', $bucket($positioned));
+        $this->assertSame(1, array_sum(array_column($positioned['buckets'], 'count')));
     }
 
     public function testRecordVehiclePositionAppendsOnlyPositionFactAndInvalidatesPlan(): void

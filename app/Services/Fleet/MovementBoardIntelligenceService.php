@@ -37,7 +37,7 @@ class MovementBoardIntelligenceService
         $profile = $this->repo()->profile($vehicleId) ?? ['energy_kind' => 'unknown', 'ready_energy_target_percent' => null, 'capabilities' => []];
         $nextTrip = $this->nextTrips()->forVehicle($vehicleId, $asOf);
         $freshness = $this->freshness()->assess($nextTrip['import_completed_at'] ?? $schedule['import_completed_at'] ?? null, $asOf);
-        $location = $this->positionBasis($lifecycleEvent, $schedule);
+        $location = $this->positionBasis($lifecycleEvent, $schedule, $card['current_position'] ?? null);
         $blockers = $this->blockers($card);
         if ($location['basis'] === 'actual' && $location['approved_turo_garage'] === false) {
             $blockers[] = ['code' => 'wrong_airport_garage', 'label' => 'Wrong airport garage - recovery / relocation required', 'severity' => 'critical'];
@@ -50,7 +50,7 @@ class MovementBoardIntelligenceService
             'profile' => $profile,
             'next_trip' => $nextTrip,
             'blockers' => $blockers,
-            'critical_blocker_count' => (int) ($card['checklist_critical_open'] ?? 0),
+            'critical_blocker_count' => (int) ($card['readiness_blocking_remaining'] ?? 0),
         ], $asOf);
         $activePlan = $this->plans()->active($vehicleId, $event, $nextTrip, $asOf);
         $usablePlan = $activePlan !== null && ! (bool) ($activePlan['is_basis_stale'] ?? true) ? $activePlan : null;
@@ -71,6 +71,11 @@ class MovementBoardIntelligenceService
         $recommendation = $this->presentRecommendation($recommendation, $assessment, $profile);
         $currentTrip = $this->presentCurrentTrip($schedule, (string) $state['code']);
         $currentMovementHref = $currentTrip === null ? null : $this->movementHref($state, $card, $schedule);
+        $readinessRemaining = (int) ($card['readiness_blocking_remaining'] ?? 0);
+        if (($card['turnaround'] ?? null) !== null) {
+            $readinessRemaining += (int) ($card['turnaround_readiness_remaining'] ?? 0);
+        }
+        $compactReadiness = $this->compactReadiness($card, $readinessRemaining);
 
         return array_merge($card, [
             'state' => $state,
@@ -91,6 +96,9 @@ class MovementBoardIntelligenceService
             'energy_label' => $energyKind === 'electric' ? 'Charge' : (in_array($energyKind, ['gasoline', 'diesel', 'hybrid'], true) ? 'Fuel' : 'Energy'),
             'energy_value' => $assessment === null || ($assessment['energy_percent'] ?? null) === null ? 'Not captured' : (int) $assessment['energy_percent'] . '%',
             'blockers' => $state['blockers'],
+            'readiness_compact' => $compactReadiness,
+            'readiness_summary' => $compactReadiness['summary'],
+            'readiness_display_remaining' => $readinessRemaining,
             'recommendation' => $recommendation,
             'operator_plan' => $this->presentOperatorPlan($activePlan, (string) ($recommendation['code'] ?? '')),
             'positioning_plan_href' => '/fleet/vehicles/' . $vehicleId . '/positioning-plan',
@@ -113,7 +121,7 @@ class MovementBoardIntelligenceService
     }
 
     /** @return array{heading:string,class:string,detail:?string,basis:string,airport_garage_code:?string,garage_line:?string,position_line:?string,approved_turo_garage:?bool} */
-    private function positionBasis(?array $event, ?array $schedule): array
+    private function positionBasis(?array $event, ?array $schedule, ?array $currentPosition): array
     {
         if (($event['event_code'] ?? null) === 'actual_handoff') {
             return array_merge($this->emptyAirportParking(), [
@@ -121,6 +129,14 @@ class MovementBoardIntelligenceService
                 'class' => (string) ($schedule['return_location_class'] ?? 'unknown'),
                 'detail' => $this->nullableText($schedule['return_location_source_text'] ?? null),
                 'basis' => 'scheduled',
+            ]);
+        }
+        if (($currentPosition['position_semantics'] ?? null) === 'current') {
+            return array_merge($this->eventAirportParking($currentPosition), [
+                'heading' => 'Current location',
+                'class' => (string) ($currentPosition['location_class'] ?? 'unknown'),
+                'detail' => $this->nullableText($currentPosition['location_detail'] ?? null),
+                'basis' => 'actual',
             ]);
         }
         if (($event['event_code'] ?? null) === 'actual_return') {
@@ -181,14 +197,56 @@ class MovementBoardIntelligenceService
     /** @return array<int, array<string, string>> */
     private function blockers(array $card): array
     {
-        $blockers = [];
-        if ((int) ($card['checklist_critical_open'] ?? 0) > 0) {
-            $blockers[] = ['code' => 'critical_checklist_items', 'label' => 'Critical checklist items open', 'severity' => 'critical'];
+        $blockers = array_map(static function (array $requirement): array {
+            return [
+                'code' => (string) ($requirement['code'] ?? 'readiness_action'),
+                'label' => (string) ($requirement['action']['label'] ?? $requirement['label'] ?? 'Complete readiness action'),
+                'severity' => 'critical',
+                'href' => $requirement['href'] ?? null,
+            ];
+        }, $card['readiness_blockers'] ?? []);
+        $deduplicated = [];
+        foreach ($blockers as $blocker) {
+            $deduplicated[$blocker['code']] ??= $blocker;
         }
         if (in_array('maintenance_required', $card['flags'] ?? [], true)) {
-            $blockers[] = ['code' => 'maintenance_required', 'label' => 'Maintenance required', 'severity' => 'critical'];
+            $deduplicated['maintenance_required'] = ['code' => 'maintenance_required', 'label' => 'Maintenance required', 'severity' => 'critical'];
         }
-        return $blockers;
+        return array_values($deduplicated);
+    }
+
+    /** @return array{blocking_count:int,additional_count:int,summary:string,next_actions:list<array{code:string,label:string,href:?string}>} */
+    private function compactReadiness(array $card, int $blockingRemaining): array
+    {
+        $additional = (int) ($card['readiness_additional_remaining'] ?? 0);
+        $nextActions = [];
+        foreach ($card['readiness_blockers'] ?? [] as $requirement) {
+            $label = trim((string) ($requirement['action']['label'] ?? ''));
+            if ($label === '') {
+                continue;
+            }
+            $nextActions[] = [
+                'code' => (string) ($requirement['code'] ?? 'readiness_action'),
+                'label' => $label,
+                'href' => isset($requirement['href']) ? (string) $requirement['href'] : null,
+            ];
+            break;
+        }
+
+        if (($card['checklists'] ?? []) === []) {
+            $summary = 'No movement workflow today';
+        } elseif ($blockingRemaining === 0) {
+            $summary = (($card['turnaround'] ?? null) !== null ? 'Ready for next pickup' : 'Ready');
+        } else {
+            $summary = $blockingRemaining . ' blocking' . ($additional > 0 ? ' · ' . $additional . ' additional' : '');
+        }
+
+        return [
+            'blocking_count' => $blockingRemaining,
+            'additional_count' => $additional,
+            'summary' => $summary,
+            'next_actions' => $nextActions,
+        ];
     }
 
     /** @return array{id:int,guest_name:string,timing_label:?string}|null */

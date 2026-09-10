@@ -29,6 +29,7 @@ use App\Services\Fleet\DecisionSupport\RevenueForecastService;
 use App\Services\Fleet\FleetCommandCenterViewModelService;
 use App\Services\Fleet\FleetCommandService;
 use App\Services\Fleet\FleetHealthService;
+use App\Services\Fleet\FleetSnapshotService;
 use App\Services\Fleet\FleetStatisticsService;
 use App\Services\Fleet\FleetVehicleService;
 use App\Services\Fleet\ImportFreshnessService;
@@ -215,6 +216,15 @@ class Services extends BaseService
         }
 
         return new CurrentVehicleLocationService(static::operationalFactsRepository());
+    }
+
+    public static function fleetSnapshotService(bool $getShared = true): FleetSnapshotService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('fleetSnapshotService');
+        }
+
+        return new FleetSnapshotService(static::currentVehicleLocationService(), static::operationalFactsRepository());
     }
 
     public static function movementOperationalFactService(bool $getShared = true): MovementOperationalFactService
@@ -638,6 +648,8 @@ class Services extends BaseService
             static::airportMovementWorkflowService(),
             static::turoAccessReimbursementService(),
             static::movementBoardIntelligenceService(),
+            static::movementReadinessReadService(),
+            static::fleetSnapshotService(),
         );
     }
 

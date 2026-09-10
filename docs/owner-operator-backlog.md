@@ -75,3 +75,9 @@ Airport delivery and return workflows are complete. FleetOS now creates HNL airp
 HNL Turo Access reimbursement tracking is complete. FleetOS now records Turo Access override incidents when a parking ticket is pulled, ties receipts to trips, calculates expected reimbursement using a configurable $21 cap, tracks claim filing and reimbursement state, supports unmatched historical receipts, and surfaces reimbursement work in Command Center.
 
 Airport receipt capture and classification is complete. FleetOS now uploads receipt evidence into the shared private file system, stores receipt metadata, previews evidence through controlled routes, supports unmatched receipt capture, classifies receipts into trip reimbursement, airport operations expense, unresolved, non-business, or duplicate buckets, links reimbursement receipts to airport workflows manually, and records chase-vehicle airport run expenses without inventing a guest trip association.
+
+## Slice 3B Discovery - Receipts and Expenses
+
+Evaluate a general **Receipts & Expenses / Operating Expenses hub** that can capture all Turo-host business expenses while preserving the specialized airport receipt and reimbursement workflows. This is a Slice 3B design item, not an expansion of the current airport-specific domain.
+
+Candidate expense categories include charging, parking, tolls, car wash, supplies, mileage, maintenance-related costs, and other operating expenses. The design must distinguish ordinary operating expenses, guest-recoverable expenses, reimbursement opportunities, deadline obligations, and reimbursed, denied, or waived outcomes.

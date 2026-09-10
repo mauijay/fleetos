@@ -12,6 +12,89 @@ use CodeIgniter\Test\CIUnitTestCase;
 /** @internal */
 final class MovementBoardIntelligenceServiceTest extends CIUnitTestCase
 {
+    public function testMovementCardCompactsLargeProjectionToCountsAndHighestPriorityAction(): void
+    {
+        $service = $this->service(null, null, null, ['energy_kind' => 'unknown', 'capabilities' => []], null);
+        $blockers = [[
+            'code' => 'vehicle_received',
+            'label' => 'Vehicle returned or recovered',
+            'action' => ['label' => 'Record actual return'],
+        ]];
+        for ($index = 2; $index <= 12; $index++) {
+            $blockers[] = [
+                'code' => 'requirement_' . $index,
+                'label' => 'Requirement ' . $index,
+                'action' => ['label' => 'Complete action ' . $index],
+            ];
+        }
+        $card = $service->enrich([[
+            'fleet_vehicle_id' => 9,
+            'status' => 'available',
+            'checklist_critical_open' => 99,
+            'checklists' => [['id' => 41]],
+            'readiness_blocking_remaining' => 12,
+            'readiness_additional_remaining' => 3,
+            'readiness_blockers' => $blockers,
+        ]], new DateTimeImmutable('2026-09-03 12:00:00'))[0];
+
+        $this->assertSame(12, $card['readiness_compact']['blocking_count']);
+        $this->assertSame(3, $card['readiness_compact']['additional_count']);
+        $this->assertStringContainsString('12 blocking', $card['readiness_compact']['summary']);
+        $this->assertStringContainsString('3 additional', $card['readiness_compact']['summary']);
+        $this->assertSame([['code' => 'vehicle_received', 'label' => 'Record actual return', 'href' => null]], $card['readiness_compact']['next_actions']);
+        $this->assertCount(12, $card['blockers']);
+        $this->assertNotContains('Critical checklist items open', array_column($card['blockers'], 'label'));
+    }
+
+    public function testStaleLegacyOpenCountCannotOverrideProjectionReadyState(): void
+    {
+        $service = $this->service(
+            null,
+            null,
+            null,
+            ['energy_kind' => 'unknown', 'capabilities' => []],
+            ['id' => 901, 'starts_at' => '2026-09-04 08:00:00', 'pickup_location_class' => 'home'],
+        );
+        $card = $service->enrich([[
+            'fleet_vehicle_id' => 9,
+            'status' => 'available',
+            'checklist_critical_open' => 9,
+            'checklists' => [['id' => 41]],
+            'readiness_blocking_remaining' => 0,
+            'readiness_additional_remaining' => 0,
+            'readiness_blockers' => [],
+        ]], new DateTimeImmutable('2026-09-03 12:00:00'))[0];
+
+        $this->assertSame('ready_for_handoff', $card['state']['code']);
+        $this->assertSame('Ready', $card['readiness_summary']);
+        $this->assertSame(0, $card['readiness_compact']['blocking_count']);
+        $this->assertSame([], $card['readiness_compact']['next_actions']);
+        $this->assertSame([], $card['blockers']);
+    }
+
+    public function testBatchedCurrentPositionOverridesOlderReturnLocationWithoutRewritingLifecycle(): void
+    {
+        $return = ['id' => 90, 'event_code' => 'actual_return', 'occurred_at' => '2026-09-03 08:00:00', 'location_class' => 'waikiki_hotel', 'location_detail' => 'Romer House'];
+        $card = $this->service($return, null, ['cleanliness' => 'clean'], ['energy_kind' => 'unknown', 'capabilities' => []], null)
+            ->enrich([[
+                'fleet_vehicle_id' => 9,
+                'status' => 'available',
+                'current_position' => [
+                    'id' => 9,
+                    'event_id' => 91,
+                    'event_code' => 'vehicle_positioned',
+                    'occurred_at' => '2026-09-03 09:00:00',
+                    'location_class' => 'home',
+                    'location_detail' => 'Fleet yard',
+                    'position_semantics' => 'current',
+                ],
+            ]], new DateTimeImmutable('2026-09-03 12:00:00'))[0];
+
+        $this->assertSame('Home', $card['location_class_label']);
+        $this->assertSame('Fleet yard', $card['location_detail']);
+        $this->assertSame($return, $card['state']['basis_facts']['event']);
+    }
+
     public function testHandoffWithoutAssessmentIsOnTripAndUsesPlannedReturnForPositioning(): void
     {
         $service = $this->service(
