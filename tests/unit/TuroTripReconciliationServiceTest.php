@@ -7,6 +7,7 @@ use App\Repositories\TuroNormalizedTripRepository;
 use App\Repositories\TuroVehicleMappingIssueRepository;
 use App\Services\Fleet\AirportMovementWorkflowService;
 use App\Services\Fleet\MovementProjectionService;
+use App\Services\Fleet\TripIncidentalReviewService;
 use App\Services\Fleet\TripMovementChecklistService;
 use App\Services\Fleet\VehiclePositioningPlanService;
 use App\Services\Turo\TuroTripImportService;
@@ -24,6 +25,7 @@ final class TuroTripReconciliationServiceTest extends CIUnitTestCase
     private TuroTripReconciliationService $service;
     private TuroTripImportService $importer;
     private TuroTripReconciliationPositioningPlanSpy $positioningPlans;
+    private TuroTripReconciliationIncidentalsSpy $incidentals;
 
     protected function setUp(): void
     {
@@ -40,10 +42,12 @@ final class TuroTripReconciliationServiceTest extends CIUnitTestCase
         $projection = new MovementProjectionService(new TuroNormalizedTripRepository($this->connection), $checklists, $airports);
 
         $this->positioningPlans = new TuroTripReconciliationPositioningPlanSpy();
+        $this->incidentals = new TuroTripReconciliationIncidentalsSpy();
         $this->importer = new TuroTripImportService(
             $this->connection,
             movementProjection: $projection,
             positioningPlans: $this->positioningPlans,
+            incidentalReviews: $this->incidentals,
         );
         $this->service = new TuroTripReconciliationService(
             new TuroVehicleMappingIssueRepository($this->connection),
@@ -75,6 +79,8 @@ final class TuroTripReconciliationServiceTest extends CIUnitTestCase
         $this->assertSame(1, $this->connection->table('trip_month_allocations')->where('turo_trip_normalized_id', (int) $trip['id'])->countAllResults());
         $this->assertSame(0, $this->connection->table('trip_movement_checklists')->where('turo_trip_normalized_id', (int) $trip['id'])->countAllResults());
         $this->assertSame([[9, 'material_trip_reconciliation', null]], $this->positioningPlans->invalidations);
+        $this->assertCount(1, $this->incidentals->tripIds);
+        $this->assertSame((int) $trip['id'], $this->incidentals->tripIds[0]);
     }
 
     public function testOnlyCreatedOrMateriallyUpdatedTripInvalidatesPositioningPlan(): void
@@ -314,5 +320,17 @@ final class TuroTripReconciliationPositioningPlanSpy extends VehiclePositioningP
     {
         $this->invalidations[] = [$vehicleId, $reason, $actorUserId];
         return 1;
+    }
+}
+
+final class TuroTripReconciliationIncidentalsSpy extends TripIncidentalReviewService
+{
+    /** @var list<int> */
+    public array $tripIds = [];
+
+    public function projectTrip(int $tripId, ?int $actorUserId = null, ?DateTimeImmutable $asOfUtc = null): bool
+    {
+        $this->tripIds[] = $tripId;
+        return true;
     }
 }

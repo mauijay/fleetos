@@ -8,6 +8,7 @@ use App\Repositories\FleetIntelligenceRepository;
 use App\Repositories\MovementChecklistRepository;
 use App\Repositories\MovementReadinessReadModelRepository;
 use App\Repositories\OperationalFactsRepository;
+use App\Repositories\TripIncidentalReviewRepository;
 use App\Repositories\TuroAccessReimbursementRepository;
 use App\Repositories\TuroImportErrorRepository;
 use App\Repositories\TuroNormalizedTripRepository;
@@ -33,6 +34,7 @@ use App\Services\Fleet\FleetSnapshotService;
 use App\Services\Fleet\FleetStatisticsService;
 use App\Services\Fleet\FleetVehicleService;
 use App\Services\Fleet\ImportFreshnessService;
+use App\Services\Fleet\IncidentalReviewUrgencyService;
 use App\Services\Fleet\LocationClassificationService;
 use App\Services\Fleet\MovementAssessmentService;
 use App\Services\Fleet\MovementBoardIntelligenceService;
@@ -51,6 +53,7 @@ use App\Services\Fleet\ScheduledLocationBackfillService;
 use App\Services\Fleet\ScheduledMovementLocationService;
 use App\Services\Fleet\TaskService;
 use App\Services\Fleet\TripAnalyticsService;
+use App\Services\Fleet\TripIncidentalReviewService;
 use App\Services\Fleet\TripMovementChecklistService;
 use App\Services\Fleet\TuroAccessReimbursementService;
 use App\Services\Fleet\UnknownVehicleOnboardingService;
@@ -84,6 +87,36 @@ use CodeIgniter\Config\BaseService;
  */
 class Services extends BaseService
 {
+    public static function tripIncidentalReviewRepository(bool $getShared = true): TripIncidentalReviewRepository
+    {
+        if ($getShared) {
+            return static::getSharedInstance('tripIncidentalReviewRepository');
+        }
+
+        return new TripIncidentalReviewRepository();
+    }
+
+    public static function incidentalReviewUrgencyService(bool $getShared = true): IncidentalReviewUrgencyService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('incidentalReviewUrgencyService');
+        }
+
+        return new IncidentalReviewUrgencyService();
+    }
+
+    public static function tripIncidentalReviewService(bool $getShared = true): TripIncidentalReviewService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('tripIncidentalReviewService');
+        }
+
+        return new TripIncidentalReviewService(
+            static::tripIncidentalReviewRepository(),
+            static::incidentalReviewUrgencyService(),
+        );
+    }
+
     public static function fleetVehicleService(bool $getShared = true): FleetVehicleService
     {
         if ($getShared) {
@@ -505,6 +538,7 @@ class Services extends BaseService
         return new TuroTripImportService(
             movementProjection: static::movementProjectionService(),
             positioningPlans: static::vehiclePositioningPlanService(),
+            incidentalReviews: static::tripIncidentalReviewService(),
         );
     }
 
@@ -650,6 +684,7 @@ class Services extends BaseService
             static::movementBoardIntelligenceService(),
             static::movementReadinessReadService(),
             static::fleetSnapshotService(),
+            incidentalReviewService: static::tripIncidentalReviewService(),
         );
     }
 

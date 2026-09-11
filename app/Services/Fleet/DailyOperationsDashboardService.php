@@ -27,6 +27,7 @@ class DailyOperationsDashboardService
         private readonly ?FleetSnapshotService $fleetSnapshotService = null,
         private readonly VehicleDailyStateService $stateService = new VehicleDailyStateService(),
         private readonly MorningBriefingService $briefingService = new MorningBriefingService(),
+        private readonly ?TripIncidentalReviewService $incidentalReviewService = null,
     ) {
     }
 
@@ -43,6 +44,7 @@ class DailyOperationsDashboardService
         $reconciliation = $this->reconciliation()->attentionSummary();
         $airport = $this->airport()->attentionSummary($asOf);
         $reimbursements = $this->reimbursements()->attentionSummary();
+        $incidentals = $this->incidentals()->attentionSummaryForSingleCompany($asOf);
         $checklists = $this->attachReadinessProjections($this->checklists()->summariesForDay($asOf), $asOf);
         $fleetSnapshot = $this->fleetSnapshot()->forSingleFleetCompany($asOf);
         $board = $this->stateService->movementBoard($vehicles, $today, $health, $asOf);
@@ -62,7 +64,7 @@ class DailyOperationsDashboardService
             'timeline' => $this->attachChecklistTimeline($this->stateService->timeline($today, $asOf), $checklists),
             'attention' => $attention,
             'fleet_status' => $this->stateService->statusCounts($board, (float) $currentMonth['fleet_utilization'], $fleetSnapshot),
-            'operational_queue' => $this->operationalQueue($today, $attention, $importIssues, $vehicleMappings, $reconciliation, $airport, $reimbursements, $checklists),
+            'operational_queue' => $this->operationalQueue($today, $attention, $importIssues, $vehicleMappings, $reconciliation, $airport, $reimbursements, $incidentals, $checklists),
             'financial' => [
                 'current_month_revenue' => '$' . number_format((float) $currentMonth['completed_revenue'], 2),
                 'forecast_revenue' => '$' . number_format((float) $currentMonth['forecast_revenue'], 0),
@@ -95,7 +97,7 @@ class DailyOperationsDashboardService
         ], static fn (array $alert): bool => (int) $alert['count'] > 0));
     }
 
-    private function operationalQueue(array $today, array $attention, array $importIssues, array $vehicleMappings, array $reconciliation, array $airport, array $reimbursements, array $checklists): array
+    private function operationalQueue(array $today, array $attention, array $importIssues, array $vehicleMappings, array $reconciliation, array $airport, array $reimbursements, array $incidentals, array $checklists): array
     {
         $blockingActions = array_sum(array_map(static fn (array $checklist): int => (int) ($checklist['blocking_remaining_count'] ?? 0), $checklists));
         $additionalActions = array_sum(array_map(static fn (array $checklist): int => (int) ($checklist['additional_actions_remaining_count'] ?? 0), $checklists));
@@ -113,6 +115,7 @@ class DailyOperationsDashboardService
             ['code' => 'reconciliation', 'label' => 'Reprocess Import Rows', 'count' => (int) $reconciliation['awaiting_reconciliation'], 'href' => $reconciliation['href']],
             ['code' => 'airport_workflows', 'label' => 'Today\'s Airport Deliveries', 'count' => (int) $airport['airport_workflows_requiring_action'], 'href' => $airport['href']],
             ['code' => 'airport_receipts', 'label' => 'Airport Receipt Inbox', 'count' => (int) $reimbursements['needs_classification'] + (int) $reimbursements['ready_to_file'] + (int) $reimbursements['filed_pending'] + (int) $reimbursements['expenses_missing_run'], 'href' => $reimbursements['href']],
+            ['code' => 'incidentals_review', 'label' => 'Incidentals Review', 'count' => (int) $incidentals['total'], 'href' => $incidentals['href']],
         ];
 
         return array_values(array_map(static function (array $action): array {
@@ -201,6 +204,10 @@ class DailyOperationsDashboardService
     private function reimbursements(): TuroAccessReimbursementService
     {
         return $this->turoAccessReimbursementService ?? service('turoAccessReimbursementService');
+    }
+    private function incidentals(): TripIncidentalReviewService
+    {
+        return $this->incidentalReviewService ?? Services::tripIncidentalReviewService();
     }
     private function movementBoardIntelligence(): MovementBoardIntelligenceService
     {

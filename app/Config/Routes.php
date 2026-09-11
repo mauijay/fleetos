@@ -52,6 +52,12 @@ $routes->group('', ['filter' => 'session'], static function (RouteCollection $ro
     $routes->post('operations/checklists/(:num)/disposition', 'TripMovementChecklists::setDisposition/$1', ['filter' => ['permission:admin.access', 'csrf']]);
     $routes->get('operations/movement-locations', 'MovementLocationAliases::index', ['filter' => 'permission:admin.access']);
     $routes->post('operations/movement-locations', 'MovementLocationAliases::save', ['filter' => ['permission:admin.access', 'csrf']]);
+    $routes->get('operations/incidentals', 'Incidentals::index', ['filter' => 'permission:admin.access']);
+    $routes->post('operations/incidentals/policies/(:num)/approve', 'Incidentals::approvePolicy/$1', ['filter' => ['permission:admin.access', 'csrf']]);
+    $routes->post('operations/incidentals/assignments', 'Incidentals::saveAssignment', ['filter' => ['permission:admin.access', 'csrf']]);
+    $routes->post('operations/incidentals/(:num)/plan', 'Incidentals::confirmPlan/$1', ['filter' => ['permission:admin.access', 'csrf']]);
+    $routes->post('operations/incidentals/(:num)/invoice-sent', 'Incidentals::invoiceSent/$1', ['filter' => ['permission:admin.access', 'csrf']]);
+    $routes->post('operations/incidentals/(:num)/no-invoice-needed', 'Incidentals::noInvoiceNeeded/$1', ['filter' => ['permission:admin.access', 'csrf']]);
     $routes->get('operations/airport', 'AirportOperations::index');
     $routes->get('operations/airport/(:num)', 'AirportOperations::show/$1');
     $routes->post('operations/airport/(:num)/staging', 'AirportOperations::recordStaging/$1');

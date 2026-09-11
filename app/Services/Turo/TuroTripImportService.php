@@ -14,6 +14,7 @@ use App\Repositories\TuroNormalizedTripRepository;
 use App\Repositories\TuroRawTripRepository;
 use App\Services\Fleet\MovementProjectionService;
 use App\Services\Fleet\ScheduledMovementLocationService;
+use App\Services\Fleet\TripIncidentalReviewService;
 use App\Services\Fleet\VehiclePositioningPlanService;
 use App\Validation\Turo\TuroTripCsvValidator;
 use CodeIgniter\Database\BaseConnection;
@@ -42,6 +43,7 @@ class TuroTripImportService
         private readonly ScheduledMovementLocationService $scheduledLocations = new ScheduledMovementLocationService(),
         private readonly ?MovementProjectionService $movementProjection = null,
         private readonly ?VehiclePositioningPlanService $positioningPlans = null,
+        private readonly ?TripIncidentalReviewService $incidentalReviews = null,
     ) {
         $this->db = $db ?? Database::connect();
     }
@@ -240,6 +242,7 @@ class TuroTripImportService
         }
 
         $this->projection()->projectTrip((int) $upsert['id'], true, 'import');
+        $this->incidentals()->projectTrip((int) $upsert['id'], $actorUserId);
 
         $issues = [];
         if ($normalizedTrip->fleetVehicleId === null) {
@@ -257,6 +260,11 @@ class TuroTripImportService
     private function plans(): VehiclePositioningPlanService
     {
         return $this->positioningPlans ?? \Config\Services::vehiclePositioningPlanService();
+    }
+
+    private function incidentals(): TripIncidentalReviewService
+    {
+        return $this->incidentalReviews ?? \Config\Services::tripIncidentalReviewService();
     }
 
     private function recordIssue(int $batchId, int $rowNumber, ValidationIssue $issue, array $row, ?string $rawTable = null, ?int $rawRowId = null): void
