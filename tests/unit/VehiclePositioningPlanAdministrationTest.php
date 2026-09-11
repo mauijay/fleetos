@@ -2,6 +2,7 @@
 
 use App\Controllers\VehiclePositioningPlans;
 use App\Services\Fleet\VehiclePositioningPlanWorkflowService;
+use CodeIgniter\Commands\Utilities\Routes\FilterCollector;
 use CodeIgniter\Config\Services as CoreServices;
 use CodeIgniter\Shield\Auth;
 use CodeIgniter\Shield\Config\Auth as AuthConfig;
@@ -25,7 +26,7 @@ final class VehiclePositioningPlanAdministrationTest extends CIUnitTestCase
         parent::tearDown();
     }
 
-    public function testRoutesRequireAdminPermissionAndPostRequiresCsrf(): void
+    public function testRoutesRequireAdminPermissionAndPostReceivesGlobalCsrf(): void
     {
         $routes = CoreServices::routes();
         $routes->loadRoutes();
@@ -37,8 +38,9 @@ final class VehiclePositioningPlanAdministrationTest extends CIUnitTestCase
             $this->assertContains($filter, $getFilters);
             $this->assertContains($filter, $postFilters);
         }
-        $this->assertContains('csrf', $postFilters);
-        $this->assertNotContains('csrf', $getFilters);
+        $filterCollector = new FilterCollector();
+        $this->assertContains('csrf', $filterCollector->get('POST', 'fleet/vehicles/10/positioning-plan')['before']);
+        $this->assertContains('csrf', $filterCollector->get('GET', 'fleet/vehicles/10/positioning-plan')['before']);
     }
 
     public function testPostUsesAuthenticatedActorAndRouteVehicleOnly(): void

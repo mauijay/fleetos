@@ -1,11 +1,13 @@
 <?php
 
+use CodeIgniter\Commands\Utilities\Routes\FilterCollector;
+use CodeIgniter\Config\Services as CoreServices;
 use CodeIgniter\Test\CIUnitTestCase;
 
 /** @internal */
 final class IncidentalsRoutesTest extends CIUnitTestCase
 {
-    public function testIncidentalsRoutesKeepReadsOnGetAndMutationsOnCsrfProtectedPost(): void
+    public function testIncidentalsRoutesKeepReadsOnGetAndMutationsOnEffectiveGlobalCsrf(): void
     {
         $routes = file_get_contents(dirname(__DIR__, 2) . '/app/Config/Routes.php');
         $this->assertIsString($routes);
@@ -13,7 +15,13 @@ final class IncidentalsRoutesTest extends CIUnitTestCase
         $this->assertStringContainsString("post('operations/incidentals/(:num)/invoice-sent'", $routes);
         $this->assertStringContainsString("post('operations/incidentals/(:num)/no-invoice-needed'", $routes);
         $this->assertStringContainsString("post('operations/incidentals/assignments'", $routes);
-        $this->assertStringContainsString("permission:admin.access', 'csrf'", $routes);
+        $routeCollection = CoreServices::routes();
+        $routeCollection->loadRoutes();
+        $filterCollector = new FilterCollector();
+        foreach (['operations/incidentals/1/invoice-sent', 'operations/incidentals/1/no-invoice-needed', 'operations/incidentals/assignments', 'operations/incidentals/policies/1/approve'] as $route) {
+            $this->assertContains('csrf', $filterCollector->get('POST', $route)['before'], $route);
+        }
+        $this->assertContains('csrf', $filterCollector->get('GET', 'operations/incidentals')['before']);
         $this->assertStringNotContainsString('operations/reimbursements', $routes);
         $this->assertStringNotContainsString('reimbursement-evidence', $routes);
     }

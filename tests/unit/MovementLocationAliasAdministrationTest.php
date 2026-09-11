@@ -2,6 +2,7 @@
 
 use App\Controllers\MovementLocationAliases;
 use App\Services\Fleet\MovementLocationAliasService;
+use CodeIgniter\Commands\Utilities\Routes\FilterCollector;
 use CodeIgniter\Config\Services as CoreServices;
 use CodeIgniter\Shield\Auth;
 use CodeIgniter\Shield\Config\Auth as AuthConfig;
@@ -25,7 +26,7 @@ final class MovementLocationAliasAdministrationTest extends CIUnitTestCase
         parent::tearDown();
     }
 
-    public function testRoutesRequireAdminPermissionAndWriteRequiresCsrf(): void
+    public function testRoutesRequireAdminPermissionAndWriteReceivesGlobalCsrf(): void
     {
         $routes = CoreServices::routes();
         $routes->loadRoutes();
@@ -36,7 +37,7 @@ final class MovementLocationAliasAdministrationTest extends CIUnitTestCase
         $writeFilters = (array) ($routes->getRoutesOptions('operations/movement-locations', 'POST')['filter'] ?? []);
         $this->assertContains('session', $writeFilters);
         $this->assertContains('permission:admin.access', $writeFilters);
-        $this->assertContains('csrf', $writeFilters);
+        $this->assertContains('csrf', (new FilterCollector())->get('POST', 'operations/movement-locations')['before']);
     }
 
     public function testSaveUsesVerifiedQueueCompanyAndAuthenticatedActor(): void
