@@ -1,5 +1,56 @@
 # Changelog
 
+## v0.9.6 — Incidentals & Security Hardening
+
+Release date: 2026-09-11
+
+### Incidentals Review
+
+- Add trip-level Incidentals Review and invoice follow-up after a configurable post-completion delay.
+- Keep overdue items visible until the operator records Invoice sent or No invoice needed.
+- Show Incidentals Review in Command Center only when positive actionable work exists.
+
+### Earnings Plan & Deadline Rules
+
+- Resolve effective-dated fleet defaults with optional vehicle overrides while preserving immutable trip snapshots.
+- Leave ambiguous or unresolved historical trips as Plan needed rather than guessing from payout percentages.
+- Apply plan-specific filing windows: More earnings — 72 hours; Balanced — 96 hours; More peace of mind — 120 hours.
+- Keep review timing separate from the filing deadline.
+
+### CodeIgniter 4 CSRF
+
+- Move CSRF protection to the global `App\Config\Filters` before filter with no exceptions.
+- Cover login and all browser mutations by default, including previously uncovered airport forms.
+- Remove redundant route-local CSRF declarations.
+
+### Airport Authorization
+
+- Require Shield `admin.access` for airport operations and reimbursement routes.
+- Scope airport controllers, services, repositories, and Command Center counts to the active company.
+- Fail cross-company relationships closed and store explicit company ownership on airport runs and unmatched receipts.
+
+### Secure Receipt Access
+
+- Replace raw file-ID streaming with company-authorized receipt-parent routes.
+- Harden private-path containment, MIME validation, and filename/header handling.
+- Preserve receipt preview and matching iframe behavior.
+
+### Authentication Hardening
+
+- Replace state-changing `GET /logout` with a globally CSRF-protected POST route.
+- Reuse Shield's native logout action and preserve its redirect and flash behavior.
+- Leave `GET /logout` unavailable so browser GET requests cannot log users out.
+
+### Framework Architecture
+
+- Preserve CodeIgniter-native filters, routing, and services with Shield-native authentication and permissions.
+- Introduce no parallel authentication or security layer.
+
+### Deployment Note
+
+- Before production migration, run migration 000019's ownership preflight.
+- Stop if any legacy airport run or receipt has missing, conflicting, or ambiguous company ownership; never guess ownership because only one company is active.
+
 ## v0.9.5 — Current State & Operator Ergonomics
 
 Release date: 2026-09-10
