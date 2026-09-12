@@ -36,7 +36,7 @@ Unmatched receipts can be entered with date, amount, ticket number, known vehicl
 
 Receipt capture now supports JPEG, PNG, WebP, and PDF evidence through authenticated FleetOS forms. Receipt files are stored privately under `writable/uploads/airport-receipts`, with metadata in the shared `files` table. FleetOS stores a SHA-256 checksum to detect duplicate uploads by content rather than filename.
 
-Receipt preview and download use controlled routes such as `/files/receipts/{file_id}`. Internal storage paths are not exposed. Mobile browsers can use the same file input for camera capture where supported.
+Receipt preview and download use `/operations/airport/reimbursements/receipts/{receipt_id}/file`. Authorization is established through the active-company receipt parent; raw file IDs and internal storage paths are not exposed. Mobile browsers can use the same file input for camera capture where supported.
 
 Unmatched receipt capture allows the operator to save evidence before a trip or run is known. The receipt can later be manually linked to a selected airport workflow. Linking reuses an existing Turo Access override incident when one already exists for the selected workflow and ticket, or creates one when needed.
 

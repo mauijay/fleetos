@@ -8,6 +8,7 @@ use CodeIgniter\Database\BaseConnection;
 use CodeIgniter\Exceptions\PageNotFoundException;
 use CodeIgniter\HTTP\Files\UploadedFile;
 use CodeIgniter\Test\CIUnitTestCase;
+use Config\AirportReceipts;
 use Config\Database;
 use Config\TuroAccess;
 
@@ -20,6 +21,7 @@ final class TuroAccessReimbursementServiceTest extends CIUnitTestCase
 
     private BaseConnection $connection;
     private TuroAccessReimbursementService $service;
+    private string $storageDirectory;
 
     protected function setUp(): void
     {
@@ -31,11 +33,20 @@ final class TuroAccessReimbursementServiceTest extends CIUnitTestCase
         $this->seedData();
         $config = new TuroAccess();
         $config->reimbursementCapAmount = 21.00;
+        $receiptConfig = new AirportReceipts();
+        $this->storageDirectory = 'airport-receipts/tests/' . bin2hex(random_bytes(8));
+        $receiptConfig->storageDirectory = $this->storageDirectory;
         $this->service = new TuroAccessReimbursementService(
             new TuroAccessReimbursementRepository($this->connection),
-            new PrivateFileStorageService(new FileRepository($this->connection)),
+            new PrivateFileStorageService(new FileRepository($this->connection), $receiptConfig),
             $config,
         );
+    }
+
+    protected function tearDown(): void
+    {
+        $this->removeStorageDirectory();
+        parent::tearDown();
     }
 
     public function testTuroAccessOverrideIncidentCanBeCreatedWithTripVehicleAndMovement(): void
@@ -150,6 +161,78 @@ final class TuroAccessReimbursementServiceTest extends CIUnitTestCase
         $this->expectException(\RuntimeException::class);
 
         $this->service->uploadUnmatchedReceipt(self::COMPANY_ID, $this->uploadedText('receipt.txt'), ['document_date' => '2026-07-19']);
+    }
+
+    public function testInvalidVehicleUploadIsRejectedBeforeFileOrReceiptCreation(): void
+    {
+        $upload = $this->uploadedPng('invalid-vehicle.png');
+
+        try {
+            $this->service->uploadUnmatchedReceipt(self::COMPANY_ID, $upload, ['fleet_vehicle_id' => 19]);
+            $this->fail('Expected cross-company vehicle validation to reject the upload.');
+        } catch (InvalidArgumentException) {
+            $this->assertSame(0, $this->connection->table('files')->countAllResults());
+            $this->assertSame(0, $this->connection->table('airport_turo_access_receipts')->countAllResults());
+        } finally {
+            $tempPath = $upload->getTempName();
+            if (is_file($tempPath)) {
+                unlink($tempPath);
+            }
+        }
+    }
+
+    public function testReceiptFileAccessRequiresAuthorizedReceiptParentEvenWhenContentIsDeduplicated(): void
+    {
+        $own = $this->service->uploadUnmatchedReceipt(self::COMPANY_ID, $this->uploadedPng('own-receipt.png'), ['document_date' => '2026-07-19']);
+        $other = $this->service->uploadUnmatchedReceipt(2, $this->uploadedPng('other-receipt.png'), ['document_date' => '2026-07-19']);
+
+        $this->assertTrue($other['duplicate_file']);
+        $ownReceipt = $this->connection->table('airport_turo_access_receipts')->where('id', $own['receipt_id'])->get()->getRowArray();
+        $otherReceipt = $this->connection->table('airport_turo_access_receipts')->where('id', $other['receipt_id'])->get()->getRowArray();
+        $this->assertSame($ownReceipt['file_id'], $otherReceipt['file_id']);
+        $resolved = $this->service->receiptFile(self::COMPANY_ID, (int) $own['receipt_id']);
+        $this->assertFileExists($resolved['path']);
+        $this->assertSame('image/png', $resolved['metadata']['mime_type']);
+        $this->assertSame('own-receipt.png', $resolved['metadata']['original_filename']);
+        $this->assertPageNotFound(fn () => $this->service->receiptFile(self::COMPANY_ID, (int) $other['receipt_id']));
+        $this->assertPageNotFound(fn () => $this->service->receiptFile(self::COMPANY_ID, 999999));
+    }
+
+    public function testMissingDeletedAndUnattachedFileMetadataFailClosed(): void
+    {
+        $this->connection->table('airport_turo_access_receipts')->insert([
+            'id' => 700,
+            'company_id' => self::COMPANY_ID,
+            'file_id' => 700,
+            'receipt_classification' => 'unresolved',
+        ]);
+        $this->assertPageNotFound(fn () => $this->service->receiptFile(self::COMPANY_ID, 700));
+
+        $uploaded = $this->service->uploadUnmatchedReceipt(self::COMPANY_ID, $this->uploadedPng('deleted.png'), ['document_date' => '2026-07-19']);
+        $uploadedReceipt = $this->connection->table('airport_turo_access_receipts')->where('id', $uploaded['receipt_id'])->get()->getRowArray();
+        $this->connection->table('files')->where('id', $uploadedReceipt['file_id'])->update(['deleted_at' => '2026-07-20 00:00:00']);
+        $this->assertPageNotFound(fn () => $this->service->receiptFile(self::COMPANY_ID, (int) $uploaded['receipt_id']));
+
+        $this->connection->table('files')->insert([
+            'id' => 900,
+            'storage_disk' => 'local',
+            'path' => $this->storageDirectory . '/unattached.png',
+            'original_filename' => 'unattached.png',
+            'mime_type' => 'image/png',
+        ]);
+        $this->assertPageNotFound(fn () => $this->service->receiptFile(self::COMPANY_ID, 900));
+    }
+
+    public function testClientSuppliedFileIdIsIgnoredOutsideAuthorizedUploadFlow(): void
+    {
+        $receiptId = $this->service->createUnmatchedReceipt(self::COMPANY_ID, ['file_id' => 321, 'document_date' => '2026-07-19']);
+        $receipt = $this->connection->table('airport_turo_access_receipts')->where('id', $receiptId)->get()->getRowArray();
+        $this->assertNull($receipt['file_id']);
+
+        $incidentId = (int) $this->service->createIncident(self::COMPANY_ID, 1, ['parking_amount_paid' => '18.00'])['incident_id'];
+        $this->assertTrue($this->service->attachReceipt(self::COMPANY_ID, $incidentId, ['file_id' => 654, 'amount' => '18.00']));
+        $attached = $this->connection->table('airport_turo_access_receipts')->where('airport_turo_access_override_incident_id', $incidentId)->get()->getRowArray();
+        $this->assertNull($attached['file_id']);
     }
 
     public function testUnmatchedReceiptCanBeLinkedToSelectedAirportTrip(): void
@@ -284,6 +367,14 @@ final class TuroAccessReimbursementServiceTest extends CIUnitTestCase
         $this->assertTrue($summary['has_reimbursement_work']);
     }
 
+    public function testReceiptInboxOffersOnlyActiveCompanyVehicles(): void
+    {
+        $vehicles = $this->service->inbox(self::COMPANY_ID)['fleet_vehicles'];
+
+        $this->assertSame([8, 9], array_map(static fn (array $vehicle): int => (int) $vehicle['id'], $vehicles));
+        $this->assertNotContains(19, array_map(static fn (array $vehicle): int => (int) $vehicle['id'], $vehicles));
+    }
+
     public function testWrongCompanyResourcesFailClosedAcrossEveryAirportResourceCategory(): void
     {
         $otherIncidentId = (int) $this->service->createIncident(2, 20, ['parking_amount_paid' => '11.00'])['incident_id'];
@@ -378,7 +469,7 @@ final class TuroAccessReimbursementServiceTest extends CIUnitTestCase
 
     private function createSchema(): void
     {
-        $this->connection->query('CREATE TABLE ' . $this->table('fleet_vehicles') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, company_id INTEGER NOT NULL, fleet_code VARCHAR(80), display_name VARCHAR(150))');
+        $this->connection->query('CREATE TABLE ' . $this->table('fleet_vehicles') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, company_id INTEGER NOT NULL, fleet_number INTEGER NULL, fleet_code VARCHAR(80), display_name VARCHAR(150), sort_order INTEGER DEFAULT 0, deleted_at DATETIME NULL)');
         $this->connection->query('CREATE TABLE ' . $this->table('files') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, storage_disk VARCHAR(80), path VARCHAR(255), original_filename VARCHAR(190) NULL, mime_type VARCHAR(120) NULL, size_bytes INTEGER NULL, document_date DATE NULL, checksum VARCHAR(128) NULL, uploaded_by INTEGER NULL, created_at DATETIME NULL, updated_at DATETIME NULL, deleted_at DATETIME NULL)');
         $this->connection->query('CREATE TABLE ' . $this->table('turo_trips_normalized') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, fleet_vehicle_id INTEGER, turo_trip_id VARCHAR(80), guest_name VARCHAR(190), starts_at DATETIME, ends_at DATETIME)');
         $this->connection->query('CREATE TABLE ' . $this->table('airport_movement_workflows') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, airport_delivery_id INTEGER NULL, turo_trip_normalized_id INTEGER, trip_movement_checklist_id INTEGER NULL, fleet_vehicle_id INTEGER, airport_id INTEGER, movement_type VARCHAR(40), scheduled_at DATETIME, workflow_status VARCHAR(40), garage VARCHAR(120) NULL, parking_level VARCHAR(40) NULL, parking_row VARCHAR(80) NULL, parking_stall VARCHAR(80) NULL, completed_at DATETIME NULL, updated_at DATETIME NULL)');
@@ -436,5 +527,23 @@ final class TuroAccessReimbursementServiceTest extends CIUnitTestCase
         file_put_contents($path, 'not a receipt image');
 
         return new UploadedFile($path, $name, 'text/plain', filesize($path), UPLOAD_ERR_OK);
+    }
+
+    private function removeStorageDirectory(): void
+    {
+        $path = rtrim((new \Config\Paths())->writableDirectory, '/\\') . DIRECTORY_SEPARATOR
+            . 'uploads/' . str_replace('/', DIRECTORY_SEPARATOR, $this->storageDirectory);
+        if (! is_dir($path)) {
+            return;
+        }
+
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($path, FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::CHILD_FIRST,
+        );
+        foreach ($iterator as $item) {
+            $item->isDir() ? rmdir($item->getPathname()) : unlink($item->getPathname());
+        }
+        rmdir($path);
     }
 }

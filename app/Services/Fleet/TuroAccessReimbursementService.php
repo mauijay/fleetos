@@ -66,17 +66,23 @@ class TuroAccessReimbursementService
 
     public function attachReceipt(int $companyId, int $incidentId, array $data): bool
     {
+        return $this->attachReceiptRecord($companyId, $incidentId, $data);
+    }
+
+    /** @param array<string, mixed>|null $storedFile */
+    private function attachReceiptRecord(int $companyId, int $incidentId, array $data, ?array $storedFile = null): bool
+    {
         $incident = $this->requireIncident($companyId, $incidentId);
         $amount = $this->amount($data['amount'] ?? null);
         $this->repo()->createReceipt($companyId, [
             'airport_turo_access_override_incident_id' => $incidentId,
             'turo_trip_normalized_id' => $incident['turo_trip_normalized_id'],
             'fleet_vehicle_id' => $incident['fleet_vehicle_id'],
-            'file_id' => $data['file_id'] ?? null,
+            'file_id' => $storedFile['file_id'] ?? null,
             'attachment_type' => $data['attachment_type'] ?? 'paid_receipt',
             'receipt_classification' => 'trip_reimbursement',
-            'original_filename' => $data['original_filename'] ?? null,
-            'mime_type' => $data['mime_type'] ?? null,
+            'original_filename' => $storedFile['file']['original_filename'] ?? $data['original_filename'] ?? null,
+            'mime_type' => $storedFile['file']['mime_type'] ?? $data['mime_type'] ?? null,
             'document_date' => $data['document_date'] ?? null,
             'amount' => $amount,
             'ticket_number' => $data['ticket_number'] ?? null,
@@ -90,24 +96,26 @@ class TuroAccessReimbursementService
     {
         $this->requireIncident($companyId, $incidentId);
         $stored = $this->files()->storeReceiptEvidence($upload, $data['document_date'] ?? null);
-        $ok = $this->attachReceipt($companyId, $incidentId, array_merge($data, [
-            'file_id' => $stored['file_id'],
-            'original_filename' => $stored['file']['original_filename'] ?? null,
-            'mime_type' => $stored['file']['mime_type'] ?? null,
-        ]));
+        $ok = $this->attachReceiptRecord($companyId, $incidentId, $data, $stored);
 
         return ['success' => $ok, 'duplicate_file' => (bool) $stored['duplicate'], 'file_id' => $stored['file_id']];
     }
 
     public function createUnmatchedReceipt(int $companyId, array $data): int
     {
+        return $this->createUnmatchedReceiptRecord($companyId, $data);
+    }
+
+    /** @param array<string, mixed>|null $storedFile */
+    private function createUnmatchedReceiptRecord(int $companyId, array $data, ?array $storedFile = null): int
+    {
         return $this->repo()->createReceipt($companyId, [
             'fleet_vehicle_id' => isset($data['fleet_vehicle_id']) ? (int) $data['fleet_vehicle_id'] : null,
-            'file_id' => $data['file_id'] ?? null,
+            'file_id' => $storedFile['file_id'] ?? null,
             'attachment_type' => $data['attachment_type'] ?? 'paid_receipt',
             'receipt_classification' => $this->receiptClassification($data['receipt_classification'] ?? 'unresolved'),
-            'original_filename' => $data['original_filename'] ?? null,
-            'mime_type' => $data['mime_type'] ?? null,
+            'original_filename' => $storedFile['file']['original_filename'] ?? $data['original_filename'] ?? null,
+            'mime_type' => $storedFile['file']['mime_type'] ?? $data['mime_type'] ?? null,
             'document_date' => $data['document_date'] ?? null,
             'amount' => $this->amount($data['amount'] ?? null),
             'ticket_number' => $data['ticket_number'] ?? null,
@@ -119,11 +127,7 @@ class TuroAccessReimbursementService
     {
         $this->repo()->validateReceiptRelationships($companyId, $data);
         $stored = $this->files()->storeReceiptEvidence($upload, $data['document_date'] ?? null);
-        $receiptId = $this->createUnmatchedReceipt($companyId, array_merge($data, [
-            'file_id' => $stored['file_id'],
-            'original_filename' => $stored['file']['original_filename'] ?? null,
-            'mime_type' => $stored['file']['mime_type'] ?? null,
-        ]));
+        $receiptId = $this->createUnmatchedReceiptRecord($companyId, $data, $stored);
 
         return ['success' => true, 'receipt_id' => $receiptId, 'duplicate_file' => (bool) $stored['duplicate'], 'candidates' => $this->candidateTripsForReceipt($companyId, $receiptId)];
     }
@@ -215,13 +219,10 @@ class TuroAccessReimbursementService
             throw PageNotFoundException::forPageNotFound();
         }
         $stored = $this->files()->storeReceiptEvidence($upload, $data['expense_date'] ?? $data['document_date'] ?? null);
-        $receiptId = $this->createUnmatchedReceipt($companyId, array_merge($data, [
+        $receiptId = $this->createUnmatchedReceiptRecord($companyId, array_merge($data, [
             'receipt_classification' => 'unresolved',
-            'file_id' => $stored['file_id'],
-            'original_filename' => $stored['file']['original_filename'] ?? null,
-            'mime_type' => $stored['file']['mime_type'] ?? null,
             'document_date' => $data['expense_date'] ?? $data['document_date'] ?? null,
-        ]));
+        ]), $stored);
         $assigned = $this->assignReceiptToOperationsExpense($companyId, $receiptId, $data);
 
         return array_merge($assigned, ['receipt_id' => $receiptId, 'duplicate_file' => (bool) $stored['duplicate'], 'file_id' => $stored['file_id']]);
@@ -358,6 +359,18 @@ class TuroAccessReimbursementService
         ];
     }
 
+    /** @return array{path: string, metadata: array<string, mixed>} */
+    public function receiptFile(int $companyId, int $receiptId): array
+    {
+        $receipt = $this->requireReceipt($companyId, $receiptId);
+        $file = $this->files()->resolveReceipt($receipt);
+        if ($file === null) {
+            throw PageNotFoundException::forPageNotFound();
+        }
+
+        return $file;
+    }
+
     /** @return array<int, array<string, mixed>> */
     public function candidateOperationsRunsForReceipt(int $companyId, int $receiptId): array
     {
@@ -390,7 +403,12 @@ class TuroAccessReimbursementService
     {
         $incidents = array_map(fn (array $incident): array => $this->incidentView($companyId, $incident), $this->repo()->inbox($companyId));
         $unmatched = $this->repo()->unmatchedReceipts($companyId);
-        return ['incidents' => $incidents, 'unmatched_receipts' => $unmatched, 'summary' => $this->attentionSummary($companyId)];
+        return [
+            'incidents' => $incidents,
+            'unmatched_receipts' => $unmatched,
+            'fleet_vehicles' => $this->repo()->fleetVehicles($companyId),
+            'summary' => $this->attentionSummary($companyId),
+        ];
     }
 
     /** @return array<string, int|bool|string|float> */

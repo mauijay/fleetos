@@ -73,6 +73,7 @@ $routes->group('', ['filter' => 'session'], static function (RouteCollection $ro
         $routes->post('(:num)/turo-access-override', 'AirportOperations::createTuroAccessOverride/$1');
         $routes->get('reimbursements', 'AirportReimbursements::index');
         $routes->get('reimbursements/match/(:num)', 'AirportReimbursements::matchWorkspace/$1');
+        $routes->get('reimbursements/receipts/(:num)/file', 'AirportReimbursements::receiptFile/$1');
         $routes->post('reimbursements/unmatched-receipt', 'AirportReimbursements::createUnmatchedReceipt');
         $routes->post('reimbursements/run-expense', 'AirportReimbursements::logRunExpense');
         $routes->post('reimbursements/(:num)/receipt', 'AirportReimbursements::attachReceipt/$1');
@@ -84,7 +85,6 @@ $routes->group('', ['filter' => 'session'], static function (RouteCollection $ro
         $routes->post('reimbursements/(:num)/reimbursed', 'AirportReimbursements::markReimbursed/$1');
         $routes->post('reimbursements/(:num)/denied', 'AirportReimbursements::deny/$1');
     });
-    $routes->get('files/receipts/(:num)', 'SecureFiles::receipt/$1');
 });
 
 service('auth')->routes($routes);

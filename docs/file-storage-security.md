@@ -6,6 +6,6 @@ Supported airport receipt formats are JPEG, PNG, WebP, and PDF. Server-side MIME
 
 Stored files use generated paths, not user-supplied filenames. Original filenames are preserved only as metadata. SHA-256 checksums are stored for duplicate detection.
 
-Receipt files are not exposed as public URLs. Preview/download uses authenticated FleetOS routes such as `/files/receipts/{file_id}`. Internal storage paths are not shown to the operator. The same preview route is reused when a receipt is classified as trip reimbursement evidence, airport operations expense evidence, unresolved, non-business, or duplicate.
+Receipt files are not exposed as public URLs. Preview/download uses the authenticated, admin-authorized parent route `/operations/airport/reimbursements/receipts/{receipt_id}/file`. A raw `files.id`, checksum, or storage path never grants document access. The company-scoped receipt must own the referenced live file, and the resolved file must remain inside the private airport-receipt storage root. The same parent-authorized preview route is reused when a receipt is classified as trip reimbursement evidence, airport operations expense evidence, unresolved, non-business, or duplicate. Other file domains must likewise introduce parent-authorized domain routes rather than generic file-ID routes.
 
 Evidence should not be physically deleted during normal operations. Filed, reimbursed, denied, or audited claim evidence should be archived rather than destroyed in a future retention workflow.

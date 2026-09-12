@@ -2,8 +2,11 @@
 
 namespace App\Controllers;
 
+use CodeIgniter\Exceptions\PageNotFoundException;
 use CodeIgniter\HTTP\RedirectResponse;
+use CodeIgniter\HTTP\ResponseInterface;
 use Config\Services;
+use InvalidArgumentException;
 
 class AirportReimbursements extends BaseController
 {
@@ -27,16 +30,37 @@ class AirportReimbursements extends BaseController
         ]);
     }
 
-    public function createUnmatchedReceipt(): RedirectResponse
+    public function receiptFile(int $id): ResponseInterface
     {
-        $file = $this->request->getFile('receipt_file');
-        if ($file !== null && $file->isValid()) {
-            $result = service('turoAccessReimbursementService')->uploadUnmatchedReceipt($this->activeCompanyId(), $file, $this->request->getPost());
-            return $this->back((bool) $result['success'], 'Unmatched airport receipt captured.', 'Receipt could not be uploaded.');
+        $file = Services::turoAccessReimbursementService()->receiptFile($this->activeCompanyIdForReceiptFile(), $id);
+        $metadata = $file['metadata'];
+        $response = $this->response->download($file['path'], null);
+        if ($response === null) {
+            throw PageNotFoundException::forPageNotFound();
         }
 
-        $id = service('turoAccessReimbursementService')->createUnmatchedReceipt($this->activeCompanyId(), $this->request->getPost());
-        return $this->back($id > 0, 'Unmatched airport receipt recorded.', 'Receipt could not be recorded.');
+        return $response
+            ->setFileName($this->safeReceiptFilename((string) ($metadata['original_filename'] ?? ''), (string) $metadata['mime_type']))
+            ->setContentType((string) $metadata['mime_type'], '')
+            ->setHeader('X-Content-Type-Options', 'nosniff')
+            ->inline()
+            ->noCache();
+    }
+
+    public function createUnmatchedReceipt(): RedirectResponse
+    {
+        try {
+            $file = $this->request->getFile('receipt_file');
+            if ($file !== null && $file->isValid()) {
+                $result = service('turoAccessReimbursementService')->uploadUnmatchedReceipt($this->activeCompanyId(), $file, $this->request->getPost());
+                return $this->back((bool) $result['success'], 'Unmatched airport receipt captured.', 'Receipt could not be uploaded.');
+            }
+
+            $id = service('turoAccessReimbursementService')->createUnmatchedReceipt($this->activeCompanyId(), $this->request->getPost());
+            return $this->back($id > 0, 'Unmatched airport receipt recorded.', 'Receipt could not be recorded.');
+        } catch (InvalidArgumentException) {
+            return $this->back(false, '', 'Choose an active fleet vehicle or leave Vehicle unassigned.');
+        }
     }
 
     public function logRunExpense(): RedirectResponse
@@ -116,5 +140,32 @@ class AirportReimbursements extends BaseController
         }
 
         return $companyIds[0];
+    }
+
+    private function activeCompanyIdForReceiptFile(): int
+    {
+        $companyIds = Services::operationalFactsRepository()->activeFleetCompanyIds(date('Y-m-d'));
+        if (count($companyIds) !== 1) {
+            throw PageNotFoundException::forPageNotFound();
+        }
+
+        return $companyIds[0];
+    }
+
+    private function safeReceiptFilename(string $filename, string $mimeType): string
+    {
+        $extension = match ($mimeType) {
+            'image/jpeg' => 'jpg',
+            'image/png' => 'png',
+            'image/webp' => 'webp',
+            'application/pdf' => 'pdf',
+            default => 'bin',
+        };
+        $basename = basename(str_replace('\\', '/', str_replace(["\r", "\n", "\0"], '', $filename)));
+        $stem = pathinfo($basename, PATHINFO_FILENAME);
+        $stem = preg_replace('/[^A-Za-z0-9._() -]+/', '_', $stem) ?? '';
+        $stem = trim(preg_replace('/\s+/', ' ', $stem) ?? '', " .-_\t\n\r\0\x0B");
+
+        return substr($stem === '' ? 'receipt' : $stem, 0, 100) . '.' . $extension;
     }
 }

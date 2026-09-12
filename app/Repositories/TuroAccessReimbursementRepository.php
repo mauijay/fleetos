@@ -101,6 +101,17 @@ class TuroAccessReimbursementRepository
         return $row === null ? null : $row;
     }
 
+    /** @return list<array{id:string, fleet_number:?string, fleet_code:string, display_name:string}> */
+    public function fleetVehicles(int $companyId): array
+    {
+        return $this->db->table('fleet_vehicles')
+            ->select('id, fleet_number, fleet_code, display_name')
+            ->where(['company_id' => $companyId, 'deleted_at' => null])
+            ->orderBy('sort_order', 'ASC')
+            ->orderBy('fleet_code', 'ASC')
+            ->get()->getResultArray();
+    }
+
     public function updateReceipt(int $companyId, int $id, array $data, string $action): bool
     {
         $old = $this->receipt($companyId, $id);
@@ -459,7 +470,7 @@ class TuroAccessReimbursementRepository
     private function receiptBuilder(int $companyId): BaseBuilder
     {
         return $this->db->table('airport_turo_access_receipts receipts')
-            ->select('receipts.*, files.path, files.mime_type AS file_mime_type, files.size_bytes, files.checksum, files.original_filename AS file_original_filename')
+            ->select('receipts.*, files.storage_disk AS file_storage_disk, files.path AS file_path, files.mime_type AS file_mime_type, files.size_bytes AS file_size_bytes, files.checksum AS file_checksum, files.original_filename AS file_original_filename, files.deleted_at AS file_deleted_at')
             ->join('files', 'files.id = receipts.file_id', 'left')
             ->where('receipts.company_id', $companyId);
     }

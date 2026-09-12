@@ -33,7 +33,7 @@ final class AirportAuthorizationTest extends CIUnitTestCase
         CoreServices::routes()->loadRoutes();
         $collector = new FilterCollector();
 
-        foreach (['operations/airport', 'operations/airport/1', 'operations/airport/reimbursements', 'operations/airport/reimbursements/match/1'] as $uri) {
+        foreach (['operations/airport', 'operations/airport/1', 'operations/airport/reimbursements', 'operations/airport/reimbursements/match/1', 'operations/airport/reimbursements/receipts/1/file'] as $uri) {
             $filters = $collector->get('GET', $uri)['before'];
             $this->assertContains('session', $filters, $uri);
             $this->assertContains('permission:admin.access', $filters, $uri);
@@ -46,9 +46,10 @@ final class AirportAuthorizationTest extends CIUnitTestCase
             $this->assertSame(1, array_count_values($filters)['csrf'] ?? 0, $uri);
         }
 
-        $receiptStreamFilters = $collector->get('GET', 'files/receipts/1')['before'];
-        $this->assertContains('session', $receiptStreamFilters);
-        $this->assertNotContains('permission:admin.access', $receiptStreamFilters);
+        $routes = file_get_contents(dirname(__DIR__, 2) . '/app/Config/Routes.php');
+        $this->assertIsString($routes);
+        $this->assertStringNotContainsString('files/receipts', $routes);
+        $this->assertStringContainsString("reimbursements/receipts/(:num)/file', 'AirportReimbursements::receiptFile/$1", $routes);
     }
 }
 

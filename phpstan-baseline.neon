@@ -217,12 +217,6 @@ parameters:
 			path: app/Controllers/Home.php
 
 		-
-			message: '#^Function service not found\.$#'
-			identifier: function.notFound
-			count: 1
-			path: app/Controllers/SecureFiles.php
-
-		-
 			message: '#^Function redirect not found\.$#'
 			identifier: function.notFound
 			count: 1
@@ -346,12 +340,6 @@ parameters:
 			message: '#^Constant ENVIRONMENT not found\.$#'
 			identifier: constant.notFound
 			count: 1
-			path: app/Services/Files/PrivateFileStorageService.php
-
-		-
-			message: '#^Constant WRITEPATH not found\.$#'
-			identifier: constant.notFound
-			count: 2
 			path: app/Services/Files/PrivateFileStorageService.php
 
 		-
