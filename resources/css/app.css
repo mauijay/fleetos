@@ -169,11 +169,24 @@ summary:focus-visible,
   color: var(--subtle);
 }
 
+.auth-action-form {
+  display: inline-flex;
+  max-width: 100%;
+  margin: 0;
+}
+
 .auth-action {
   border: 1px solid rgba(52, 211, 153, 0.34);
   background: rgba(52, 211, 153, 0.08);
   color: var(--success);
   padding: 7px 10px;
+}
+
+.auth-action-form .auth-action {
+  appearance: none;
+  cursor: pointer;
+  font-family: inherit;
+  line-height: inherit;
 }
 
 .auth-action:hover {

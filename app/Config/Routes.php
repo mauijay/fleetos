@@ -4,6 +4,11 @@ use CodeIgniter\Router\RouteCollection;
 
 /** @var RouteCollection $routes */
 $routes->group('', ['filter' => 'session'], static function (RouteCollection $routes): void {
+    $routes->post(
+        'logout',
+        '\\CodeIgniter\\Shield\\Controllers\\LoginController::logoutAction',
+        ['as' => 'logout'],
+    );
     $routes->get('/', 'Home::index');
     $routes->get('turo/imports', 'TuroImports::index', ['filter' => 'permission:admin.access']);
     $routes->post('turo/imports', 'TuroImports::store', ['filter' => 'permission:admin.access']);
@@ -87,4 +92,4 @@ $routes->group('', ['filter' => 'session'], static function (RouteCollection $ro
     });
 });
 
-service('auth')->routes($routes);
+service('auth')->routes($routes, ['except' => ['logout']]);
