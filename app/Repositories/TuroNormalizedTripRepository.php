@@ -86,8 +86,9 @@ class TuroNormalizedTripRepository
     public function find(int $tripId): ?array
     {
         $row = $this->db->table('turo_trips_normalized trips')
-            ->select('trips.*, statuses.code AS trip_status_code')
+            ->select('trips.*, statuses.code AS trip_status_code, vehicles.company_id')
             ->join('lookup_values statuses', 'statuses.id = trips.trip_status_lookup_value_id', 'left')
+            ->join('fleet_vehicles vehicles', 'vehicles.id = trips.fleet_vehicle_id', 'left')
             ->where('trips.id', $tripId)
             ->where('trips.deleted_at', null)
             ->get()
@@ -100,8 +101,9 @@ class TuroNormalizedTripRepository
     public function movementsBetween(string $start, string $end): array
     {
         return $this->db->table('turo_trips_normalized trips')
-            ->select('trips.*, statuses.code AS trip_status_code')
+            ->select('trips.*, statuses.code AS trip_status_code, vehicles.company_id')
             ->join('lookup_values statuses', 'statuses.id = trips.trip_status_lookup_value_id', 'left')
+            ->join('fleet_vehicles vehicles', 'vehicles.id = trips.fleet_vehicle_id', 'left')
             ->where('trips.deleted_at', null)
             ->groupStart()
                 ->groupStart()

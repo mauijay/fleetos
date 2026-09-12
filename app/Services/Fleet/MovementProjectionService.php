@@ -61,13 +61,14 @@ class MovementProjectionService
     private function project(array $trip, bool $apply, string $source, array &$summary, DateTimeImmutable $start, DateTimeImmutable $end): void
     {
         $tripId = (int) ($trip['id'] ?? 0);
-        if ($tripId <= 0 || (int) ($trip['fleet_vehicle_id'] ?? 0) <= 0) {
+        $companyId = (int) ($trip['company_id'] ?? 0);
+        if ($tripId <= 0 || $companyId <= 0 || (int) ($trip['fleet_vehicle_id'] ?? 0) <= 0) {
             $summary['skipped']++;
 
             return;
         }
 
-        $deliveries = $this->airports()->deliveriesForTrip($tripId);
+        $deliveries = $this->airports()->deliveriesForTrip($companyId, $tripId);
         foreach (['pickup' => 'starts_at', 'return' => 'ends_at'] as $movementType => $field) {
             $scheduledAt = trim((string) ($trip[$field] ?? ''));
             if ($scheduledAt === '') {
@@ -102,12 +103,12 @@ class MovementProjectionService
         foreach ($deliveries as $delivery) {
             $pickupAt = (string) ($delivery['scheduled_at'] ?? $trip['starts_at'] ?? '');
             if ($this->isEligible($trip, $pickupAt, $start, $end, $summary)) {
-                $this->projectAirportWorkflow($delivery, 'pickup', $pickupAt, $apply, $summary);
+                $this->projectAirportWorkflow($companyId, $delivery, 'pickup', $pickupAt, $apply, $summary);
             }
             if (trim((string) ($trip['ends_at'] ?? '')) !== '') {
                 $returnAt = (string) $trip['ends_at'];
                 if ($this->isEligible($trip, $returnAt, $start, $end, $summary)) {
-                    $this->projectAirportWorkflow($delivery, 'return', $returnAt, $apply, $summary);
+                    $this->projectAirportWorkflow($companyId, $delivery, 'return', $returnAt, $apply, $summary);
                 }
             }
         }
@@ -128,7 +129,7 @@ class MovementProjectionService
     }
 
     /** @param array<string, mixed> $delivery @param array<string, int> $summary */
-    private function projectAirportWorkflow(array $delivery, string $movementType, string $scheduledAt, bool $apply, array &$summary): void
+    private function projectAirportWorkflow(int $companyId, array $delivery, string $movementType, string $scheduledAt, bool $apply, array &$summary): void
     {
         $tripId = (int) ($delivery['turo_trip_normalized_id'] ?? 0);
         if ($tripId <= 0 || trim($scheduledAt) === '') {
@@ -136,7 +137,7 @@ class MovementProjectionService
             return;
         }
 
-        if ($this->airports()->existingForMovement($tripId, $movementType, $scheduledAt) !== null) {
+        if ($this->airports()->existingForMovement($companyId, $tripId, $movementType, $scheduledAt) !== null) {
             $summary['already_present']++;
             return;
         }
@@ -147,11 +148,11 @@ class MovementProjectionService
         }
 
         try {
-            $workflow = $this->airports()->ensure($delivery, $movementType, $scheduledAt);
+            $workflow = $this->airports()->ensure($companyId, $delivery, $movementType, $scheduledAt);
             ($workflow['exists'] ?? false) ? $summary['airport_workflows_projected']++ : $summary['errors']++;
         } catch (Throwable) {
             $this->recordFailure(
-                $this->airports()->existingForMovement($tripId, $movementType, $scheduledAt) !== null,
+                $this->airports()->existingForMovement($companyId, $tripId, $movementType, $scheduledAt) !== null,
                 $summary,
             );
         }

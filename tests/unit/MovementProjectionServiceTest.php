@@ -161,7 +161,7 @@ final class MovementProjectionServiceTest extends CIUnitTestCase
 
     private function seedData(): void
     {
-        $this->connection->table('fleet_vehicles')->insert(['id' => 9, 'fleet_code' => 'Spaceship-009', 'display_name' => 'Spaceship-009']);
+        $this->connection->table('fleet_vehicles')->insert(['id' => 9, 'company_id' => 1, 'fleet_code' => 'Spaceship-009', 'display_name' => 'Spaceship-009']);
         $this->connection->table('lookup_values')->insertBatch([
             ['id' => 1, 'code' => 'booked'],
             ['id' => 2, 'code' => 'in_progress'],

@@ -188,8 +188,8 @@ final class DailyOperationsDashboardServiceTest extends CIUnitTestCase
         $vehicleMappings = $this->createStub(TuroVehicleMappingService::class);
         $reconciliation = $this->createStub(TuroTripReconciliationService::class);
         $checklists = $this->getMockBuilder(TripMovementChecklistService::class)->disableOriginalConstructor()->onlyMethods(['ensureForDay', 'summariesForDay'])->getMock();
-        $airport = $this->createStub(AirportMovementWorkflowService::class);
-        $reimbursements = $this->createStub(TuroAccessReimbursementService::class);
+        $airport = $this->createMock(AirportMovementWorkflowService::class);
+        $reimbursements = $this->createMock(TuroAccessReimbursementService::class);
 
         $today = $this->today();
         $today['airport_deliveries'][] = ['fleet_vehicle_id' => 1, 'scheduled_at' => '2026-07-19 07:00:00', 'completed_at' => '2026-07-19 07:30:00'];
@@ -210,8 +210,8 @@ final class DailyOperationsDashboardServiceTest extends CIUnitTestCase
             'critical_open_count' => 1,
             'href' => '/operations/checklists/41',
         ]]);
-        $airport->method('attentionSummary')->willReturn(['airport_workflows_requiring_action' => 0, 'href' => '/operations/airport']);
-        $reimbursements->method('attentionSummary')->willReturn([
+        $airport->expects($this->once())->method('attentionSummary')->with(1, $this->isInstanceOf(DateTimeImmutable::class))->willReturn(['airport_workflows_requiring_action' => 0, 'href' => '/operations/airport']);
+        $reimbursements->expects($this->once())->method('attentionSummary')->with(1)->willReturn([
             'needs_classification' => 0,
             'ready_to_file' => 0,
             'filed_pending' => 0,

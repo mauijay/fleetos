@@ -93,9 +93,29 @@ class TripMovementChecklistService
         return array_merge($checklist, ['exists' => true, 'items' => $items, 'progress' => $progress, 'readiness_status' => $status]);
     }
 
+    /** @return array<string, mixed>|null */
+    public function checklistForCompany(int $companyId, int $id): ?array
+    {
+        $checklist = $this->repo()->checklistForCompany($companyId, $id);
+        if ($checklist === null) {
+            return null;
+        }
+
+        $items = $this->repo()->items($id);
+        $progress = $this->readiness->progress($items);
+        $status = $this->readiness->status((string) $checklist['movement_type'], $items, $checklist['vehicle_disposition'] ?? null, $checklist['completed_at'] !== null);
+
+        return array_merge($checklist, ['exists' => true, 'items' => $items, 'progress' => $progress, 'readiness_status' => $status]);
+    }
+
     public function completeItem(int $itemId, ?string $note = null, ?int $actorUserId = null): bool
     {
         return $this->repo()->updateItem($itemId, ['completion_state' => 'complete', 'completion_source' => 'manual', 'completed_at' => date('Y-m-d H:i:s'), 'note' => $note], $actorUserId);
+    }
+
+    public function completeItemForCompany(int $companyId, int $itemId, ?string $note = null, ?int $actorUserId = null): bool
+    {
+        return $this->repo()->updateItemForCompany($companyId, $itemId, ['completion_state' => 'complete', 'completion_source' => 'manual', 'completed_at' => date('Y-m-d H:i:s'), 'note' => $note], $actorUserId);
     }
 
     public function undoItem(int $itemId, ?int $actorUserId = null): bool

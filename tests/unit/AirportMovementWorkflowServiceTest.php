@@ -6,6 +6,7 @@ use App\Services\Fleet\AirportInstructionService;
 use App\Services\Fleet\AirportMovementWorkflowService;
 use App\Services\Fleet\TripMovementChecklistService;
 use CodeIgniter\Database\BaseConnection;
+use CodeIgniter\Exceptions\PageNotFoundException;
 use CodeIgniter\Test\CIUnitTestCase;
 use Config\Database;
 
@@ -14,6 +15,8 @@ use Config\Database;
  */
 final class AirportMovementWorkflowServiceTest extends CIUnitTestCase
 {
+    private const COMPANY_ID = 1;
+
     private BaseConnection $connection;
     private AirportMovementWorkflowService $service;
 
@@ -31,8 +34,8 @@ final class AirportMovementWorkflowServiceTest extends CIUnitTestCase
 
     public function testAirportPickupAndReturnWorkflowsAreCreatedOnce(): void
     {
-        $first = $this->service->ensureForDay(new DateTimeImmutable('2026-07-19 08:00:00'));
-        $second = $this->service->ensureForDay(new DateTimeImmutable('2026-07-19 08:00:00'));
+        $first = $this->service->ensureForDay(self::COMPANY_ID, new DateTimeImmutable('2026-07-19 08:00:00'));
+        $second = $this->service->ensureForDay(self::COMPANY_ID, new DateTimeImmutable('2026-07-19 08:00:00'));
 
         $this->assertCount(2, $first);
         $this->assertCount(2, $second);
@@ -42,18 +45,18 @@ final class AirportMovementWorkflowServiceTest extends CIUnitTestCase
 
     public function testNonAirportDayCreatesNoWorkflows(): void
     {
-        $this->assertSame([], $this->service->ensureForDay(new DateTimeImmutable('2026-07-20 08:00:00')));
+        $this->assertSame([], $this->service->ensureForDay(self::COMPANY_ID, new DateTimeImmutable('2026-07-20 08:00:00')));
     }
 
     public function testStagingDetailsCanBeRecordedAndVehicleCannotBeStagedWithoutConfirmations(): void
     {
         $workflow = $this->pickupWorkflow();
 
-        $this->assertTrue($this->service->recordStaging((int) $workflow['id'], ['garage' => 'international', 'parking_level' => '7', 'parking_row' => 'F', 'parking_entry_at' => '2026-07-19 10:00:00']));
-        $this->assertFalse($this->service->markStaged((int) $workflow['id'], ['vehicle_parked' => '1']));
-        $this->assertTrue($this->service->markStaged((int) $workflow['id'], ['vehicle_parked' => '1', 'vehicle_locked' => '1', 'key_card_placed' => '1', 'parking_details_verified' => '1']));
+        $this->assertTrue($this->service->recordStaging(self::COMPANY_ID, (int) $workflow['id'], ['garage' => 'international', 'parking_level' => '7', 'parking_row' => 'F', 'parking_entry_at' => '2026-07-19 10:00:00']));
+        $this->assertFalse($this->service->markStaged(self::COMPANY_ID, (int) $workflow['id'], ['vehicle_parked' => '1']));
+        $this->assertTrue($this->service->markStaged(self::COMPANY_ID, (int) $workflow['id'], ['vehicle_parked' => '1', 'vehicle_locked' => '1', 'key_card_placed' => '1', 'parking_details_verified' => '1']));
 
-        $updated = $this->service->workflow((int) $workflow['id']);
+        $updated = $this->service->workflow(self::COMPANY_ID, (int) $workflow['id']);
         $this->assertSame('staged', $updated['workflow_status']);
         $this->assertNotNull($updated['vehicle_staged_at']);
         $this->assertGreaterThan(0, $this->connection->table('airport_movement_audits')->where('airport_movement_workflow_id', (int) $workflow['id'])->countAllResults());
@@ -65,9 +68,9 @@ final class AirportMovementWorkflowServiceTest extends CIUnitTestCase
         $instructions = (new AirportInstructionService())->pickupInstructions($workflow);
         $this->assertFalse($instructions['complete']);
 
-        $this->service->recordStaging((int) $workflow['id'], ['garage' => 'international', 'parking_level' => '7', 'parking_row' => 'F']);
-        $this->assertTrue($this->service->markInstructionsSent((int) $workflow['id']));
-        $updated = $this->service->workflow((int) $workflow['id']);
+        $this->service->recordStaging(self::COMPANY_ID, (int) $workflow['id'], ['garage' => 'international', 'parking_level' => '7', 'parking_row' => 'F']);
+        $this->assertTrue($this->service->markInstructionsSent(self::COMPANY_ID, (int) $workflow['id']));
+        $updated = $this->service->workflow(self::COMPANY_ID, (int) $workflow['id']);
 
         $this->assertSame('instructions_sent', $updated['workflow_status']);
         $this->assertStringContainsString('Level 7', $updated['guest_instructions']);
@@ -78,14 +81,14 @@ final class AirportMovementWorkflowServiceTest extends CIUnitTestCase
     public function testGuestPickupAndReturnRecoveryCanBeConfirmed(): void
     {
         $pickup = $this->pickupWorkflow();
-        $this->service->recordStaging((int) $pickup['id'], ['garage' => 'international', 'parking_level' => '7', 'parking_row' => 'F']);
-        $this->service->markStaged((int) $pickup['id'], ['vehicle_parked' => '1', 'vehicle_locked' => '1', 'key_card_placed' => '1', 'parking_details_verified' => '1']);
-        $this->assertTrue($this->service->confirmGuestPickup((int) $pickup['id']));
+        $this->service->recordStaging(self::COMPANY_ID, (int) $pickup['id'], ['garage' => 'international', 'parking_level' => '7', 'parking_row' => 'F']);
+        $this->service->markStaged(self::COMPANY_ID, (int) $pickup['id'], ['vehicle_parked' => '1', 'vehicle_locked' => '1', 'key_card_placed' => '1', 'parking_details_verified' => '1']);
+        $this->assertTrue($this->service->confirmGuestPickup(self::COMPANY_ID, (int) $pickup['id']));
 
         $return = $this->returnWorkflow();
-        $this->assertTrue($this->service->recordReturnLocation((int) $return['id'], ['guest_reported_level' => '8', 'guest_reported_row' => 'D']));
-        $this->assertTrue($this->service->confirmVehicleLocated((int) $return['id']));
-        $this->assertSame('vehicle_located', $this->service->workflow((int) $return['id'])['workflow_status']);
+        $this->assertTrue($this->service->recordReturnLocation(self::COMPANY_ID, (int) $return['id'], ['guest_reported_level' => '8', 'guest_reported_row' => 'D']));
+        $this->assertTrue($this->service->confirmVehicleLocated(self::COMPANY_ID, (int) $return['id']));
+        $this->assertSame('vehicle_located', $this->service->workflow(self::COMPANY_ID, (int) $return['id'])['workflow_status']);
     }
 
     public function testStagingRejectsInvalidLevelAndConflictingGarageRow(): void
@@ -93,30 +96,30 @@ final class AirportMovementWorkflowServiceTest extends CIUnitTestCase
         $workflow = $this->pickupWorkflow();
 
         $this->expectException(InvalidArgumentException::class);
-        $this->service->recordStaging((int) $workflow['id'], ['garage' => 'terminal_2', 'parking_level' => '7', 'parking_row' => 'M']);
+        $this->service->recordStaging(self::COMPANY_ID, (int) $workflow['id'], ['garage' => 'terminal_2', 'parking_level' => '7', 'parking_row' => 'M']);
     }
 
     public function testParkingCostValidationAndExceptionRecording(): void
     {
         $workflow = $this->pickupWorkflow();
 
-        $this->assertFalse($this->service->recordParkingCost((int) $workflow['id'], 'abc', 'host_operational_cost'));
-        $this->assertFalse($this->service->recordParkingCost((int) $workflow['id'], '12.50', 'guest_pays_in_moon_rocks'));
-        $this->assertTrue($this->service->recordParkingCost((int) $workflow['id'], '12.50', 'host_operational_cost'));
-        $this->assertGreaterThan(0, $this->service->createException((int) $workflow['id'], 'garage_full', 'today', 'Garage was full.'));
-        $this->assertSame('exception', $this->service->workflow((int) $workflow['id'])['workflow_status']);
+        $this->assertFalse($this->service->recordParkingCost(self::COMPANY_ID, (int) $workflow['id'], 'abc', 'host_operational_cost'));
+        $this->assertFalse($this->service->recordParkingCost(self::COMPANY_ID, (int) $workflow['id'], '12.50', 'guest_pays_in_moon_rocks'));
+        $this->assertTrue($this->service->recordParkingCost(self::COMPANY_ID, (int) $workflow['id'], '12.50', 'host_operational_cost'));
+        $this->assertGreaterThan(0, $this->service->createException(self::COMPANY_ID, (int) $workflow['id'], 'garage_full', 'today', 'Garage was full.'));
+        $this->assertSame('exception', $this->service->workflow(self::COMPANY_ID, (int) $workflow['id'])['workflow_status']);
     }
 
     public function testWorkflowCannotCompleteBeforeLinkedChecklistReadiness(): void
     {
         $workflow = $this->pickupWorkflow();
-        $this->assertFalse($this->service->complete((int) $workflow['id']));
+        $this->assertFalse($this->service->complete(self::COMPANY_ID, (int) $workflow['id']));
     }
 
     public function testAttentionSummaryCountsIncompleteAirportWork(): void
     {
-        $this->service->ensureForDay(new DateTimeImmutable('2026-07-19 08:00:00'));
-        $summary = $this->service->attentionSummary(new DateTimeImmutable('2026-07-19 08:00:00'));
+        $this->service->ensureForDay(self::COMPANY_ID, new DateTimeImmutable('2026-07-19 08:00:00'));
+        $summary = $this->service->attentionSummary(self::COMPANY_ID, new DateTimeImmutable('2026-07-19 08:00:00'));
 
         $this->assertTrue($summary['has_airport_work']);
         $this->assertSame(2, $summary['airport_workflows_requiring_action']);
@@ -124,15 +127,68 @@ final class AirportMovementWorkflowServiceTest extends CIUnitTestCase
 
     public function testTodayDoesNotCreateAirportWorkflows(): void
     {
-        $this->assertSame([], $this->service->today(new DateTimeImmutable('2026-07-19 08:00:00')));
+        $this->assertSame([], $this->service->today(self::COMPANY_ID, new DateTimeImmutable('2026-07-19 08:00:00')));
         $this->assertSame(0, $this->connection->table('airport_movement_workflows')->countAllResults());
         $this->assertSame(0, $this->connection->table('trip_movement_checklists')->countAllResults());
     }
 
+    public function testWrongCompanyWorkflowDisplayAndTransitionReturnGenericNotFound(): void
+    {
+        $this->service->ensureForDay(2, new DateTimeImmutable('2026-07-19 08:00:00'));
+        $otherWorkflow = $this->service->today(2, new DateTimeImmutable('2026-07-19 08:00:00'))[0];
+        $workflowId = (int) $otherWorkflow['id'];
+
+        try {
+            $this->service->workflow(self::COMPANY_ID, $workflowId);
+            $this->fail('Wrong-company workflow display must fail closed.');
+        } catch (PageNotFoundException) {
+            $this->addToAssertionCount(1);
+        }
+
+        try {
+            $this->service->recordParkingCost(self::COMPANY_ID, $workflowId, '12.00', 'host_operational_cost', 77);
+            $this->fail('Wrong-company workflow transition must fail closed.');
+        } catch (PageNotFoundException) {
+            $this->addToAssertionCount(1);
+        }
+
+        $this->assertSame(0, $this->connection->table('airport_movement_audits')->where('airport_movement_workflow_id', $workflowId)->countAllResults());
+    }
+
+    public function testCompanyScopedListsAndAttentionExcludeOtherCompany(): void
+    {
+        $this->service->ensureForDay(self::COMPANY_ID, new DateTimeImmutable('2026-07-19 08:00:00'));
+        $this->service->ensureForDay(2, new DateTimeImmutable('2026-07-19 08:00:00'));
+
+        $this->assertCount(2, $this->service->today(self::COMPANY_ID, new DateTimeImmutable('2026-07-19 08:00:00')));
+        $this->assertCount(2, $this->service->today(2, new DateTimeImmutable('2026-07-19 08:00:00')));
+        $this->assertSame(2, $this->service->attentionSummary(self::COMPANY_ID, new DateTimeImmutable('2026-07-19 08:00:00'))['airport_workflows_requiring_action']);
+    }
+
+    public function testCrossCompanyChecklistMilestoneRollsBackWithoutWorkflowOrAuditChanges(): void
+    {
+        $workflow = $this->pickupWorkflow();
+        $this->service->ensureForDay(2, new DateTimeImmutable('2026-07-19 08:00:00'));
+        $otherChecklist = $this->connection->table('trip_movement_checklists')->where('fleet_vehicle_id', 19)->get()->getRowArray();
+        $this->assertNotNull($otherChecklist);
+        $workflowId = (int) $workflow['id'];
+        $this->connection->table('airport_movement_workflows')->where('id', $workflowId)->update(['trip_movement_checklist_id' => (int) $otherChecklist['id']]);
+
+        try {
+            $this->service->markStaged(self::COMPANY_ID, $workflowId, ['vehicle_parked' => '1', 'vehicle_locked' => '1', 'key_card_placed' => '1', 'parking_details_verified' => '1'], 77);
+            $this->fail('Cross-company checklist completion must fail closed.');
+        } catch (PageNotFoundException) {
+            $this->addToAssertionCount(1);
+        }
+
+        $this->assertSame(0, $this->connection->table('airport_movement_audits')->where('airport_movement_workflow_id', $workflowId)->countAllResults());
+        $this->assertSame(0, $this->connection->table('trip_movement_checklist_audits')->where('trip_movement_checklist_id', (int) $otherChecklist['id'])->countAllResults());
+    }
+
     private function pickupWorkflow(): array
     {
-        $this->service->ensureForDay(new DateTimeImmutable('2026-07-19 08:00:00'));
-        foreach ($this->service->today(new DateTimeImmutable('2026-07-19 08:00:00')) as $workflow) {
+        $this->service->ensureForDay(self::COMPANY_ID, new DateTimeImmutable('2026-07-19 08:00:00'));
+        foreach ($this->service->today(self::COMPANY_ID, new DateTimeImmutable('2026-07-19 08:00:00')) as $workflow) {
             if ($workflow['movement_type'] === 'pickup') {
                 return $workflow;
             }
@@ -142,8 +198,8 @@ final class AirportMovementWorkflowServiceTest extends CIUnitTestCase
 
     private function returnWorkflow(): array
     {
-        $this->service->ensureForDay(new DateTimeImmutable('2026-07-19 08:00:00'));
-        foreach ($this->service->today(new DateTimeImmutable('2026-07-19 08:00:00')) as $workflow) {
+        $this->service->ensureForDay(self::COMPANY_ID, new DateTimeImmutable('2026-07-19 08:00:00'));
+        foreach ($this->service->today(self::COMPANY_ID, new DateTimeImmutable('2026-07-19 08:00:00')) as $workflow) {
             if ($workflow['movement_type'] === 'return') {
                 return $workflow;
             }
@@ -177,10 +233,13 @@ final class AirportMovementWorkflowServiceTest extends CIUnitTestCase
 
     private function seedData(): void
     {
-        $this->connection->table('fleet_vehicles')->insert(['id' => 9, 'fleet_code' => 'Spaceship-009', 'display_name' => 'Spaceship-009']);
+        $this->connection->table('fleet_vehicles')->insert(['id' => 9, 'company_id' => self::COMPANY_ID, 'fleet_code' => 'Spaceship-009', 'display_name' => 'Spaceship-009']);
+        $this->connection->table('fleet_vehicles')->insert(['id' => 19, 'company_id' => 2, 'fleet_code' => 'Other-019', 'display_name' => 'Other-019']);
         $this->connection->table('turo_trips_normalized')->insert(['id' => 1, 'fleet_vehicle_id' => 9, 'turo_trip_id' => 'trip-1', 'guest_name' => 'Guest One', 'starts_at' => '2026-07-19 14:00:00', 'ends_at' => '2026-07-19 18:00:00']);
+        $this->connection->table('turo_trips_normalized')->insert(['id' => 2, 'fleet_vehicle_id' => 19, 'turo_trip_id' => 'trip-2', 'guest_name' => 'Other Guest', 'starts_at' => '2026-07-19 15:00:00', 'ends_at' => '2026-07-19 19:00:00']);
         $this->connection->table('airports')->insert(['id' => 1, 'code' => 'HNL', 'name' => 'Honolulu International Airport']);
         $this->connection->table('airport_deliveries')->insert(['id' => 1, 'fleet_vehicle_id' => 9, 'airport_id' => 1, 'turo_trip_normalized_id' => 1, 'scheduled_at' => '2026-07-19 14:00:00', 'completed_at' => null, 'delivery_fee_amount' => '0.00', 'parking_cost_amount' => '0.00', 'deleted_at' => null]);
+        $this->connection->table('airport_deliveries')->insert(['id' => 2, 'fleet_vehicle_id' => 19, 'airport_id' => 1, 'turo_trip_normalized_id' => 2, 'scheduled_at' => '2026-07-19 15:00:00', 'completed_at' => null, 'delivery_fee_amount' => '0.00', 'parking_cost_amount' => '0.00', 'deleted_at' => null]);
     }
 
     private function table(string $table): string

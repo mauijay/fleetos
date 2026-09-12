@@ -1,11 +1,12 @@
 <?php
 
-use App\Repositories\TuroAccessReimbursementRepository;
 use App\Repositories\FileRepository;
+use App\Repositories\TuroAccessReimbursementRepository;
 use App\Services\Files\PrivateFileStorageService;
 use App\Services\Fleet\TuroAccessReimbursementService;
-use CodeIgniter\HTTP\Files\UploadedFile;
 use CodeIgniter\Database\BaseConnection;
+use CodeIgniter\Exceptions\PageNotFoundException;
+use CodeIgniter\HTTP\Files\UploadedFile;
 use CodeIgniter\Test\CIUnitTestCase;
 use Config\Database;
 use Config\TuroAccess;
@@ -15,6 +16,8 @@ use Config\TuroAccess;
  */
 final class TuroAccessReimbursementServiceTest extends CIUnitTestCase
 {
+    private const COMPANY_ID = 1;
+
     private BaseConnection $connection;
     private TuroAccessReimbursementService $service;
 
@@ -37,7 +40,7 @@ final class TuroAccessReimbursementServiceTest extends CIUnitTestCase
 
     public function testTuroAccessOverrideIncidentCanBeCreatedWithTripVehicleAndMovement(): void
     {
-        $result = $this->service->createIncident(1, ['incident_context' => 'exit', 'operator_type' => 'guest', 'ticket_number' => 'T123', 'parking_amount_paid' => '18.00']);
+        $result = $this->service->createIncident(self::COMPANY_ID, 1, ['incident_context' => 'exit', 'operator_type' => 'guest', 'ticket_number' => 'T123', 'parking_amount_paid' => '18.00']);
 
         $this->assertTrue($result['success']);
         $incident = $this->connection->table('airport_turo_access_override_incidents')->where('id', $result['incident_id'])->get()->getRowArray();
@@ -49,20 +52,20 @@ final class TuroAccessReimbursementServiceTest extends CIUnitTestCase
 
     public function testDuplicateIncidentWarningWorks(): void
     {
-        $this->service->createIncident(1, ['ticket_number' => 'T123']);
-        $duplicate = $this->service->createIncident(1, ['ticket_number' => 'T123']);
+        $this->service->createIncident(self::COMPANY_ID, 1, ['ticket_number' => 'T123']);
+        $duplicate = $this->service->createIncident(self::COMPANY_ID, 1, ['ticket_number' => 'T123']);
 
         $this->assertFalse($duplicate['success']);
         $this->assertSame('possible_duplicate', $duplicate['code']);
-        $confirmed = $this->service->createIncident(1, ['ticket_number' => 'T123'], true);
+        $confirmed = $this->service->createIncident(self::COMPANY_ID, 1, ['ticket_number' => 'T123'], true);
         $this->assertTrue($confirmed['success']);
     }
 
     public function testReceiptAttachmentProducesClaimReadyStateAndCapMath(): void
     {
-        $incidentId = $this->service->createIncident(1, ['parking_amount_paid' => '28.00', 'incident_at' => '2026-07-19 14:30:00'])['incident_id'];
+        $incidentId = $this->service->createIncident(self::COMPANY_ID, 1, ['parking_amount_paid' => '28.00', 'incident_at' => '2026-07-19 14:30:00'])['incident_id'];
 
-        $this->assertTrue($this->service->attachReceipt($incidentId, ['original_filename' => 'receipt.jpg', 'amount' => '28.00', 'attachment_type' => 'paid_receipt']));
+        $this->assertTrue($this->service->attachReceipt(self::COMPANY_ID, $incidentId, ['original_filename' => 'receipt.jpg', 'amount' => '28.00', 'attachment_type' => 'paid_receipt']));
         $incident = $this->connection->table('airport_turo_access_override_incidents')->where('id', $incidentId)->get()->getRowArray();
 
         $this->assertSame('ready_to_file', $incident['claim_status']);
@@ -72,7 +75,7 @@ final class TuroAccessReimbursementServiceTest extends CIUnitTestCase
 
     public function testMissingReceiptPreventsClaimReadyState(): void
     {
-        $incidentId = $this->service->createIncident(1, ['parking_amount_paid' => '18.00'])['incident_id'];
+        $incidentId = $this->service->createIncident(self::COMPANY_ID, 1, ['parking_amount_paid' => '18.00'])['incident_id'];
 
         $incident = $this->connection->table('airport_turo_access_override_incidents')->where('id', $incidentId)->get()->getRowArray();
         $this->assertSame('not_ready', $incident['claim_status']);
@@ -80,26 +83,26 @@ final class TuroAccessReimbursementServiceTest extends CIUnitTestCase
 
     public function testClaimLifecycleKeepsFiledSeparateFromReimbursedAndStoresDenial(): void
     {
-        $incidentId = $this->service->createIncident(1, ['parking_amount_paid' => '18.00'])['incident_id'];
-        $this->service->attachReceipt($incidentId, ['original_filename' => 'receipt.jpg', 'amount' => '18.00']);
+        $incidentId = $this->service->createIncident(self::COMPANY_ID, 1, ['parking_amount_paid' => '18.00'])['incident_id'];
+        $this->service->attachReceipt(self::COMPANY_ID, $incidentId, ['original_filename' => 'receipt.jpg', 'amount' => '18.00']);
 
-        $this->assertTrue($this->service->markFiled($incidentId, 'CASE-1', '18.00'));
+        $this->assertTrue($this->service->markFiled(self::COMPANY_ID, $incidentId, 'CASE-1', '18.00'));
         $filed = $this->connection->table('airport_turo_access_override_incidents')->where('id', $incidentId)->get()->getRowArray();
         $this->assertSame('filed', $filed['claim_status']);
         $this->assertNull($filed['reimbursed_amount']);
 
-        $this->assertTrue($this->service->markReimbursed($incidentId, '18.00'));
+        $this->assertTrue($this->service->markReimbursed(self::COMPANY_ID, $incidentId, '18.00'));
         $this->assertSame('reimbursed', $this->connection->table('airport_turo_access_override_incidents')->where('id', $incidentId)->get()->getRowArray()['claim_status']);
 
-        $deniedId = $this->service->createIncident(1, ['parking_amount_paid' => '12.00'], true)['incident_id'];
-        $this->assertTrue($this->service->deny($deniedId, 'Not eligible'));
+        $deniedId = $this->service->createIncident(self::COMPANY_ID, 1, ['parking_amount_paid' => '12.00'], true)['incident_id'];
+        $this->assertTrue($this->service->deny(self::COMPANY_ID, $deniedId, 'Not eligible'));
         $this->assertSame('Not eligible', $this->connection->table('airport_turo_access_override_incidents')->where('id', $deniedId)->get()->getRowArray()['denial_reason']);
     }
 
     public function testUnmatchedReceiptAndCandidateTripsAreDeterministic(): void
     {
-        $receiptId = $this->service->createUnmatchedReceipt(['fleet_vehicle_id' => 9, 'document_date' => '2026-07-19', 'amount' => '18.00', 'ticket_number' => 'R1']);
-        $candidates = $this->service->candidateTripsForReceipt($receiptId);
+        $receiptId = $this->service->createUnmatchedReceipt(self::COMPANY_ID, ['fleet_vehicle_id' => 9, 'document_date' => '2026-07-19', 'amount' => '18.00', 'ticket_number' => 'R1']);
+        $candidates = $this->service->candidateTripsForReceipt(self::COMPANY_ID, $receiptId);
 
         $this->assertSame(2, count($candidates));
         $this->assertSame(1, (int) $candidates[0]['id']);
@@ -112,8 +115,8 @@ final class TuroAccessReimbursementServiceTest extends CIUnitTestCase
 
     public function testMatchingWorkspaceDoesNotAutoLinkReceipt(): void
     {
-        $receipt = $this->service->uploadUnmatchedReceipt($this->uploadedPng('receipt.png'), ['fleet_vehicle_id' => 9, 'document_date' => '2026-07-19', 'amount' => '18.00', 'ticket_number' => 'R1']);
-        $workspace = $this->service->matchingWorkspace((int) $receipt['receipt_id']);
+        $receipt = $this->service->uploadUnmatchedReceipt(self::COMPANY_ID, $this->uploadedPng('receipt.png'), ['fleet_vehicle_id' => 9, 'document_date' => '2026-07-19', 'amount' => '18.00', 'ticket_number' => 'R1']);
+        $workspace = $this->service->matchingWorkspace(self::COMPANY_ID, (int) $receipt['receipt_id']);
 
         $this->assertTrue($workspace['exists']);
         $this->assertNotEmpty($workspace['candidates']);
@@ -122,8 +125,8 @@ final class TuroAccessReimbursementServiceTest extends CIUnitTestCase
 
     public function testReceiptImageUploadStoresFileMetadataAndRefreshesClaimReadiness(): void
     {
-        $incidentId = $this->service->createIncident(1, ['parking_amount_paid' => '18.00'])['incident_id'];
-        $result = $this->service->uploadReceiptForIncident($incidentId, $this->uploadedPng('receipt.png'), ['amount' => '18.00', 'attachment_type' => 'paid_receipt']);
+        $incidentId = $this->service->createIncident(self::COMPANY_ID, 1, ['parking_amount_paid' => '18.00'])['incident_id'];
+        $result = $this->service->uploadReceiptForIncident(self::COMPANY_ID, $incidentId, $this->uploadedPng('receipt.png'), ['amount' => '18.00', 'attachment_type' => 'paid_receipt']);
 
         $this->assertTrue($result['success']);
         $this->assertSame(1, $this->connection->table('files')->countAllResults());
@@ -134,8 +137,8 @@ final class TuroAccessReimbursementServiceTest extends CIUnitTestCase
 
     public function testDuplicateUploadReusesExistingFileRecord(): void
     {
-        $this->service->uploadUnmatchedReceipt($this->uploadedPng('receipt-a.png'), ['document_date' => '2026-07-19', 'amount' => '10.00']);
-        $result = $this->service->uploadUnmatchedReceipt($this->uploadedPng('receipt-b.png'), ['document_date' => '2026-07-19', 'amount' => '10.00']);
+        $this->service->uploadUnmatchedReceipt(self::COMPANY_ID, $this->uploadedPng('receipt-a.png'), ['document_date' => '2026-07-19', 'amount' => '10.00']);
+        $result = $this->service->uploadUnmatchedReceipt(self::COMPANY_ID, $this->uploadedPng('receipt-b.png'), ['document_date' => '2026-07-19', 'amount' => '10.00']);
 
         $this->assertTrue($result['duplicate_file']);
         $this->assertSame(1, $this->connection->table('files')->countAllResults());
@@ -146,13 +149,13 @@ final class TuroAccessReimbursementServiceTest extends CIUnitTestCase
     {
         $this->expectException(\RuntimeException::class);
 
-        $this->service->uploadUnmatchedReceipt($this->uploadedText('receipt.txt'), ['document_date' => '2026-07-19']);
+        $this->service->uploadUnmatchedReceipt(self::COMPANY_ID, $this->uploadedText('receipt.txt'), ['document_date' => '2026-07-19']);
     }
 
     public function testUnmatchedReceiptCanBeLinkedToSelectedAirportTrip(): void
     {
-        $receipt = $this->service->uploadUnmatchedReceipt($this->uploadedPng('receipt.png'), ['fleet_vehicle_id' => 9, 'document_date' => '2026-07-19', 'amount' => '18.00', 'ticket_number' => 'R1']);
-        $result = $this->service->linkReceiptToWorkflow((int) $receipt['receipt_id'], 1);
+        $receipt = $this->service->uploadUnmatchedReceipt(self::COMPANY_ID, $this->uploadedPng('receipt.png'), ['fleet_vehicle_id' => 9, 'document_date' => '2026-07-19', 'amount' => '18.00', 'ticket_number' => 'R1']);
+        $result = $this->service->linkReceiptToWorkflow(self::COMPANY_ID, (int) $receipt['receipt_id'], 1);
 
         $this->assertTrue($result['success']);
         $linked = $this->connection->table('airport_turo_access_receipts')->where('id', $receipt['receipt_id'])->get()->getRowArray();
@@ -162,9 +165,9 @@ final class TuroAccessReimbursementServiceTest extends CIUnitTestCase
 
     public function testOperationsExpenseCanExistWithoutTripAndReceiptCanBeAssignedToRun(): void
     {
-        $run = $this->service->createOperationsRun(['run_date' => '2026-07-19', 'purpose' => 'Wash and restage airport car', 'chase_vehicle_type' => 'personal_vehicle', 'chase_vehicle_description' => 'Personal Tacoma']);
-        $receiptId = $this->service->createUnmatchedReceipt(['document_date' => '2026-07-19', 'amount' => '14.00', 'receipt_classification' => 'unresolved']);
-        $assigned = $this->service->assignReceiptToOperationsExpense($receiptId, ['airport_operations_run_id' => $run['run_id'], 'expense_category' => 'car_wash', 'business_purpose_note' => 'Wash and return vehicle to HNL staging.']);
+        $run = $this->service->createOperationsRun(self::COMPANY_ID, ['run_date' => '2026-07-19', 'purpose' => 'Wash and restage airport car', 'chase_vehicle_type' => 'personal_vehicle', 'chase_vehicle_description' => 'Personal Tacoma']);
+        $receiptId = $this->service->createUnmatchedReceipt(self::COMPANY_ID, ['document_date' => '2026-07-19', 'amount' => '14.00', 'receipt_classification' => 'unresolved']);
+        $assigned = $this->service->assignReceiptToOperationsExpense(self::COMPANY_ID, $receiptId, ['airport_operations_run_id' => $run['run_id'], 'expense_category' => 'car_wash', 'business_purpose_note' => 'Wash and return vehicle to HNL staging.']);
 
         $this->assertTrue($assigned['success']);
         $expense = $this->connection->table('airport_operations_expenses')->where('id', $assigned['expense_id'])->get()->getRowArray();
@@ -177,8 +180,8 @@ final class TuroAccessReimbursementServiceTest extends CIUnitTestCase
 
     public function testNewRunCanBeCreatedDuringReceiptClassificationAndReferenceMultipleVehicles(): void
     {
-        $receiptId = $this->service->createUnmatchedReceipt(['document_date' => '2026-07-19', 'amount' => '18.00']);
-        $assigned = $this->service->assignReceiptToOperationsExpense($receiptId, [
+        $receiptId = $this->service->createUnmatchedReceipt(self::COMPANY_ID, ['document_date' => '2026-07-19', 'amount' => '18.00']);
+        $assigned = $this->service->assignReceiptToOperationsExpense(self::COMPANY_ID, $receiptId, [
             'create_airport_operations_run' => '1',
             'run_date' => '2026-07-19',
             'purpose' => 'Deliver and recover airport vehicles',
@@ -199,41 +202,41 @@ final class TuroAccessReimbursementServiceTest extends CIUnitTestCase
 
     public function testExpenseAllocationReconcilesToTotalAndUnallocatedRemainsValid(): void
     {
-        $run = $this->service->createOperationsRun(['run_date' => '2026-07-19', 'purpose' => 'Charge vehicles']);
-        $receiptId = $this->service->createUnmatchedReceipt(['document_date' => '2026-07-19', 'amount' => '30.00']);
-        $assigned = $this->service->assignReceiptToOperationsExpense($receiptId, ['airport_operations_run_id' => $run['run_id'], 'expense_category' => 'ev_charging', 'business_purpose_note' => 'Charging before airport handoff.']);
+        $run = $this->service->createOperationsRun(self::COMPANY_ID, ['run_date' => '2026-07-19', 'purpose' => 'Charge vehicles']);
+        $receiptId = $this->service->createUnmatchedReceipt(self::COMPANY_ID, ['document_date' => '2026-07-19', 'amount' => '30.00']);
+        $assigned = $this->service->assignReceiptToOperationsExpense(self::COMPANY_ID, $receiptId, ['airport_operations_run_id' => $run['run_id'], 'expense_category' => 'ev_charging', 'business_purpose_note' => 'Charging before airport handoff.']);
 
-        $this->assertTrue($this->service->allocateOperationsExpense((int) $assigned['expense_id'], [
+        $this->assertTrue($this->service->allocateOperationsExpense(self::COMPANY_ID, (int) $assigned['expense_id'], [
             ['fleet_vehicle_id' => 9, 'allocation_method' => 'manual_amount', 'allocated_amount' => '15.00'],
             ['fleet_vehicle_id' => 8, 'allocation_method' => 'manual_amount', 'allocated_amount' => '15.00'],
         ]));
-        $this->assertFalse($this->service->allocateOperationsExpense((int) $assigned['expense_id'], [
+        $this->assertFalse($this->service->allocateOperationsExpense(self::COMPANY_ID, (int) $assigned['expense_id'], [
             ['fleet_vehicle_id' => 9, 'allocation_method' => 'manual_amount', 'allocated_amount' => '31.00'],
         ]));
 
-        $unallocatedReceiptId = $this->service->createUnmatchedReceipt(['document_date' => '2026-07-19', 'amount' => '9.00']);
-        $unallocated = $this->service->assignReceiptToOperationsExpense($unallocatedReceiptId, ['airport_operations_run_id' => $run['run_id'], 'expense_category' => 'supplies', 'business_purpose_note' => 'Airport supplies.']);
+        $unallocatedReceiptId = $this->service->createUnmatchedReceipt(self::COMPANY_ID, ['document_date' => '2026-07-19', 'amount' => '9.00']);
+        $unallocated = $this->service->assignReceiptToOperationsExpense(self::COMPANY_ID, $unallocatedReceiptId, ['airport_operations_run_id' => $run['run_id'], 'expense_category' => 'supplies', 'business_purpose_note' => 'Airport supplies.']);
         $this->assertTrue($unallocated['success']);
     }
 
     public function testSplitReceiptTotalsReconcileAndDoubleCountingIsPrevented(): void
     {
-        $receiptId = $this->service->createUnmatchedReceipt(['fleet_vehicle_id' => 9, 'document_date' => '2026-07-19', 'amount' => '40.00']);
+        $receiptId = $this->service->createUnmatchedReceipt(self::COMPANY_ID, ['fleet_vehicle_id' => 9, 'document_date' => '2026-07-19', 'amount' => '40.00']);
 
-        $this->assertFalse($this->service->splitReceipt($receiptId, ['original_receipt_total' => '40.00', 'reimbursement_portion_amount' => '25.00', 'operations_expense_portion_amount' => '20.00', 'remaining_unclassified_amount' => '0.00'])['success'] ?? false);
-        $split = $this->service->splitReceipt($receiptId, ['original_receipt_total' => '40.00', 'reimbursement_portion_amount' => '25.00', 'operations_expense_portion_amount' => '15.00', 'remaining_unclassified_amount' => '0.00']);
+        $this->assertFalse($this->service->splitReceipt(self::COMPANY_ID, $receiptId, ['original_receipt_total' => '40.00', 'reimbursement_portion_amount' => '25.00', 'operations_expense_portion_amount' => '20.00', 'remaining_unclassified_amount' => '0.00'])['success'] ?? false);
+        $split = $this->service->splitReceipt(self::COMPANY_ID, $receiptId, ['original_receipt_total' => '40.00', 'reimbursement_portion_amount' => '25.00', 'operations_expense_portion_amount' => '15.00', 'remaining_unclassified_amount' => '0.00']);
         $this->assertTrue($split['success']);
 
-        $trip = $this->service->linkReceiptToWorkflow($receiptId, 1);
+        $trip = $this->service->linkReceiptToWorkflow(self::COMPANY_ID, $receiptId, 1);
         $this->assertTrue($trip['success']);
-        $blocked = $this->service->assignReceiptToOperationsExpense($receiptId, ['create_airport_operations_run' => '1', 'run_date' => '2026-07-19', 'expense_category' => 'parking', 'business_purpose_note' => 'Should be blocked.']);
+        $blocked = $this->service->assignReceiptToOperationsExpense(self::COMPANY_ID, $receiptId, ['create_airport_operations_run' => '1', 'run_date' => '2026-07-19', 'expense_category' => 'parking', 'business_purpose_note' => 'Should be blocked.']);
         $this->assertFalse($blocked['success']);
     }
 
     public function testReceiptCanBeReclassifiedAndChangesAreAudited(): void
     {
-        $receiptId = $this->service->createUnmatchedReceipt(['document_date' => '2026-07-19', 'amount' => '8.00']);
-        $result = $this->service->classifyReceipt($receiptId, 'non_business', 'Personal coffee stop.');
+        $receiptId = $this->service->createUnmatchedReceipt(self::COMPANY_ID, ['document_date' => '2026-07-19', 'amount' => '8.00']);
+        $result = $this->service->classifyReceipt(self::COMPANY_ID, $receiptId, 'non_business', 'Personal coffee stop.');
 
         $this->assertTrue($result['success']);
         $receipt = $this->connection->table('airport_turo_access_receipts')->where('id', $receiptId)->get()->getRowArray();
@@ -243,11 +246,11 @@ final class TuroAccessReimbursementServiceTest extends CIUnitTestCase
 
     public function testCommandCenterReceiptCountsIncludeOperationsWork(): void
     {
-        $this->service->createUnmatchedReceipt(['document_date' => '2026-07-19', 'amount' => '8.00']);
-        $receiptId = $this->service->createUnmatchedReceipt(['document_date' => '2026-07-19', 'amount' => '12.00']);
-        $this->service->assignReceiptToOperationsExpense($receiptId, ['expense_category' => 'parking', 'business_purpose_note' => 'Airport parking during recovery run.']);
+        $this->service->createUnmatchedReceipt(self::COMPANY_ID, ['document_date' => '2026-07-19', 'amount' => '8.00']);
+        $receiptId = $this->service->createUnmatchedReceipt(self::COMPANY_ID, ['document_date' => '2026-07-19', 'amount' => '12.00']);
+        $this->service->assignReceiptToOperationsExpense(self::COMPANY_ID, $receiptId, ['expense_category' => 'parking', 'business_purpose_note' => 'Airport parking during recovery run.']);
 
-        $summary = $this->service->attentionSummary();
+        $summary = $this->service->attentionSummary(self::COMPANY_ID);
         $this->assertSame(1, $summary['needs_classification']);
         $this->assertSame(1, $summary['expenses_missing_run']);
         $this->assertSame(1, $summary['runs_with_unallocated_expenses']);
@@ -256,29 +259,114 @@ final class TuroAccessReimbursementServiceTest extends CIUnitTestCase
 
     public function testReceiptMetadataCanBeEditedAndReadinessRecalculated(): void
     {
-        $incidentId = $this->service->createIncident(1, ['parking_amount_paid' => '18.00'])['incident_id'];
-        $this->service->uploadReceiptForIncident($incidentId, $this->uploadedPng('receipt.png'), ['amount' => '18.00', 'attachment_type' => 'paid_receipt']);
+        $incidentId = $this->service->createIncident(self::COMPANY_ID, 1, ['parking_amount_paid' => '18.00'])['incident_id'];
+        $this->service->uploadReceiptForIncident(self::COMPANY_ID, $incidentId, $this->uploadedPng('receipt.png'), ['amount' => '18.00', 'attachment_type' => 'paid_receipt']);
         $receipt = $this->connection->table('airport_turo_access_receipts')->where('airport_turo_access_override_incident_id', $incidentId)->get()->getRowArray();
 
-        $this->assertTrue($this->service->updateReceiptMetadata((int) $receipt['id'], ['amount' => '28.00', 'attachment_type' => 'paid_receipt']));
+        $this->assertTrue($this->service->updateReceiptMetadata(self::COMPANY_ID, (int) $receipt['id'], ['amount' => '28.00', 'attachment_type' => 'paid_receipt']));
         $updated = $this->connection->table('airport_turo_access_override_incidents')->where('id', $incidentId)->get()->getRowArray();
         $this->assertSame('21', (string) $updated['expected_reimbursement_amount']);
     }
 
     public function testAttentionSummaryCountsUnmatchedReadyAndFiled(): void
     {
-        $this->service->createUnmatchedReceipt(['fleet_vehicle_id' => 9, 'document_date' => '2026-07-19', 'amount' => '18.00']);
-        $readyId = $this->service->createIncident(1, ['parking_amount_paid' => '18.00'])['incident_id'];
-        $this->service->attachReceipt($readyId, ['original_filename' => 'receipt.jpg', 'amount' => '18.00']);
-        $filedId = $this->service->createIncident(1, ['parking_amount_paid' => '12.00'], true)['incident_id'];
-        $this->service->attachReceipt($filedId, ['original_filename' => 'receipt2.jpg', 'amount' => '12.00']);
-        $this->service->markFiled($filedId, 'CASE-2', '12.00');
+        $this->service->createUnmatchedReceipt(self::COMPANY_ID, ['fleet_vehicle_id' => 9, 'document_date' => '2026-07-19', 'amount' => '18.00']);
+        $readyId = $this->service->createIncident(self::COMPANY_ID, 1, ['parking_amount_paid' => '18.00'])['incident_id'];
+        $this->service->attachReceipt(self::COMPANY_ID, $readyId, ['original_filename' => 'receipt.jpg', 'amount' => '18.00']);
+        $filedId = $this->service->createIncident(self::COMPANY_ID, 1, ['parking_amount_paid' => '12.00'], true)['incident_id'];
+        $this->service->attachReceipt(self::COMPANY_ID, $filedId, ['original_filename' => 'receipt2.jpg', 'amount' => '12.00']);
+        $this->service->markFiled(self::COMPANY_ID, $filedId, 'CASE-2', '12.00');
 
-        $summary = $this->service->attentionSummary();
+        $summary = $this->service->attentionSummary(self::COMPANY_ID);
         $this->assertSame(1, $summary['unmatched_receipts']);
         $this->assertSame(1, $summary['ready_to_file']);
         $this->assertSame(1, $summary['filed_pending']);
         $this->assertTrue($summary['has_reimbursement_work']);
+    }
+
+    public function testWrongCompanyResourcesFailClosedAcrossEveryAirportResourceCategory(): void
+    {
+        $otherIncidentId = (int) $this->service->createIncident(2, 20, ['parking_amount_paid' => '11.00'])['incident_id'];
+        $otherReceiptId = $this->service->createUnmatchedReceipt(2, ['fleet_vehicle_id' => 19, 'document_date' => '2026-07-19', 'amount' => '11.00']);
+        $otherRunId = (int) $this->service->createOperationsRun(2, ['run_date' => '2026-07-19', 'purpose' => 'Other company airport run', 'chase_fleet_vehicle_id' => 19])['run_id'];
+        $assigned = $this->service->assignReceiptToOperationsExpense(2, $otherReceiptId, ['airport_operations_run_id' => $otherRunId, 'expense_category' => 'parking']);
+        $otherExpenseId = (int) $assigned['expense_id'];
+
+        $this->assertPageNotFound(fn () => $this->service->matchingWorkspace(self::COMPANY_ID, $otherReceiptId));
+        $this->assertPageNotFound(fn () => $this->service->classifyReceipt(self::COMPANY_ID, $otherReceiptId, 'non_business'));
+        $this->assertPageNotFound(fn () => $this->service->updateReceiptMetadata(self::COMPANY_ID, $otherReceiptId, ['amount' => '12.00']));
+        $this->assertPageNotFound(fn () => $this->service->markFiled(self::COMPANY_ID, $otherIncidentId, 'NOPE'));
+        $this->assertPageNotFound(fn () => $this->service->allocateOperationsExpense(self::COMPANY_ID, $otherExpenseId, []));
+        $this->assertPageNotFound(fn () => $this->service->splitReceipt(self::COMPANY_ID, $otherReceiptId, ['original_receipt_total' => '11.00']));
+
+        $repo = new TuroAccessReimbursementRepository($this->connection);
+        $this->assertNull($repo->workflow(self::COMPANY_ID, 20));
+        $this->assertNull($repo->incident(self::COMPANY_ID, $otherIncidentId));
+        $this->assertNull($repo->receipt(self::COMPANY_ID, $otherReceiptId));
+        $this->assertNull($repo->operationsRun(self::COMPANY_ID, $otherRunId));
+        $this->assertNull($repo->operationsExpense(self::COMPANY_ID, $otherExpenseId));
+    }
+
+    public function testCandidateSearchInboxAndSummaryExcludeOtherCompany(): void
+    {
+        $receiptId = $this->service->createUnmatchedReceipt(self::COMPANY_ID, ['fleet_vehicle_id' => 9, 'document_date' => '2026-07-19', 'amount' => '18.00']);
+        $this->service->createUnmatchedReceipt(2, ['fleet_vehicle_id' => 19, 'document_date' => '2026-07-19', 'amount' => '11.00']);
+        $this->service->createIncident(2, 20, ['parking_amount_paid' => '11.00']);
+        $otherRunId = (int) $this->service->createOperationsRun(2, ['run_date' => '2026-07-19', 'purpose' => 'Other company run', 'chase_fleet_vehicle_id' => 19])['run_id'];
+
+        $this->assertSame([], $this->service->searchCandidates(self::COMPANY_ID, $receiptId, 'Other Guest'));
+        $this->assertSame([], $this->service->inbox(self::COMPANY_ID)['incidents']);
+        $this->assertSame(1, $this->service->attentionSummary(self::COMPANY_ID)['unmatched_receipts']);
+        $runIds = array_map('intval', array_column($this->service->candidateOperationsRunsForReceipt(self::COMPANY_ID, $receiptId), 'id'));
+        $this->assertNotContains($otherRunId, $runIds);
+    }
+
+    public function testCrossCompanyReceiptWorkflowAndRunLinksLeaveNoPartialChanges(): void
+    {
+        $receiptId = $this->service->createUnmatchedReceipt(self::COMPANY_ID, ['fleet_vehicle_id' => 9, 'document_date' => '2026-07-19', 'amount' => '18.00']);
+        $otherRunId = (int) $this->service->createOperationsRun(2, ['run_date' => '2026-07-19', 'purpose' => 'Other company run', 'chase_fleet_vehicle_id' => 19])['run_id'];
+        $incidentCount = $this->connection->table('airport_turo_access_override_incidents')->countAllResults();
+        $expenseCount = $this->connection->table('airport_operations_expenses')->countAllResults();
+        $auditCount = $this->connection->table('airport_turo_access_audits')->countAllResults();
+
+        $this->assertPageNotFound(fn () => $this->service->linkReceiptToWorkflow(self::COMPANY_ID, $receiptId, 20));
+        $this->assertSame($incidentCount, $this->connection->table('airport_turo_access_override_incidents')->countAllResults());
+        $this->assertSame($auditCount, $this->connection->table('airport_turo_access_audits')->countAllResults());
+
+        $this->assertPageNotFound(fn () => $this->service->assignReceiptToOperationsExpense(self::COMPANY_ID, $receiptId, ['airport_operations_run_id' => $otherRunId, 'expense_category' => 'parking']));
+        $this->assertSame($expenseCount, $this->connection->table('airport_operations_expenses')->countAllResults());
+        $receipt = $this->connection->table('airport_turo_access_receipts')->where('id', $receiptId)->get()->getRowArray();
+        $this->assertSame('unresolved', $receipt['receipt_classification']);
+        $this->assertNull($receipt['airport_operations_expense_id']);
+    }
+
+    public function testCrossCompanyActivityAndAllocationRejectBeforeWriting(): void
+    {
+        $runCount = $this->connection->table('airport_operations_runs')->countAllResults();
+        $activityCount = $this->connection->table('airport_operations_run_activities')->countAllResults();
+        $auditCount = $this->connection->table('airport_turo_access_audits')->countAllResults();
+        try {
+            $this->service->createOperationsRun(self::COMPANY_ID, [
+                'run_date' => '2026-07-19',
+                'purpose' => 'Invalid mixed-company run',
+                'activities' => [['activity_type' => 'recover_fleet_vehicle', 'fleet_vehicle_id' => 19, 'turo_trip_normalized_id' => 20, 'airport_movement_workflow_id' => 20]],
+            ]);
+            $this->fail('Cross-company run activity must be rejected.');
+        } catch (InvalidArgumentException) {
+            $this->addToAssertionCount(1);
+        }
+        $this->assertSame($runCount, $this->connection->table('airport_operations_runs')->countAllResults());
+        $this->assertSame($activityCount, $this->connection->table('airport_operations_run_activities')->countAllResults());
+        $this->assertSame($auditCount, $this->connection->table('airport_turo_access_audits')->countAllResults());
+
+        $runId = (int) $this->service->createOperationsRun(self::COMPANY_ID, ['run_date' => '2026-07-19', 'purpose' => 'Valid company run'])['run_id'];
+        $receiptId = $this->service->createUnmatchedReceipt(self::COMPANY_ID, ['document_date' => '2026-07-19', 'amount' => '20.00']);
+        $expenseId = (int) $this->service->assignReceiptToOperationsExpense(self::COMPANY_ID, $receiptId, ['airport_operations_run_id' => $runId, 'expense_category' => 'parking'])['expense_id'];
+        $this->assertTrue($this->service->allocateOperationsExpense(self::COMPANY_ID, $expenseId, [['fleet_vehicle_id' => 9, 'allocation_method' => 'manual_amount', 'allocated_amount' => '10.00']]));
+        $this->assertFalse($this->service->allocateOperationsExpense(self::COMPANY_ID, $expenseId, [['fleet_vehicle_id' => 19, 'allocation_method' => 'manual_amount', 'allocated_amount' => '10.00']]));
+        $allocations = $this->connection->table('airport_operations_expense_allocations')->where('airport_operations_expense_id', $expenseId)->get()->getResultArray();
+        $this->assertCount(1, $allocations);
+        $this->assertSame(9, (int) $allocations[0]['fleet_vehicle_id']);
     }
 
     private function resetSchema(): void
@@ -290,16 +378,16 @@ final class TuroAccessReimbursementServiceTest extends CIUnitTestCase
 
     private function createSchema(): void
     {
-        $this->connection->query('CREATE TABLE ' . $this->table('fleet_vehicles') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, fleet_code VARCHAR(80), display_name VARCHAR(150))');
+        $this->connection->query('CREATE TABLE ' . $this->table('fleet_vehicles') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, company_id INTEGER NOT NULL, fleet_code VARCHAR(80), display_name VARCHAR(150))');
         $this->connection->query('CREATE TABLE ' . $this->table('files') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, storage_disk VARCHAR(80), path VARCHAR(255), original_filename VARCHAR(190) NULL, mime_type VARCHAR(120) NULL, size_bytes INTEGER NULL, document_date DATE NULL, checksum VARCHAR(128) NULL, uploaded_by INTEGER NULL, created_at DATETIME NULL, updated_at DATETIME NULL, deleted_at DATETIME NULL)');
         $this->connection->query('CREATE TABLE ' . $this->table('turo_trips_normalized') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, fleet_vehicle_id INTEGER, turo_trip_id VARCHAR(80), guest_name VARCHAR(190), starts_at DATETIME, ends_at DATETIME)');
         $this->connection->query('CREATE TABLE ' . $this->table('airport_movement_workflows') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, airport_delivery_id INTEGER NULL, turo_trip_normalized_id INTEGER, trip_movement_checklist_id INTEGER NULL, fleet_vehicle_id INTEGER, airport_id INTEGER, movement_type VARCHAR(40), scheduled_at DATETIME, workflow_status VARCHAR(40), garage VARCHAR(120) NULL, parking_level VARCHAR(40) NULL, parking_row VARCHAR(80) NULL, parking_stall VARCHAR(80) NULL, completed_at DATETIME NULL, updated_at DATETIME NULL)');
         $this->connection->query('CREATE TABLE ' . $this->table('airport_movement_exceptions') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, airport_movement_workflow_id INTEGER, exception_type VARCHAR(80), severity VARCHAR(40), note TEXT, resolved_at DATETIME NULL, resolution_note TEXT NULL, created_at DATETIME NULL, updated_at DATETIME NULL)');
         $this->connection->query('CREATE TABLE ' . $this->table('airport_movement_audits') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, airport_movement_workflow_id INTEGER, action VARCHAR(60), old_values TEXT NULL, new_values TEXT NULL, created_by INTEGER NULL, created_at DATETIME NULL)');
         $this->connection->query('CREATE TABLE ' . $this->table('airport_turo_access_override_incidents') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, airport_movement_workflow_id INTEGER NULL, turo_trip_normalized_id INTEGER NULL, fleet_vehicle_id INTEGER NULL, movement_type VARCHAR(40) NULL, incident_stage VARCHAR(60), claim_status VARCHAR(60), incident_context VARCHAR(40), operator_type VARCHAR(40), incident_at DATETIME NULL, ticket_number VARCHAR(120) NULL, parking_entry_at DATETIME NULL, parking_exit_at DATETIME NULL, parking_amount_paid DECIMAL(10,2) NULL, payment_at DATETIME NULL, payment_method VARCHAR(80) NULL, expected_reimbursement_amount DECIMAL(10,2), host_unreimbursed_amount DECIMAL(10,2), claim_filed_on DATE NULL, claim_reference VARCHAR(120) NULL, claimed_amount DECIMAL(10,2) NULL, approved_amount DECIMAL(10,2) NULL, reimbursed_amount DECIMAL(10,2) NULL, reimbursed_on DATE NULL, denial_reason TEXT NULL, operator_note TEXT NULL, created_at DATETIME NULL, updated_at DATETIME NULL)');
-        $this->connection->query('CREATE TABLE ' . $this->table('airport_turo_access_receipts') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, airport_turo_access_override_incident_id INTEGER NULL, airport_operations_expense_id INTEGER NULL, turo_trip_normalized_id INTEGER NULL, fleet_vehicle_id INTEGER NULL, file_id INTEGER NULL, attachment_type VARCHAR(80), receipt_classification VARCHAR(60) DEFAULT "unresolved", original_filename VARCHAR(190) NULL, mime_type VARCHAR(120) NULL, document_date DATE NULL, amount DECIMAL(10,2) NULL, ticket_number VARCHAR(120) NULL, note TEXT NULL, classification_note TEXT NULL, created_at DATETIME NULL, updated_at DATETIME NULL)');
+        $this->connection->query('CREATE TABLE ' . $this->table('airport_turo_access_receipts') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, company_id INTEGER NOT NULL, airport_turo_access_override_incident_id INTEGER NULL, airport_operations_expense_id INTEGER NULL, turo_trip_normalized_id INTEGER NULL, fleet_vehicle_id INTEGER NULL, file_id INTEGER NULL, attachment_type VARCHAR(80), receipt_classification VARCHAR(60) DEFAULT "unresolved", original_filename VARCHAR(190) NULL, mime_type VARCHAR(120) NULL, document_date DATE NULL, amount DECIMAL(10,2) NULL, ticket_number VARCHAR(120) NULL, note TEXT NULL, classification_note TEXT NULL, created_at DATETIME NULL, updated_at DATETIME NULL)');
         $this->connection->query('CREATE TABLE ' . $this->table('airport_turo_access_audits') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, airport_turo_access_override_incident_id INTEGER NULL, action VARCHAR(80), old_values TEXT NULL, new_values TEXT NULL, created_by INTEGER NULL, created_at DATETIME NULL)');
-        $this->connection->query('CREATE TABLE ' . $this->table('airport_operations_runs') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, run_date DATE, start_time TIME NULL, end_time TIME NULL, chase_vehicle_type VARCHAR(40), chase_fleet_vehicle_id INTEGER NULL, chase_vehicle_description VARCHAR(190) NULL, operator_name VARCHAR(120) NULL, purpose VARCHAR(190), airport_id INTEGER NULL, starting_location VARCHAR(190) NULL, ending_location VARCHAR(190) NULL, starting_mileage DECIMAL(10,1) NULL, ending_mileage DECIMAL(10,1) NULL, business_miles DECIMAL(10,1) NULL, notes TEXT NULL, run_status VARCHAR(40), created_at DATETIME NULL, updated_at DATETIME NULL)');
+        $this->connection->query('CREATE TABLE ' . $this->table('airport_operations_runs') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, company_id INTEGER NOT NULL, run_date DATE, start_time TIME NULL, end_time TIME NULL, chase_vehicle_type VARCHAR(40), chase_fleet_vehicle_id INTEGER NULL, chase_vehicle_description VARCHAR(190) NULL, operator_name VARCHAR(120) NULL, purpose VARCHAR(190), airport_id INTEGER NULL, starting_location VARCHAR(190) NULL, ending_location VARCHAR(190) NULL, starting_mileage DECIMAL(10,1) NULL, ending_mileage DECIMAL(10,1) NULL, business_miles DECIMAL(10,1) NULL, notes TEXT NULL, run_status VARCHAR(40), created_at DATETIME NULL, updated_at DATETIME NULL)');
         $this->connection->query('CREATE TABLE ' . $this->table('airport_operations_run_activities') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, airport_operations_run_id INTEGER, activity_type VARCHAR(60), fleet_vehicle_id INTEGER NULL, turo_trip_normalized_id INTEGER NULL, airport_movement_workflow_id INTEGER NULL, movement_type VARCHAR(40) NULL, started_at DATETIME NULL, completed_at DATETIME NULL, note TEXT NULL, created_at DATETIME NULL, updated_at DATETIME NULL)');
         $this->connection->query('CREATE TABLE ' . $this->table('airport_operations_expenses') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, airport_operations_run_id INTEGER NULL, airport_turo_access_receipt_id INTEGER NULL, expense_category VARCHAR(60), amount DECIMAL(10,2), expense_date DATE, vendor VARCHAR(190) NULL, payment_method VARCHAR(80) NULL, file_id INTEGER NULL, business_purpose_note TEXT, is_reimbursable INTEGER DEFAULT 0, reimbursement_source VARCHAR(120) NULL, accounting_status VARCHAR(60), created_at DATETIME NULL, updated_at DATETIME NULL)');
         $this->connection->query('CREATE TABLE ' . $this->table('airport_operations_expense_allocations') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, airport_operations_expense_id INTEGER, fleet_vehicle_id INTEGER NULL, allocation_method VARCHAR(40), allocated_amount DECIMAL(10,2), allocated_percentage DECIMAL(5,2) NULL, note TEXT NULL, created_at DATETIME NULL, updated_at DATETIME NULL)');
@@ -308,12 +396,25 @@ final class TuroAccessReimbursementServiceTest extends CIUnitTestCase
 
     private function seedData(): void
     {
-        $this->connection->table('fleet_vehicles')->insert(['id' => 9, 'fleet_code' => 'Spaceship-009', 'display_name' => 'Spaceship-009']);
-        $this->connection->table('fleet_vehicles')->insert(['id' => 8, 'fleet_code' => 'Spaceship-008', 'display_name' => 'Spaceship-008']);
+        $this->connection->table('fleet_vehicles')->insert(['id' => 9, 'company_id' => self::COMPANY_ID, 'fleet_code' => 'Spaceship-009', 'display_name' => 'Spaceship-009']);
+        $this->connection->table('fleet_vehicles')->insert(['id' => 8, 'company_id' => self::COMPANY_ID, 'fleet_code' => 'Spaceship-008', 'display_name' => 'Spaceship-008']);
+        $this->connection->table('fleet_vehicles')->insert(['id' => 19, 'company_id' => 2, 'fleet_code' => 'Other-019', 'display_name' => 'Other-019']);
         $this->connection->table('turo_trips_normalized')->insert(['id' => 10, 'fleet_vehicle_id' => 9, 'turo_trip_id' => 'trip-10', 'guest_name' => 'Guest Ten', 'starts_at' => '2026-07-19 14:00:00', 'ends_at' => '2026-07-19 18:00:00']);
         $this->connection->table('turo_trips_normalized')->insert(['id' => 11, 'fleet_vehicle_id' => 8, 'turo_trip_id' => 'trip-11', 'guest_name' => 'Guest Eleven', 'starts_at' => '2026-07-19 15:00:00', 'ends_at' => '2026-07-19 19:00:00']);
+        $this->connection->table('turo_trips_normalized')->insert(['id' => 20, 'fleet_vehicle_id' => 19, 'turo_trip_id' => 'trip-20', 'guest_name' => 'Other Guest', 'starts_at' => '2026-07-19 16:00:00', 'ends_at' => '2026-07-19 20:00:00']);
         $this->connection->table('airport_movement_workflows')->insert(['id' => 1, 'airport_delivery_id' => 1, 'turo_trip_normalized_id' => 10, 'trip_movement_checklist_id' => null, 'fleet_vehicle_id' => 9, 'airport_id' => 1, 'movement_type' => 'pickup', 'scheduled_at' => '2026-07-19 14:00:00', 'workflow_status' => 'picked_up', 'garage' => 'HNL International Parking Garage', 'parking_level' => '7', 'parking_row' => 'C', 'parking_stall' => '742']);
         $this->connection->table('airport_movement_workflows')->insert(['id' => 2, 'airport_delivery_id' => 2, 'turo_trip_normalized_id' => 11, 'trip_movement_checklist_id' => null, 'fleet_vehicle_id' => 8, 'airport_id' => 1, 'movement_type' => 'return', 'scheduled_at' => '2026-07-19 15:00:00', 'workflow_status' => 'completed', 'garage' => 'HNL International Parking Garage', 'parking_level' => '6', 'parking_row' => 'B', 'parking_stall' => '611']);
+        $this->connection->table('airport_movement_workflows')->insert(['id' => 20, 'airport_delivery_id' => 20, 'turo_trip_normalized_id' => 20, 'trip_movement_checklist_id' => null, 'fleet_vehicle_id' => 19, 'airport_id' => 1, 'movement_type' => 'pickup', 'scheduled_at' => '2026-07-19 16:00:00', 'workflow_status' => 'picked_up', 'garage' => 'HNL International Parking Garage', 'parking_level' => '5', 'parking_row' => 'A', 'parking_stall' => '501']);
+    }
+
+    private function assertPageNotFound(callable $callback): void
+    {
+        try {
+            $callback();
+            $this->fail('Expected generic not-found behavior.');
+        } catch (PageNotFoundException) {
+            $this->addToAssertionCount(1);
+        }
     }
 
     private function table(string $table): string

@@ -35,6 +35,8 @@ class DailyOperationsDashboardService
     public function forToday(?DateTimeImmutable $asOf = null, ?string $movementFilter = null): array
     {
         $asOf ??= new DateTimeImmutable();
+        $fleetSnapshot = $this->fleetSnapshot()->forSingleFleetCompany($asOf);
+        $companyId = (int) $fleetSnapshot['company_id'];
         $today = $this->tasks()->today($asOf);
         $health = $this->health()->summary($asOf);
         $vehicles = $this->availability()->vehicleStatus($asOf);
@@ -42,11 +44,10 @@ class DailyOperationsDashboardService
         $importIssues = $this->importIssues()->attentionSummary();
         $vehicleMappings = $this->vehicleMappings()->attentionSummary();
         $reconciliation = $this->reconciliation()->attentionSummary();
-        $airport = $this->airport()->attentionSummary($asOf);
-        $reimbursements = $this->reimbursements()->attentionSummary();
+        $airport = $this->airport()->attentionSummary($companyId, $asOf);
+        $reimbursements = $this->reimbursements()->attentionSummary($companyId);
         $incidentals = $this->incidentals()->attentionSummaryForSingleCompany($asOf);
         $checklists = $this->attachReadinessProjections($this->checklists()->summariesForDay($asOf), $asOf);
-        $fleetSnapshot = $this->fleetSnapshot()->forSingleFleetCompany($asOf);
         $board = $this->stateService->movementBoard($vehicles, $today, $health, $asOf);
         $board = $this->attachCurrentPositions($board, $fleetSnapshot['vehicles']);
         $board = $this->attachChecklistSummaries($board, $checklists);

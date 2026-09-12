@@ -58,6 +58,20 @@ class MovementChecklistRepository
         return $row === null ? null : $row;
     }
 
+    /** @return array<string, mixed>|null */
+    public function checklistForCompany(int $companyId, int $id): ?array
+    {
+        $row = $this->db->table('trip_movement_checklists checklists')
+            ->select('checklists.*, trips.guest_name, trips.starts_at, trips.ends_at, trips.turo_trip_id, fv.company_id, fv.fleet_code, fv.display_name')
+            ->join('turo_trips_normalized trips', 'trips.id = checklists.turo_trip_normalized_id AND trips.fleet_vehicle_id = checklists.fleet_vehicle_id')
+            ->join('fleet_vehicles fv', 'fv.id = checklists.fleet_vehicle_id')
+            ->where(['checklists.id' => $id, 'fv.company_id' => $companyId])
+            ->get()
+            ->getRowArray();
+
+        return $row === null ? null : $row;
+    }
+
     /** @return array<int, array<string, mixed>> */
     public function items(int $checklistId): array
     {
@@ -96,6 +110,35 @@ class MovementChecklistRepository
         $this->audit((int) $old['trip_movement_checklist_id'], $itemId, 'item_updated', $old, array_merge($old, $data), $actorUserId);
 
         return $this->db->affectedRows() > 0;
+    }
+
+    public function updateItemForCompany(int $companyId, int $itemId, array $data, ?int $actorUserId = null): bool
+    {
+        $old = $this->db->table('trip_movement_checklist_items items')
+            ->select('items.*')
+            ->join('trip_movement_checklists checklists', 'checklists.id = items.trip_movement_checklist_id')
+            ->join('fleet_vehicles vehicles', 'vehicles.id = checklists.fleet_vehicle_id')
+            ->where(['items.id' => $itemId, 'vehicles.company_id' => $companyId])
+            ->get()
+            ->getRowArray();
+        if ($old === null) {
+            return false;
+        }
+
+        $companyChecklistIds = $this->db->table('trip_movement_checklists checklists')
+            ->select('checklists.id')
+            ->join('fleet_vehicles vehicles', 'vehicles.id = checklists.fleet_vehicle_id')
+            ->where('vehicles.company_id', $companyId);
+        $this->db->table('trip_movement_checklist_items')
+            ->where('id', $itemId)
+            ->whereIn('trip_movement_checklist_id', $companyChecklistIds)
+            ->update(array_merge($data, ['updated_at' => date('Y-m-d H:i:s')]));
+        if ($this->db->affectedRows() < 1) {
+            return false;
+        }
+        $this->audit((int) $old['trip_movement_checklist_id'], $itemId, 'item_updated', $old, array_merge($old, $data), $actorUserId);
+
+        return true;
     }
 
     public function updateChecklist(int $checklistId, array $data, ?int $actorUserId = null): bool

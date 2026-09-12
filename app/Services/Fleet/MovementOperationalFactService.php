@@ -703,7 +703,8 @@ class MovementOperationalFactService
             ->get(1)
             ->getRowArray();
         if ($workflow !== null) {
-            if (! (new AirportMovementRepository($this->db))->updateWorkflow((int) $workflow['id'], $data, $action, $actorUserId)) {
+            $companyId = (int) ($checklist['company_id'] ?? 0);
+            if ($companyId < 1 || ! (new AirportMovementRepository($this->db))->updateWorkflow($companyId, (int) $workflow['id'], $data, $action, $actorUserId)) {
                 throw new RuntimeException('Airport workflow synchronization failed.');
             }
         }

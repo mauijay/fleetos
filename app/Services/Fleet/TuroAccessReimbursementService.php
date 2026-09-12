@@ -4,6 +4,7 @@ namespace App\Services\Fleet;
 
 use App\Repositories\TuroAccessReimbursementRepository;
 use App\Services\Files\PrivateFileStorageService;
+use CodeIgniter\Exceptions\PageNotFoundException;
 use CodeIgniter\HTTP\Files\UploadedFile;
 use Config\TuroAccess;
 
@@ -17,21 +18,27 @@ class TuroAccessReimbursementService
     }
 
     /** @return array<string, mixed> */
-    public function createIncident(int $workflowId, array $data, bool $confirmDuplicate = false): array
+    public function createIncident(int $companyId, int $workflowId, array $data, bool $confirmDuplicate = false): array
     {
-        $workflow = $this->repo()->workflow($workflowId);
-        if ($workflow === null) {
-            return $this->failed('invalid_airport_workflow', 'Choose a valid airport workflow before recording this incident.');
-        }
+        $workflow = $this->requireWorkflow($companyId, $workflowId);
 
         $ticketNumber = trim((string) ($data['ticket_number'] ?? ''));
-        if (! $confirmDuplicate && $this->repo()->possibleDuplicate($workflowId, $ticketNumber === '' ? null : $ticketNumber) !== null) {
+        if (! $confirmDuplicate && $this->repo()->possibleDuplicate($companyId, $workflowId, $ticketNumber === '' ? null : $ticketNumber) !== null) {
             return $this->failed('possible_duplicate', 'A Turo Access override incident may already exist for this airport movement. Confirm duplicate if this is a separate ticket.');
         }
 
         $amount = $this->amount($data['parking_amount_paid'] ?? null);
         $amounts = $this->amounts($amount);
-        $incidentId = $this->repo()->createIncident(array_merge($amounts, [
+        $incidentId = $this->repo()->transaction(fn (): int => $this->createIncidentAndException($companyId, $workflowId, $workflow, $data, $amounts, $ticketNumber));
+
+        return ['success' => true, 'incident_id' => $incidentId, 'message' => 'Turo Access override incident recorded.'];
+    }
+
+    /** @param array<string, mixed> $workflow @param array<string, mixed> $data @param array<string, float> $amounts */
+    private function createIncidentAndException(int $companyId, int $workflowId, array $workflow, array $data, array $amounts, string $ticketNumber): int
+    {
+        $amount = $this->amount($data['parking_amount_paid'] ?? null);
+        $incidentId = $this->repo()->createIncident($companyId, array_merge($amounts, [
             'airport_movement_workflow_id' => $workflowId,
             'turo_trip_normalized_id' => (int) $workflow['turo_trip_normalized_id'],
             'fleet_vehicle_id' => (int) $workflow['fleet_vehicle_id'],
@@ -50,19 +57,18 @@ class TuroAccessReimbursementService
             'operator_note' => $data['operator_note'] ?? null,
         ]));
 
-        $this->repo()->recordAirportException($workflowId, 'Turo Access was overridden by a physical parking ticket.');
+        if (! $this->repo()->recordAirportException($companyId, $workflowId, 'Turo Access was overridden by a physical parking ticket.')) {
+            throw new \RuntimeException('Airport incident exception could not be recorded.');
+        }
 
-        return ['success' => true, 'incident_id' => $incidentId, 'message' => 'Turo Access override incident recorded.'];
+        return $incidentId;
     }
 
-    public function attachReceipt(int $incidentId, array $data): bool
+    public function attachReceipt(int $companyId, int $incidentId, array $data): bool
     {
-        $incident = $this->repo()->incident($incidentId);
-        if ($incident === null) {
-            return false;
-        }
+        $incident = $this->requireIncident($companyId, $incidentId);
         $amount = $this->amount($data['amount'] ?? null);
-        $this->repo()->createReceipt([
+        $this->repo()->createReceipt($companyId, [
             'airport_turo_access_override_incident_id' => $incidentId,
             'turo_trip_normalized_id' => $incident['turo_trip_normalized_id'],
             'fleet_vehicle_id' => $incident['fleet_vehicle_id'],
@@ -77,13 +83,14 @@ class TuroAccessReimbursementService
             'note' => $data['note'] ?? null,
         ]);
 
-        return $this->refreshClaimReadiness($incidentId);
+        return $this->refreshClaimReadiness($companyId, $incidentId);
     }
 
-    public function uploadReceiptForIncident(int $incidentId, UploadedFile $upload, array $data): array
+    public function uploadReceiptForIncident(int $companyId, int $incidentId, UploadedFile $upload, array $data): array
     {
+        $this->requireIncident($companyId, $incidentId);
         $stored = $this->files()->storeReceiptEvidence($upload, $data['document_date'] ?? null);
-        $ok = $this->attachReceipt($incidentId, array_merge($data, [
+        $ok = $this->attachReceipt($companyId, $incidentId, array_merge($data, [
             'file_id' => $stored['file_id'],
             'original_filename' => $stored['file']['original_filename'] ?? null,
             'mime_type' => $stored['file']['mime_type'] ?? null,
@@ -92,9 +99,9 @@ class TuroAccessReimbursementService
         return ['success' => $ok, 'duplicate_file' => (bool) $stored['duplicate'], 'file_id' => $stored['file_id']];
     }
 
-    public function createUnmatchedReceipt(array $data): int
+    public function createUnmatchedReceipt(int $companyId, array $data): int
     {
-        return $this->repo()->createReceipt([
+        return $this->repo()->createReceipt($companyId, [
             'fleet_vehicle_id' => isset($data['fleet_vehicle_id']) ? (int) $data['fleet_vehicle_id'] : null,
             'file_id' => $data['file_id'] ?? null,
             'attachment_type' => $data['attachment_type'] ?? 'paid_receipt',
@@ -108,20 +115,21 @@ class TuroAccessReimbursementService
         ]);
     }
 
-    public function uploadUnmatchedReceipt(UploadedFile $upload, array $data): array
+    public function uploadUnmatchedReceipt(int $companyId, UploadedFile $upload, array $data): array
     {
+        $this->repo()->validateReceiptRelationships($companyId, $data);
         $stored = $this->files()->storeReceiptEvidence($upload, $data['document_date'] ?? null);
-        $receiptId = $this->createUnmatchedReceipt(array_merge($data, [
+        $receiptId = $this->createUnmatchedReceipt($companyId, array_merge($data, [
             'file_id' => $stored['file_id'],
             'original_filename' => $stored['file']['original_filename'] ?? null,
             'mime_type' => $stored['file']['mime_type'] ?? null,
         ]));
 
-        return ['success' => true, 'receipt_id' => $receiptId, 'duplicate_file' => (bool) $stored['duplicate'], 'candidates' => $this->candidateTripsForReceipt($receiptId)];
+        return ['success' => true, 'receipt_id' => $receiptId, 'duplicate_file' => (bool) $stored['duplicate'], 'candidates' => $this->candidateTripsForReceipt($companyId, $receiptId)];
     }
 
     /** @return array<string, mixed> */
-    public function createOperationsRun(array $data): array
+    public function createOperationsRun(int $companyId, array $data): array
     {
         $runDate = (string) ($data['run_date'] ?? $data['document_date'] ?? date('Y-m-d'));
         $startMileage = $this->mileage($data['starting_mileage'] ?? null);
@@ -131,46 +139,50 @@ class TuroAccessReimbursementService
             $businessMiles = round($endMileage - $startMileage, 1);
         }
 
-        $runId = $this->repo()->createOperationsRun([
-            'run_date' => $runDate,
-            'start_time' => $data['start_time'] ?? null,
-            'end_time' => $data['end_time'] ?? null,
-            'chase_vehicle_type' => $this->chaseVehicleType($data['chase_vehicle_type'] ?? 'personal_vehicle'),
-            'chase_fleet_vehicle_id' => isset($data['chase_fleet_vehicle_id']) && (int) $data['chase_fleet_vehicle_id'] > 0 ? (int) $data['chase_fleet_vehicle_id'] : null,
-            'chase_vehicle_description' => $data['chase_vehicle_description'] ?? null,
-            'operator_name' => $data['operator_name'] ?? null,
-            'purpose' => trim((string) ($data['purpose'] ?? 'Airport operations')),
-            'airport_id' => isset($data['airport_id']) && (int) $data['airport_id'] > 0 ? (int) $data['airport_id'] : null,
-            'starting_location' => $data['starting_location'] ?? null,
-            'ending_location' => $data['ending_location'] ?? null,
-            'starting_mileage' => $startMileage,
-            'ending_mileage' => $endMileage,
-            'business_miles' => $businessMiles,
-            'notes' => $data['notes'] ?? null,
-            'run_status' => in_array($data['run_status'] ?? 'open', ['open', 'complete', 'cancelled'], true) ? (string) ($data['run_status'] ?? 'open') : 'open',
-        ]);
+        $runId = $this->repo()->transaction(function () use ($companyId, $data, $runDate, $startMileage, $endMileage, $businessMiles): int {
+            $runId = $this->repo()->createOperationsRun($companyId, [
+                'run_date' => $runDate,
+                'start_time' => $data['start_time'] ?? null,
+                'end_time' => $data['end_time'] ?? null,
+                'chase_vehicle_type' => $this->chaseVehicleType($data['chase_vehicle_type'] ?? 'personal_vehicle'),
+                'chase_fleet_vehicle_id' => isset($data['chase_fleet_vehicle_id']) && (int) $data['chase_fleet_vehicle_id'] > 0 ? (int) $data['chase_fleet_vehicle_id'] : null,
+                'chase_vehicle_description' => $data['chase_vehicle_description'] ?? null,
+                'operator_name' => $data['operator_name'] ?? null,
+                'purpose' => trim((string) ($data['purpose'] ?? 'Airport operations')),
+                'airport_id' => isset($data['airport_id']) && (int) $data['airport_id'] > 0 ? (int) $data['airport_id'] : null,
+                'starting_location' => $data['starting_location'] ?? null,
+                'ending_location' => $data['ending_location'] ?? null,
+                'starting_mileage' => $startMileage,
+                'ending_mileage' => $endMileage,
+                'business_miles' => $businessMiles,
+                'notes' => $data['notes'] ?? null,
+                'run_status' => in_array($data['run_status'] ?? 'open', ['open', 'complete', 'cancelled'], true) ? (string) ($data['run_status'] ?? 'open') : 'open',
+            ]);
 
-        foreach ($this->activityPayloads($data) as $activity) {
-            $this->repo()->createRunActivity($runId, $activity);
-        }
+            foreach ($this->activityPayloads($data) as $activity) {
+                $this->repo()->createRunActivity($companyId, $runId, $activity);
+            }
+
+            return $runId;
+        });
 
         return ['success' => true, 'run_id' => $runId, 'message' => 'Airport operations run recorded.'];
     }
 
     /** @return array<string, mixed> */
-    public function assignReceiptToOperationsExpense(int $receiptId, array $data): array
+    public function assignReceiptToOperationsExpense(int $companyId, int $receiptId, array $data): array
     {
-        $result = $this->repo()->transaction(function () use ($receiptId, $data): array {
-            $receipt = $this->repo()->receipt($receiptId);
-            if ($receipt === null) {
-                return $this->failed('missing_receipt', 'Choose a valid receipt before assigning it to an airport run.');
-            }
+        $result = $this->repo()->transaction(function () use ($companyId, $receiptId, $data): array {
+            $receipt = $this->requireReceipt($companyId, $receiptId);
             if (($receipt['airport_turo_access_override_incident_id'] ?? null) !== null) {
                 return $this->failed('already_claim_receipt', 'This receipt is already linked to a trip reimbursement claim. Split it before assigning an operations expense.');
             }
 
-            $runId = $this->runIdFromData($data);
-            $expenseId = $this->repo()->createOperationsExpense([
+            $runId = $this->runIdFromData($companyId, $data);
+            if ($runId !== null && $this->repo()->operationsRun($companyId, $runId) === null) {
+                throw PageNotFoundException::forPageNotFound();
+            }
+            $expenseId = $this->repo()->createOperationsExpense($companyId, [
                 'airport_operations_run_id' => $runId,
                 'airport_turo_access_receipt_id' => $receiptId,
                 'expense_category' => $this->expenseCategory($data['expense_category'] ?? 'parking'),
@@ -184,7 +196,9 @@ class TuroAccessReimbursementService
                 'reimbursement_source' => $data['reimbursement_source'] ?? null,
                 'accounting_status' => $this->accountingStatus($data['accounting_status'] ?? 'unreviewed'),
             ]);
-            $this->repo()->linkReceiptToOperationsExpense($receiptId, $expenseId, $runId, (string) ($data['classification_note'] ?? 'Assigned to airport operations expense.'));
+            if (! $this->repo()->linkReceiptToOperationsExpense($companyId, $receiptId, $expenseId, $runId, (string) ($data['classification_note'] ?? 'Assigned to airport operations expense.'))) {
+                throw new \RuntimeException('Receipt could not be linked to the operations expense.');
+            }
 
             return ['success' => true, 'expense_id' => $expenseId, 'run_id' => $runId, 'message' => 'Receipt assigned to airport operations expense.'];
         });
@@ -193,40 +207,46 @@ class TuroAccessReimbursementService
     }
 
     /** @return array<string, mixed> */
-    public function uploadAirportRunExpense(UploadedFile $upload, array $data): array
+    public function uploadAirportRunExpense(int $companyId, UploadedFile $upload, array $data): array
     {
+        $this->repo()->validateReceiptRelationships($companyId, $data);
+        $runId = isset($data['airport_operations_run_id']) ? (int) $data['airport_operations_run_id'] : 0;
+        if ($runId > 0 && $this->repo()->operationsRun($companyId, $runId) === null) {
+            throw PageNotFoundException::forPageNotFound();
+        }
         $stored = $this->files()->storeReceiptEvidence($upload, $data['expense_date'] ?? $data['document_date'] ?? null);
-        $receiptId = $this->createUnmatchedReceipt(array_merge($data, [
+        $receiptId = $this->createUnmatchedReceipt($companyId, array_merge($data, [
             'receipt_classification' => 'unresolved',
             'file_id' => $stored['file_id'],
             'original_filename' => $stored['file']['original_filename'] ?? null,
             'mime_type' => $stored['file']['mime_type'] ?? null,
             'document_date' => $data['expense_date'] ?? $data['document_date'] ?? null,
         ]));
-        $assigned = $this->assignReceiptToOperationsExpense($receiptId, $data);
+        $assigned = $this->assignReceiptToOperationsExpense($companyId, $receiptId, $data);
 
         return array_merge($assigned, ['receipt_id' => $receiptId, 'duplicate_file' => (bool) $stored['duplicate'], 'file_id' => $stored['file_id']]);
     }
 
     /** @return array<string, mixed> */
-    public function classifyReceipt(int $receiptId, string $classification, ?string $note = null): array
+    public function classifyReceipt(int $companyId, int $receiptId, string $classification, ?string $note = null): array
     {
-        $receipt = $this->repo()->receipt($receiptId);
-        if ($receipt === null) {
-            return $this->failed('missing_receipt', 'Choose a valid receipt.');
-        }
+        $receipt = $this->requireReceipt($companyId, $receiptId);
         $classification = $this->receiptClassification($classification);
         if ($classification === 'trip_reimbursement' && ($receipt['airport_operations_expense_id'] ?? null) !== null) {
             return $this->failed('already_operations_expense', 'This receipt is already assigned to an operations expense. Split it before creating a reimbursement claim.');
         }
 
-        return ['success' => $this->repo()->classifyReceipt($receiptId, $classification, null, $note), 'message' => 'Receipt classification saved.'];
+        return ['success' => $this->repo()->classifyReceipt($companyId, $receiptId, $classification, null, $note), 'message' => 'Receipt classification saved.'];
     }
 
     /** @param array<int, array<string, mixed>> $allocations */
-    public function allocateOperationsExpense(int $expenseId, array $allocations): bool
+    public function allocateOperationsExpense(int $companyId, int $expenseId, array $allocations): bool
     {
-        return $this->repo()->replaceExpenseAllocations($expenseId, array_map(function (array $allocation): array {
+        if ($this->repo()->operationsExpense($companyId, $expenseId) === null) {
+            throw PageNotFoundException::forPageNotFound();
+        }
+
+        return $this->repo()->replaceExpenseAllocations($companyId, $expenseId, array_map(function (array $allocation): array {
             return [
                 'fleet_vehicle_id' => isset($allocation['fleet_vehicle_id']) && (int) $allocation['fleet_vehicle_id'] > 0 ? (int) $allocation['fleet_vehicle_id'] : null,
                 'allocation_method' => in_array($allocation['allocation_method'] ?? 'unallocated', ['equal_split', 'manual_amount', 'manual_percentage', 'unallocated'], true) ? (string) $allocation['allocation_method'] : 'unallocated',
@@ -238,13 +258,10 @@ class TuroAccessReimbursementService
     }
 
     /** @return array<string, mixed> */
-    public function splitReceipt(int $receiptId, array $data): array
+    public function splitReceipt(int $companyId, int $receiptId, array $data): array
     {
-        $receipt = $this->repo()->receipt($receiptId);
-        if ($receipt === null) {
-            return $this->failed('missing_receipt', 'Choose a valid receipt before splitting it.');
-        }
-        $splitId = $this->repo()->createReceiptSplit([
+        $receipt = $this->requireReceipt($companyId, $receiptId);
+        $splitId = $this->repo()->createReceiptSplit($companyId, [
             'airport_turo_access_receipt_id' => $receiptId,
             'original_receipt_total' => $this->amount($data['original_receipt_total'] ?? $receipt['amount'] ?? 0) ?? 0.0,
             'reimbursement_portion_amount' => $this->amount($data['reimbursement_portion_amount'] ?? 0) ?? 0.0,
@@ -256,18 +273,15 @@ class TuroAccessReimbursementService
         return $splitId === false ? $this->failed('split_not_reconciled', 'Split portions must reconcile to the original receipt total.') : ['success' => true, 'split_id' => $splitId, 'message' => 'Receipt split recorded.'];
     }
 
-    public function linkReceiptToWorkflow(int $receiptId, int $workflowId, bool $confirmNonAirport = false): array
+    public function linkReceiptToWorkflow(int $companyId, int $receiptId, int $workflowId, bool $confirmNonAirport = false): array
     {
-        $result = $this->repo()->transaction(function () use ($receiptId, $workflowId): array {
-            $receipt = $this->repo()->receipt($receiptId);
-            $workflow = $this->repo()->workflow($workflowId);
-            if ($receipt === null || $workflow === null) {
-                return $this->failed('invalid_association', 'Choose a valid receipt and airport trip.');
-            }
+        $result = $this->repo()->transaction(function () use ($companyId, $receiptId, $workflowId): array {
+            $receipt = $this->requireReceipt($companyId, $receiptId);
+            $workflow = $this->requireWorkflow($companyId, $workflowId);
 
-            $incident = $this->repo()->existingIncidentForWorkflow($workflowId, $receipt['ticket_number'] ?? null);
+            $incident = $this->repo()->existingIncidentForWorkflow($companyId, $workflowId, $receipt['ticket_number'] ?? null);
             if ($incident === null) {
-                $created = $this->createIncident($workflowId, [
+                $created = $this->createIncident($companyId, $workflowId, [
                     'ticket_number' => $receipt['ticket_number'] ?? null,
                     'parking_amount_paid' => $receipt['amount'] ?? null,
                     'incident_at' => $receipt['document_date'] ?? date('Y-m-d'),
@@ -276,11 +290,13 @@ class TuroAccessReimbursementService
                 if (! ($created['success'] ?? false)) {
                     return $created;
                 }
-                $incident = $this->repo()->incident((int) $created['incident_id']);
+                $incident = $this->repo()->incident($companyId, (int) $created['incident_id']);
             }
 
-            $this->repo()->linkReceiptToIncident($receiptId, (int) $incident['id']);
-            $this->refreshClaimReadiness((int) $incident['id']);
+            if ($incident === null || ! $this->repo()->linkReceiptToIncident($companyId, $receiptId, (int) $incident['id'])) {
+                throw new \RuntimeException('Receipt could not be linked to the incident.');
+            }
+            $this->refreshClaimReadiness($companyId, (int) $incident['id']);
 
             return ['success' => true, 'incident_id' => (int) $incident['id'], 'message' => 'Receipt linked to airport trip and claim readiness refreshed.'];
         });
@@ -288,13 +304,10 @@ class TuroAccessReimbursementService
         return is_array($result) ? $result : $this->failed('match_failed', 'Receipt could not be linked.');
     }
 
-    public function updateReceiptMetadata(int $receiptId, array $data): bool
+    public function updateReceiptMetadata(int $companyId, int $receiptId, array $data): bool
     {
-        $receipt = $this->repo()->receipt($receiptId);
-        if ($receipt === null) {
-            return false;
-        }
-        $ok = $this->repo()->updateReceipt($receiptId, [
+        $receipt = $this->requireReceipt($companyId, $receiptId);
+        $ok = $this->repo()->updateReceipt($companyId, $receiptId, [
             'attachment_type' => $data['attachment_type'] ?? $receipt['attachment_type'],
             'document_date' => $data['document_date'] ?? $receipt['document_date'],
             'amount' => $this->amount($data['amount'] ?? $receipt['amount']),
@@ -302,108 +315,102 @@ class TuroAccessReimbursementService
             'note' => $data['note'] ?? $receipt['note'],
         ], 'receipt_metadata_updated');
         if ($ok && $receipt['airport_turo_access_override_incident_id'] !== null) {
-            $this->refreshClaimReadiness((int) $receipt['airport_turo_access_override_incident_id']);
+            $this->refreshClaimReadiness($companyId, (int) $receipt['airport_turo_access_override_incident_id']);
         }
 
         return $ok;
     }
 
     /** @return array<int, array<string, mixed>> */
-    public function candidateTripsForReceipt(int $receiptId): array
+    public function candidateTripsForReceipt(int $companyId, int $receiptId): array
     {
-        $receipt = $this->repo()->receipt($receiptId);
-        if ($receipt === null || ($receipt['document_date'] ?? null) === null) {
+        $receipt = $this->requireReceipt($companyId, $receiptId);
+        if (($receipt['document_date'] ?? null) === null) {
             return [];
         }
 
-        return $this->rankCandidates($receipt, $this->repo()->candidateAirportTrips($receipt['fleet_vehicle_id'] === null ? null : (int) $receipt['fleet_vehicle_id'], (string) $receipt['document_date']));
+        return $this->rankCandidates($receipt, $this->repo()->candidateAirportTrips($companyId, $receipt['fleet_vehicle_id'] === null ? null : (int) $receipt['fleet_vehicle_id'], (string) $receipt['document_date']));
     }
 
     /** @return array<int, array<string, mixed>> */
-    public function searchCandidates(int $receiptId, string $query): array
+    public function searchCandidates(int $companyId, int $receiptId, string $query): array
     {
-        $receipt = $this->repo()->receipt($receiptId);
-        if ($receipt === null || trim($query) === '') {
+        $receipt = $this->requireReceipt($companyId, $receiptId);
+        if (trim($query) === '') {
             return [];
         }
 
-        return $this->rankCandidates($receipt, $this->repo()->searchAirportTrips(trim($query)));
+        return $this->rankCandidates($receipt, $this->repo()->searchAirportTrips($companyId, trim($query)));
     }
 
     /** @return array<string, mixed> */
-    public function matchingWorkspace(int $receiptId, ?string $query = null): array
+    public function matchingWorkspace(int $companyId, int $receiptId, ?string $query = null): array
     {
-        $receipt = $this->repo()->receipt($receiptId);
-        if ($receipt === null) {
-            return ['exists' => false, 'receipt' => null, 'candidates' => [], 'summary' => $this->attentionSummary(), 'query' => $query ?? ''];
-        }
+        $receipt = $this->requireReceipt($companyId, $receiptId);
 
         return [
             'exists' => true,
             'receipt' => $receipt,
-            'candidates' => $query === null || trim($query) === '' ? $this->candidateTripsForReceipt($receiptId) : $this->searchCandidates($receiptId, $query),
-            'operation_runs' => $this->candidateOperationsRunsForReceipt($receiptId),
-            'summary' => $this->attentionSummary(),
+            'candidates' => $query === null || trim($query) === '' ? $this->candidateTripsForReceipt($companyId, $receiptId) : $this->searchCandidates($companyId, $receiptId, $query),
+            'operation_runs' => $this->candidateOperationsRunsForReceipt($companyId, $receiptId),
+            'summary' => $this->attentionSummary($companyId),
             'query' => $query ?? '',
         ];
     }
 
     /** @return array<int, array<string, mixed>> */
-    public function candidateOperationsRunsForReceipt(int $receiptId): array
+    public function candidateOperationsRunsForReceipt(int $companyId, int $receiptId): array
     {
-        $receipt = $this->repo()->receipt($receiptId);
-        if ($receipt === null) {
-            return [];
-        }
+        $receipt = $this->requireReceipt($companyId, $receiptId);
 
-        return array_map(fn (array $run): array => $this->operationsRunCandidateView($receipt, $run), $this->repo()->candidateOperationsRuns($receipt['document_date'] ?? null, $receipt['fleet_vehicle_id'] === null ? null : (int) $receipt['fleet_vehicle_id']));
+        return array_map(fn (array $run): array => $this->operationsRunCandidateView($receipt, $run), $this->repo()->candidateOperationsRuns($companyId, $receipt['document_date'] ?? null, $receipt['fleet_vehicle_id'] === null ? null : (int) $receipt['fleet_vehicle_id']));
     }
 
-    public function markFiled(int $incidentId, string $reference, ?string $claimedAmount = null): bool
+    public function markFiled(int $companyId, int $incidentId, string $reference, ?string $claimedAmount = null): bool
     {
+        $this->requireIncident($companyId, $incidentId);
         $amount = $this->amount($claimedAmount);
-        return $this->repo()->updateIncident($incidentId, ['claim_status' => 'filed', 'incident_stage' => 'claim_filed', 'claim_filed_on' => date('Y-m-d'), 'claim_reference' => $reference, 'claimed_amount' => $amount], 'claim_filed');
+        return $this->repo()->updateIncident($companyId, $incidentId, ['claim_status' => 'filed', 'incident_stage' => 'claim_filed', 'claim_filed_on' => date('Y-m-d'), 'claim_reference' => $reference, 'claimed_amount' => $amount], 'claim_filed');
     }
 
-    public function markReimbursed(int $incidentId, ?string $amount): bool
+    public function markReimbursed(int $companyId, int $incidentId, ?string $amount): bool
     {
-        return $this->repo()->updateIncident($incidentId, ['claim_status' => 'reimbursed', 'incident_stage' => 'reimbursed', 'reimbursed_amount' => $this->amount($amount), 'reimbursed_on' => date('Y-m-d')], 'reimbursed');
+        $this->requireIncident($companyId, $incidentId);
+        return $this->repo()->updateIncident($companyId, $incidentId, ['claim_status' => 'reimbursed', 'incident_stage' => 'reimbursed', 'reimbursed_amount' => $this->amount($amount), 'reimbursed_on' => date('Y-m-d')], 'reimbursed');
     }
 
-    public function deny(int $incidentId, string $reason): bool
+    public function deny(int $companyId, int $incidentId, string $reason): bool
     {
-        return $this->repo()->updateIncident($incidentId, ['claim_status' => 'denied', 'incident_stage' => 'denied', 'denial_reason' => $reason], 'denied');
+        $this->requireIncident($companyId, $incidentId);
+        return $this->repo()->updateIncident($companyId, $incidentId, ['claim_status' => 'denied', 'incident_stage' => 'denied', 'denial_reason' => $reason], 'denied');
     }
 
     /** @return array<string, mixed> */
-    public function inbox(): array
+    public function inbox(int $companyId): array
     {
-        $incidents = array_map(fn (array $incident): array => $this->incidentView($incident), $this->repo()->inbox());
-        $unmatched = $this->repo()->unmatchedReceipts();
-        return ['incidents' => $incidents, 'unmatched_receipts' => $unmatched, 'summary' => $this->attentionSummary()];
+        $incidents = array_map(fn (array $incident): array => $this->incidentView($companyId, $incident), $this->repo()->inbox($companyId));
+        $unmatched = $this->repo()->unmatchedReceipts($companyId);
+        return ['incidents' => $incidents, 'unmatched_receipts' => $unmatched, 'summary' => $this->attentionSummary($companyId)];
     }
 
     /** @return array<string, int|bool|string|float> */
-    public function attentionSummary(): array
+    public function attentionSummary(int $companyId): array
     {
-        $inbox = $this->repo()->inbox();
+        $inbox = $this->repo()->inbox($companyId);
         $ready = array_values(array_filter($inbox, static fn (array $incident): bool => ($incident['claim_status'] ?? '') === 'ready_to_file'));
         $filed = array_values(array_filter($inbox, static fn (array $incident): bool => ($incident['claim_status'] ?? '') === 'filed'));
-        $unmatched = $this->repo()->unmatchedReceipts();
+        $unmatched = $this->repo()->unmatchedReceipts($companyId);
         $expected = array_reduce($ready, static fn (float $sum, array $incident): float => $sum + (float) ($incident['expected_reimbursement_amount'] ?? 0), 0.0);
 
-        $operations = $this->repo()->operationsAttentionSummary();
+        $operations = $this->repo()->operationsAttentionSummary($companyId);
 
         return array_merge($operations, ['unmatched_receipts' => count($unmatched), 'ready_to_file' => count($ready), 'filed_pending' => count($filed), 'expected_reimbursement_total' => $expected, 'has_reimbursement_work' => count($unmatched) + count($ready) + count($filed) + (int) $operations['needs_classification'] + (int) $operations['expenses_missing_run'] > 0, 'href' => '/operations/airport/reimbursements']);
     }
 
-    private function refreshClaimReadiness(int $incidentId): bool
+    private function refreshClaimReadiness(int $companyId, int $incidentId): bool
     {
-        $incident = $this->repo()->incident($incidentId);
-        if ($incident === null) {
-            return false;
-        }
-        $receipts = $this->repo()->receiptsForIncident($incidentId);
+        $incident = $this->requireIncident($companyId, $incidentId);
+        $receipts = $this->repo()->receiptsForIncident($companyId, $incidentId);
         $hasReceipt = count(array_filter($receipts, static fn (array $receipt): bool => ($receipt['attachment_type'] ?? '') === 'paid_receipt')) > 0;
         $amount = (float) ($incident['parking_amount_paid'] ?? 0);
         foreach ($receipts as $receipt) {
@@ -414,12 +421,12 @@ class TuroAccessReimbursementService
         }
         $ready = (int) ($incident['turo_trip_normalized_id'] ?? 0) > 0 && (int) ($incident['fleet_vehicle_id'] ?? 0) > 0 && ($incident['incident_at'] ?? null) !== null && $amount > 0 && $hasReceipt && ! in_array($incident['claim_status'] ?? '', ['filed', 'reimbursed', 'denied'], true);
         $amounts = $this->amounts($amount);
-        return $this->repo()->updateIncident($incidentId, array_merge($amounts, ['parking_amount_paid' => $amount, 'claim_status' => $ready ? 'ready_to_file' : 'not_ready', 'incident_stage' => $ready ? 'claim_ready' : 'receipt_captured']), 'claim_readiness_refreshed');
+        return $this->repo()->updateIncident($companyId, $incidentId, array_merge($amounts, ['parking_amount_paid' => $amount, 'claim_status' => $ready ? 'ready_to_file' : 'not_ready', 'incident_stage' => $ready ? 'claim_ready' : 'receipt_captured']), 'claim_readiness_refreshed');
     }
 
-    private function incidentView(array $incident): array
+    private function incidentView(int $companyId, array $incident): array
     {
-        return array_merge($incident, $this->amounts((float) ($incident['parking_amount_paid'] ?? 0)), ['receipts' => $this->repo()->receiptsForIncident((int) $incident['id'])]);
+        return array_merge($incident, $this->amounts((float) ($incident['parking_amount_paid'] ?? 0)), ['receipts' => $this->repo()->receiptsForIncident($companyId, (int) $incident['id'])]);
     }
 
     /** @param array<int, array<string, mixed>> $trips @return array<int, array<string, mixed>> */
@@ -501,13 +508,13 @@ class TuroAccessReimbursementService
         return array_merge($run, ['match_label' => $reasons === [] ? 'Possible run' : 'Likely run', 'reasons' => $reasons]);
     }
 
-    private function runIdFromData(array $data): ?int
+    private function runIdFromData(int $companyId, array $data): ?int
     {
         if (isset($data['airport_operations_run_id']) && (int) $data['airport_operations_run_id'] > 0) {
             return (int) $data['airport_operations_run_id'];
         }
         if (($data['create_airport_operations_run'] ?? '0') === '1') {
-            $created = $this->createOperationsRun($data);
+            $created = $this->createOperationsRun($companyId, $data);
             return (int) $created['run_id'];
         }
 
@@ -589,6 +596,39 @@ class TuroAccessReimbursementService
     private function failed(string $code, string $message): array
     {
         return ['success' => false, 'code' => $code, 'message' => $message];
+    }
+
+    /** @return array<string, mixed> */
+    private function requireWorkflow(int $companyId, int $workflowId): array
+    {
+        $workflow = $this->repo()->workflow($companyId, $workflowId);
+        if ($workflow === null) {
+            throw PageNotFoundException::forPageNotFound();
+        }
+
+        return $workflow;
+    }
+
+    /** @return array<string, mixed> */
+    private function requireIncident(int $companyId, int $incidentId): array
+    {
+        $incident = $this->repo()->incident($companyId, $incidentId);
+        if ($incident === null) {
+            throw PageNotFoundException::forPageNotFound();
+        }
+
+        return $incident;
+    }
+
+    /** @return array<string, mixed> */
+    private function requireReceipt(int $companyId, int $receiptId): array
+    {
+        $receipt = $this->repo()->receipt($companyId, $receiptId);
+        if ($receipt === null) {
+            throw PageNotFoundException::forPageNotFound();
+        }
+
+        return $receipt;
     }
 
     private function repo(): TuroAccessReimbursementRepository
