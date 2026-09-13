@@ -1,5 +1,53 @@
 # Changelog
 
+## v0.9.7 — Airport Receipts & Follow-up
+
+Release date: 2026-09-12
+
+### HNL Policy Alignment
+
+- Stop creating new HNL Turo Access reimbursement claims under the current airport policy.
+- Treat the current $14 host parking fee as a host operating cost and earnings deduction, not guest reimbursement.
+- Preserve historical $21 claim values for existing legacy records.
+- Use staffed-lane and attendant resolution for gate failures.
+
+### Airport Receipts & Follow-up
+
+- Organize existing records into Needs Setup, Ready to File, Filed / Awaiting Outcome, and History views.
+- Count unresolved work once and remove resolved operating-expense, duplicate, and non-business receipts from the active queue.
+- Keep historical claims fully readable.
+
+### Claim Workflow Integrity
+
+- Allow only `ready_to_file` to `filed` and `filed` to `reimbursed` or `denied` transitions.
+- Reject invalid and terminal-state transitions without partial writes.
+- Record the authenticated Shield actor for filing, outcomes, classification, and matching actions.
+
+### Command Center
+
+- Add one positive-only Airport Follow-up action that distinguishes ready, needs-setup, and awaiting-outcome work.
+- Exclude resolved and historical work from the active summary.
+
+### Airport Receipts UX
+
+- Center the action-first operator workspace at an approximately 1440px maximum width.
+- Add bookmarkable filters and pagination with dark-mode-readable, responsive presentation.
+- Move capture forms into a secondary disclosure while preserving their existing behavior.
+
+### Capture Workflow
+
+- Make “Capture or log airport evidence” visually recognizable as an interactive disclosure with hover, keyboard-focus, and caret states.
+
+### Performance
+
+- Reduce the Command Center airport summary to one company-scoped aggregate query.
+- Batch receipt evidence and remove the per-incident receipt query pattern.
+
+### Security & Accounting
+
+- Preserve global CSRF, Shield admin authorization, active-company scoping, and receipt-parent file authorization.
+- Keep reimbursement workflow status separate from revenue and profit-and-loss accounting.
+
 ## v0.9.6 — Incidentals & Security Hardening
 
 Release date: 2026-09-11
