@@ -72,7 +72,7 @@ Daily pickup and return checklists are complete. FleetOS now creates one idempot
 
 Airport delivery and return workflows are complete. FleetOS now creates HNL airport movement records for linked airport trips, records staging details, generates verified guest instructions, tracks pickup/return/recovery milestones, links to movement checklists, records parking costs, and surfaces airport work in Command Center.
 
-HNL Turo Access reimbursement tracking is complete. FleetOS now records Turo Access override incidents when a parking ticket is pulled, ties receipts to trips, calculates expected reimbursement using a configurable $21 cap, tracks claim filing and reimbursement state, supports unmatched historical receipts, and surfaces reimbursement work in Command Center.
+Historical HNL Turo Access reimbursement tracking is complete. Current HNL policy disables new claims and treats the $14 host parking fee as an earnings deduction/operating cost. FleetOS preserves the legacy $21 calculation and stored amounts only for existing claims, tracks legal filing/outcome transitions, and surfaces distinct Airport Follow-up work in Command Center.
 
 Airport receipt capture and classification is complete. FleetOS now uploads receipt evidence into the shared private file system, stores receipt metadata, previews evidence through controlled routes, supports unmatched receipt capture, classifies receipts into trip reimbursement, airport operations expense, unresolved, non-business, or duplicate buckets, links reimbursement receipts to airport workflows manually, and records chase-vehicle airport run expenses without inventing a guest trip association.
 

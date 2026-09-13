@@ -90,10 +90,7 @@ class DailyOperationsDashboardService
             ['count' => (int) $vehicleMappings['unique_unmatched_vehicles'], 'severity' => 'today', 'label' => 'Turo vehicles need mapping.', 'detail' => (string) $vehicleMappings['affected_issues'] . ' affected row(s).', 'href' => $vehicleMappings['href']],
             ['count' => (int) $reconciliation['awaiting_reconciliation'], 'severity' => 'today', 'label' => 'Mapped rows need reconciliation.', 'detail' => (string) $reconciliation['awaiting_reconciliation'] . ' historical row(s).', 'href' => $reconciliation['href']],
             ['count' => (int) $airport['airport_workflows_requiring_action'], 'severity' => 'today', 'label' => 'Airport workflows need attention.', 'detail' => (string) $airport['airport_workflows_requiring_action'] . ' airport movement(s).', 'href' => $airport['href']],
-            ['count' => (int) $reimbursements['ready_to_file'], 'severity' => 'today', 'label' => 'Airport parking reimbursements are ready to file.', 'detail' => (string) $reimbursements['ready_to_file'] . ' claim-ready item(s), expected $' . number_format((float) $reimbursements['expected_reimbursement_total'], 0) . '.', 'href' => $reimbursements['href']],
-            ['count' => (int) $reimbursements['needs_classification'], 'severity' => 'today', 'label' => 'Airport receipts need classification.', 'detail' => (string) $reimbursements['needs_classification'] . ' receipt(s) need a business bucket.', 'href' => $reimbursements['href']],
-            ['count' => (int) $reimbursements['expenses_missing_run'], 'severity' => 'later', 'label' => 'Chase-vehicle expenses are missing a run.', 'detail' => (string) $reimbursements['expenses_missing_run'] . ' operations expense(s) need an airport run.', 'href' => $reimbursements['href']],
-            ['count' => (int) $reimbursements['runs_with_unallocated_expenses'], 'severity' => 'later', 'label' => 'Airport run expenses need allocation review.', 'detail' => (string) $reimbursements['runs_with_unallocated_expenses'] . ' expense(s) are not allocated to vehicles.', 'href' => $reimbursements['href']],
+            ['count' => (int) $reimbursements['total_actionable'], 'severity' => 'today', 'label' => 'Airport follow-up requires attention.', 'detail' => (string) $reimbursements['ready_to_file'] . ' ready · ' . (string) $reimbursements['needs_setup'] . ' needs setup · ' . (string) $reimbursements['filed_pending'] . ' awaiting outcome.', 'href' => $reimbursements['href']],
             ['count' => count($health['claims_requiring_follow_up'] ?? []), 'severity' => 'today', 'label' => 'Claims require follow-up.', 'detail' => count($health['claims_requiring_follow_up'] ?? []) . ' open claim(s).', 'href' => '#fleet-health'],
         ], static fn (array $alert): bool => (int) $alert['count'] > 0));
     }
@@ -115,7 +112,7 @@ class DailyOperationsDashboardService
             ['code' => 'vehicle_mapping', 'label' => 'Map Turo Vehicles', 'count' => (int) $vehicleMappings['unique_unmatched_vehicles'], 'href' => $vehicleMappings['href']],
             ['code' => 'reconciliation', 'label' => 'Reprocess Import Rows', 'count' => (int) $reconciliation['awaiting_reconciliation'], 'href' => $reconciliation['href']],
             ['code' => 'airport_workflows', 'label' => 'Today\'s Airport Deliveries', 'count' => (int) $airport['airport_workflows_requiring_action'], 'href' => $airport['href']],
-            ['code' => 'airport_receipts', 'label' => 'Airport Receipt Inbox', 'count' => (int) $reimbursements['needs_classification'] + (int) $reimbursements['ready_to_file'] + (int) $reimbursements['filed_pending'] + (int) $reimbursements['expenses_missing_run'], 'href' => $reimbursements['href']],
+            ['code' => 'airport_receipts', 'label' => 'Airport Follow-up', 'count' => (int) $reimbursements['total_actionable'], 'href' => $reimbursements['href']],
             ['code' => 'incidentals_review', 'label' => 'Incidentals Review', 'count' => (int) $incidentals['total'], 'href' => $incidentals['href']],
         ];
 

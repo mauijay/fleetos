@@ -29,6 +29,7 @@ class AirportOperations extends BaseController
         return view('airport_operations/show', [
             'assets' => service('assetManifestService')->appAssets(),
             'workflow' => service('airportMovementWorkflowService')->workflow($companyId, $id),
+            'turoAccessPolicy' => Services::turoAccessReimbursementService()->policySummary(),
             'notice' => session()->getFlashdata('airport_workflow_notice'),
             'error' => session()->getFlashdata('airport_workflow_error'),
         ]);
@@ -87,7 +88,7 @@ class AirportOperations extends BaseController
 
     public function createTuroAccessOverride(int $id): RedirectResponse
     {
-        $result = service('turoAccessReimbursementService')->createIncident($this->activeCompanyId(), $id, $this->request->getPost(), $this->request->getPost('confirm_duplicate') === '1');
+        $result = service('turoAccessReimbursementService')->createIncident($this->activeCompanyId(), $id, $this->request->getPost(), $this->request->getPost('confirm_duplicate') === '1', $this->actorUserId());
 
         return $this->back((bool) ($result['success'] ?? false), (string) ($result['message'] ?? 'Incident recorded.'), (string) ($result['message'] ?? 'Incident could not be recorded.'));
     }

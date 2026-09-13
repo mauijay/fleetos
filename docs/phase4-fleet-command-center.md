@@ -74,7 +74,7 @@ Not yet reliably captured: battery telemetry, cleaning completion workflow state
 
 Checklist readiness is separate from trip status. FleetOS does not mark a vehicle ready merely because a trip exists or a return time has passed. Critical checklist items must be manually confirmed, and return workflows require a disposition before completion.
 
-Airport operations add attention for HNL movements that need staging, instructions, pickup confirmation, return recovery, parking cost review, Turo Access override receipts, claim-ready reimbursement items, filed claims awaiting reimbursement, airport receipt classification, and chase-vehicle expenses missing a run. Airport receipt inbox attention stays below urgent vehicle movement work. Expected reimbursement is shown as an operational estimate, not received revenue, and airport operations expenses are shown as operating costs rather than Turo receivables.
+Airport Operations remains responsible for HNL movement work. A separate positive-only **Airport Follow-up** entry combines distinct receipt setup work, ready historical claims, and filed historical claims awaiting outcome, and links to the bookmarkable action filter. Resolved ordinary airport expenses and terminal receipt classifications are excluded. Expected reimbursement remains an operational estimate rather than revenue.
 
 ## Reusable Components
 

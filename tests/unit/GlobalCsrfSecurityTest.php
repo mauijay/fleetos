@@ -204,8 +204,8 @@ final class GlobalCsrfSecurityTest extends CIUnitTestCase
     {
         $root = dirname(__DIR__, 2);
         foreach ([
-            '/app/Views/airport_operations/show.php' => 9,
-            '/app/Views/airport_reimbursements/index.php' => 4,
+            '/app/Views/airport_operations/show.php' => 8,
+            '/app/Views/airport_reimbursements/index.php' => 6,
             '/app/Views/airport_reimbursements/match.php' => 7,
         ] as $path => $expected) {
             $source = file_get_contents($root . $path);

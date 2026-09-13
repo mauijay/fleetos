@@ -18,15 +18,15 @@ final class OperationalQueueViewTest extends CIUnitTestCase
             'items' => [
                 ['label' => 'Complete Movement Readiness', 'detail' => '2 items', 'href' => '/?movement=readiness#movement-board', 'actionable' => true],
                 ['label' => 'Review Import Issues', 'detail' => '3 items', 'href' => '/turo/import-issues', 'actionable' => true],
-                ['label' => 'Airport Receipt Inbox', 'detail' => '1 item', 'href' => '/operations/airport/reimbursements', 'actionable' => true],
+                ['label' => 'Airport Follow-up', 'detail' => '1 item', 'href' => '/operations/airport/reimbursements?filter=action', 'actionable' => true],
             ],
         ]])->render('fleet_command_center/components/operational_queue'), ENT_QUOTES | ENT_HTML5);
 
         $this->assertStringContainsString('aria-current="page"', $html);
         $this->assertStringContainsString('href="/?movement=readiness#movement-board"', $html);
         $this->assertStringContainsString('href="/turo/import-issues"', $html);
-        $this->assertStringContainsString('Airport Receipt Inbox', $html);
-        $this->assertStringContainsString('href="/operations/airport/reimbursements"', $html);
+        $this->assertStringContainsString('Airport Follow-up', $html);
+        $this->assertStringContainsString('href="/operations/airport/reimbursements?filter=action"', $html);
         $this->assertStringNotContainsString('Import Turo Trips', $html);
         $this->assertStringNotContainsString('href="/?queue=urgent#operational-queue"', $html);
     }

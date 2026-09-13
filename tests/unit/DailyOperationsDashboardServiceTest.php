@@ -212,13 +212,12 @@ final class DailyOperationsDashboardServiceTest extends CIUnitTestCase
         ]]);
         $airport->expects($this->once())->method('attentionSummary')->with(1, $this->isInstanceOf(DateTimeImmutable::class))->willReturn(['airport_workflows_requiring_action' => 0, 'href' => '/operations/airport']);
         $reimbursements->expects($this->once())->method('attentionSummary')->with(1)->willReturn([
-            'needs_classification' => 0,
+            'needs_setup' => 0,
             'ready_to_file' => 0,
             'filed_pending' => 0,
-            'expenses_missing_run' => 0,
-            'runs_with_unallocated_expenses' => 0,
+            'total_actionable' => 0,
             'expected_reimbursement_total' => 0.0,
-            'href' => '/operations/airport/reimbursements',
+            'href' => '/operations/airport/reimbursements?filter=action',
         ]);
 
         $readiness = $this->createMock(MovementReadinessReadService::class);

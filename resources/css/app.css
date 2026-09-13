@@ -18,6 +18,248 @@
   --shadow: 0 20px 80px rgba(0, 0, 0, 0.34);
 }
 
+/* Airport Receipts & Follow-up */
+.airport-receipts-frame {
+  width: 100%;
+}
+
+.airport-receipts-main {
+  justify-self: stretch;
+  width: 100%;
+  max-width: 1440px;
+  min-width: 0;
+  margin-inline: auto;
+}
+
+.airport-receipts-header .status-copy {
+  max-width: 880px;
+}
+
+.hnl-policy {
+  border-color: rgba(56, 189, 248, 0.3);
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.07), var(--surface));
+}
+
+.airport-queue-heading,
+.airport-card-heading,
+.hnl-policy .section-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.airport-summary {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.airport-summary > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--muted);
+  padding: 7px 8px 7px 14px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.airport-summary strong,
+.status-pill {
+  display: inline-grid;
+  place-items: center;
+  min-height: 28px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--text);
+  padding: 4px 9px;
+  font-size: 12px;
+}
+
+.airport-card-list {
+  display: grid;
+  gap: 16px;
+}
+
+.airport-action-card {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-left: 5px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-2);
+  padding: 18px;
+}
+
+.airport-action-card.tone-warning {
+  border-left-color: var(--warning);
+}
+
+.airport-action-card.tone-success {
+  border-left-color: var(--success);
+}
+
+.airport-action-card.tone-info {
+  border-left-color: var(--info);
+}
+
+.airport-action-card h3,
+.capture-grid h2,
+.hnl-policy h3 {
+  margin: 0;
+}
+
+.airport-action-card .issue-facts {
+  margin: 16px 0;
+}
+
+.compact-action,
+.filed-outcomes,
+.capture-grid,
+.policy-guidance {
+  display: grid;
+  gap: 14px;
+}
+
+.compact-action {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+  align-items: end;
+}
+
+.filed-outcomes,
+.capture-grid,
+.policy-guidance {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.filed-outcomes .compact-action {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.secondary-work > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 48px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-2);
+  cursor: pointer;
+  color: var(--text);
+  list-style: none;
+  padding: 10px 14px;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease;
+  user-select: none;
+}
+
+.secondary-work > summary::-webkit-details-marker {
+  display: none;
+}
+
+.secondary-work > summary::after {
+  flex: 0 0 auto;
+  color: var(--muted);
+  content: "›";
+  font-size: 22px;
+  line-height: 1;
+  transform: rotate(0deg);
+  transition: transform 140ms ease;
+}
+
+.secondary-work > summary:hover {
+  border-color: rgba(56, 189, 248, 0.45);
+  background: var(--surface-3);
+}
+
+.secondary-work > summary:focus-visible {
+  border-color: var(--info);
+  outline: 3px solid rgba(56, 189, 248, 0.28);
+  outline-offset: 2px;
+}
+
+.secondary-work > summary span {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.secondary-work[open] > summary {
+  margin-bottom: 18px;
+}
+
+.secondary-work[open] > summary::after {
+  transform: rotate(90deg);
+}
+
+.receipt-evidence {
+  margin: 16px 0 0;
+  color: var(--muted);
+}
+
+.pager-wrap {
+  margin-top: 20px;
+  overflow-x: auto;
+}
+
+.pager-wrap ul {
+  display: flex;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pager-wrap a,
+.pager-wrap li.active {
+  display: inline-grid;
+  min-width: 42px;
+  min-height: 42px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 8px;
+}
+
+@media (max-width: 760px) {
+  .airport-receipts-main {
+    padding: 12px;
+  }
+
+  .airport-receipts-main .top-status,
+  .airport-receipts-main .section {
+    padding: 16px;
+  }
+
+  .airport-queue-heading,
+  .airport-card-heading,
+  .hnl-policy .section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .airport-summary {
+    justify-content: flex-start;
+  }
+
+  .compact-action,
+  .filed-outcomes,
+  .capture-grid,
+  .policy-guidance,
+  .filed-outcomes .compact-action {
+    grid-template-columns: 1fr;
+  }
+}
+
 * {
   box-sizing: border-box;
 }

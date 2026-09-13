@@ -1,10 +1,10 @@
 # Airport Operations
 
-FleetOS supports focused HNL airport workflows for airport pickup delivery, airport returns, and Turo Access override reimbursement tracking.
+FleetOS supports focused HNL airport workflows for airport pickup delivery, airport returns, airport receipts and expenses, and follow-up on historical Turo Access reimbursement claims.
 
 ## Turo Access
 
-Under normal operation, Turo registers eligible vehicle plates with HNL. The plate reader opens the gate and no physical ticket should be pulled. If a guest or operator pulls a parking ticket, that ticket overrides Turo Access, paid parking begins, and the ticket must be paid before exit.
+Current HNL guidance treats the $14 host parking fee as a deduction from host earnings, not a guest-reimbursable charge. On entry, allow the gate to open automatically; if it does not open, pull a parking ticket and leave it visible for the guest. At host pickup after the trip, use a staffed exit lane. If automatic exit fails, show the Turo reservation and parking ticket to the attendant so the reservation can be verified and the host can exit without payment.
 
 ## Workflow Lifecycle
 
@@ -14,23 +14,23 @@ Pickup workflows record garage, level, row, stall, parking entry time, access me
 
 ## Guest Instructions
 
-Pickup and return instructions are deterministic. They only include verified parking details. Both templates include the Turo Access warning: wait for the license-plate reader and do not pull a parking ticket.
+Pickup and return instructions are deterministic and include only verified parking details. Return guidance now explains the entry fallback: pull a ticket only when the automatic gate fails, then leave it visible in the vehicle. Review and update the corresponding Turo scheduled-message templates separately; FleetOS does not manage those external templates in this slice.
 
 ## Checklist Integration
 
 Airport staging can complete `airport_staging_completed` and `parking_location_recorded`. Sending verified instructions can complete `guest_pickup_instructions_confirmed` and `turo_access_instructions_confirmed`. Physical checks such as cleanliness, charge, damage-free condition, and key-card presence remain manual.
 
-## Turo Access Override Incidents
+## Historical Turo Access Override Incidents
 
-Use **Parking Ticket Pulled** from the airport workflow when a ticket overrides Turo Access. Incidents track movement context, operator type, ticket number, parking amount, payment details, receipts, claim status, expected reimbursement, and final reimbursement outcome.
+New Turo Access reimbursement incidents are inactive under current HNL policy. Existing incidents remain readable and can continue through their legal historical lifecycle. They retain movement context, ticket, stored amount, evidence, filing state, and outcome.
 
 ## Reimbursement Cap
 
-The reimbursement cap is configured in `Config\\TuroAccess` as `reimbursementCapAmount`. The current documented cap is `$21.00`. FleetOS calculates expected reimbursement as the lower of paid parking and the configured cap, and tracks the remaining host cost separately.
+The historical reimbursement cap remains configured in `Config\\TuroAccess` as `reimbursementCapAmount = 21.00`; it is not a current $14 reimbursement. FleetOS preserves stored historical expected and host-unreimbursed amounts rather than recomputing them from current policy. Current policy is represented separately by `newReimbursementClaimsEnabled = false` and `hostParkingFeeAmount = 14.00`.
 
-## Airport Receipt Inbox
+## Airport Receipts & Follow-up
 
-`/operations/airport/reimbursements` is the airport receipt inbox. Every airport receipt can be classified as `trip_reimbursement`, `airport_operations_expense`, `unresolved`, `non_business`, or `duplicate`. The inbox no longer assumes every receipt belongs to a guest trip or Turo claim.
+`/operations/airport/reimbursements` is the airport receipt action queue. Every airport receipt can be classified as `trip_reimbursement`, `airport_operations_expense`, `unresolved`, `non_business`, or `duplicate`. Action filters distinguish setup work, ready historical claims, filed claims awaiting outcome, and history.
 
 Unmatched receipts can be entered with date, amount, ticket number, known vehicle, receipt file, and starting classification. The matching workspace shows trip reimbursement candidates and airport operations run candidates side by side. The operator must explicitly confirm either association; FleetOS does not auto-link receipts.
 
@@ -38,7 +38,7 @@ Receipt capture now supports JPEG, PNG, WebP, and PDF evidence through authentic
 
 Receipt preview and download use `/operations/airport/reimbursements/receipts/{receipt_id}/file`. Authorization is established through the active-company receipt parent; raw file IDs and internal storage paths are not exposed. Mobile browsers can use the same file input for camera capture where supported.
 
-Unmatched receipt capture allows the operator to save evidence before a trip or run is known. The receipt can later be manually linked to a selected airport workflow. Linking reuses an existing Turo Access override incident when one already exists for the selected workflow and ticket, or creates one when needed.
+Unresolved receipt capture allows the operator to save evidence before a trip or run is known. Matching may reuse an existing historical incident; it will not create a current HNL reimbursement incident when none exists. Non-business, duplicate, and operating-expense receipts linked to an expense are not kept in the active receipt queue.
 
 ## Airport Operations Runs and Expenses
 

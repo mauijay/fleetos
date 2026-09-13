@@ -45,7 +45,7 @@ class TuroAccessReimbursementRepository
         return $row === null ? null : $row;
     }
 
-    public function createIncident(int $companyId, array $data): int
+    public function createIncident(int $companyId, array $data, ?int $actorUserId = null): int
     {
         $workflow = $this->workflow($companyId, (int) ($data['airport_movement_workflow_id'] ?? 0));
         if ($workflow === null
@@ -57,12 +57,12 @@ class TuroAccessReimbursementRepository
         $now = date('Y-m-d H:i:s');
         $this->db->table('airport_turo_access_override_incidents')->insert(array_merge($data, ['created_at' => $now, 'updated_at' => $now]));
         $id = (int) $this->db->insertID();
-        $this->audit($id, 'incident_created', null, $data);
+        $this->audit($id, 'incident_created', null, $data, $actorUserId);
 
         return $id;
     }
 
-    public function updateIncident(int $companyId, int $id, array $data, string $action): bool
+    public function updateIncident(int $companyId, int $id, array $data, string $action, ?int $actorUserId = null): bool
     {
         $old = $this->incident($companyId, $id);
         if ($old === null) {
@@ -76,7 +76,7 @@ class TuroAccessReimbursementRepository
         if ($this->db->affectedRows() < 1) {
             return false;
         }
-        $this->audit($id, $action, $old, array_merge($old, $data));
+        $this->audit($id, $action, $old, array_merge($old, $data), $actorUserId);
 
         return true;
     }
@@ -112,7 +112,7 @@ class TuroAccessReimbursementRepository
             ->get()->getResultArray();
     }
 
-    public function updateReceipt(int $companyId, int $id, array $data, string $action): bool
+    public function updateReceipt(int $companyId, int $id, array $data, string $action, ?int $actorUserId = null): bool
     {
         $old = $this->receipt($companyId, $id);
         if ($old === null) {
@@ -125,7 +125,7 @@ class TuroAccessReimbursementRepository
         if ($this->db->affectedRows() < 1) {
             return false;
         }
-        $this->audit($old['airport_turo_access_override_incident_id'] === null ? null : (int) $old['airport_turo_access_override_incident_id'], $action, $old, array_merge($old, $data));
+        $this->audit($old['airport_turo_access_override_incident_id'] === null ? null : (int) $old['airport_turo_access_override_incident_id'], $action, $old, array_merge($old, $data), $actorUserId);
 
         return true;
     }
@@ -170,6 +170,25 @@ class TuroAccessReimbursementRepository
             ->orderBy('created_at', 'ASC')->get()->getResultArray();
     }
 
+    /** @param list<int> $incidentIds @return array<int, list<array<string, mixed>>> */
+    public function receiptsForIncidents(int $companyId, array $incidentIds): array
+    {
+        $incidentIds = array_values(array_unique(array_filter(array_map('intval', $incidentIds), static fn (int $id): bool => $id > 0)));
+        if ($incidentIds === []) {
+            return [];
+        }
+
+        $rows = $this->receiptBuilder($companyId)
+            ->whereIn('receipts.airport_turo_access_override_incident_id', $incidentIds)
+            ->orderBy('receipts.created_at', 'ASC')->get()->getResultArray();
+        $grouped = [];
+        foreach ($rows as $row) {
+            $grouped[(int) $row['airport_turo_access_override_incident_id']][] = $row;
+        }
+
+        return $grouped;
+    }
+
     /** @return array<int, array<string, mixed>> */
     public function inbox(int $companyId): array
     {
@@ -178,12 +197,106 @@ class TuroAccessReimbursementRepository
             ->orderBy('incidents.incident_at', 'ASC')->get()->getResultArray();
     }
 
+    /** @return array{rows:list<array<string,mixed>>,total:int} */
+    public function incidentPage(int $companyId, string $filter, int $page, int $perPage): array
+    {
+        $applyFilter = static function (BaseBuilder $builder) use ($filter): void {
+            match ($filter) {
+                'action' => $builder->whereIn('incidents.claim_status', ['not_ready', 'ready_to_file', 'filed']),
+                'ready' => $builder->where('incidents.claim_status', 'ready_to_file'),
+                'filed' => $builder->where('incidents.claim_status', 'filed'),
+                'history' => $builder->whereIn('incidents.claim_status', ['reimbursed', 'denied', 'closed_without_filing']),
+                default => null,
+            };
+        };
+        $builder = $this->incidentBuilder($companyId);
+        $applyFilter($builder);
+        $rows = $builder->select('COUNT(*) OVER() AS pagination_total', false)
+            ->orderBy('incidents.incident_at', 'DESC')->limit($perPage, ($page - 1) * $perPage)->get()->getResultArray();
+
+        return [
+            'rows' => $rows,
+            'total' => (int) ($rows[0]['pagination_total'] ?? 0),
+        ];
+    }
+
     /** @return array<int, array<string, mixed>> */
     public function unmatchedReceipts(int $companyId): array
     {
-        return $this->db->table('airport_turo_access_receipts')
-            ->where(['company_id' => $companyId, 'airport_turo_access_override_incident_id' => null])
-            ->orderBy('document_date', 'ASC')->get()->getResultArray();
+        return $this->receiptActionBuilder($companyId)
+            ->orderBy('receipts.document_date', 'ASC')->get()->getResultArray();
+    }
+
+    /** @return array{rows:list<array<string,mixed>>,total:int} */
+    public function receiptPage(int $companyId, string $filter, int $page, int $perPage): array
+    {
+        if (in_array($filter, ['ready', 'filed'], true)) {
+            return ['rows' => [], 'total' => 0];
+        }
+        $builderForFilter = function () use ($companyId, $filter): BaseBuilder {
+            return match ($filter) {
+                'history' => $this->receiptBuilder($companyId)
+                    ->where('receipts.airport_turo_access_override_incident_id', null)
+                    ->whereIn('receipts.receipt_classification', ['non_business', 'duplicate']),
+                'all' => $this->receiptBuilder($companyId)->where('receipts.airport_turo_access_override_incident_id', null),
+                default => $this->receiptActionBuilder($companyId),
+            };
+        };
+        $rows = $builderForFilter()->select('COUNT(*) OVER() AS pagination_total', false)
+            ->orderBy('receipts.document_date', 'DESC')->limit($perPage, ($page - 1) * $perPage)->get()->getResultArray();
+
+        return [
+            'rows' => $rows,
+            'total' => (int) ($rows[0]['pagination_total'] ?? 0),
+        ];
+    }
+
+    /** @return array<string, int|float> */
+    public function actionSummary(int $companyId): array
+    {
+        $incidents = $this->db->prefixTable('airport_turo_access_override_incidents');
+        $workflows = $this->db->prefixTable('airport_movement_workflows');
+        $vehicles = $this->db->prefixTable('fleet_vehicles');
+        $receipts = $this->db->prefixTable('airport_turo_access_receipts');
+        $sql = "SELECT
+            SUM(needs_setup) AS needs_setup,
+            SUM(ready_to_file) AS ready_to_file,
+            SUM(filed_pending) AS filed_pending,
+            SUM(history_count) AS history_count,
+            SUM(expected_total) AS expected_reimbursement_total
+        FROM (
+            SELECT
+                CASE WHEN incidents.claim_status = 'not_ready' THEN 1 ELSE 0 END AS needs_setup,
+                CASE WHEN incidents.claim_status = 'ready_to_file' THEN 1 ELSE 0 END AS ready_to_file,
+                CASE WHEN incidents.claim_status = 'filed' THEN 1 ELSE 0 END AS filed_pending,
+                CASE WHEN incidents.claim_status IN ('reimbursed','denied','closed_without_filing') THEN 1 ELSE 0 END AS history_count,
+                CASE WHEN incidents.claim_status = 'ready_to_file' THEN incidents.expected_reimbursement_amount ELSE 0 END AS expected_total
+            FROM {$incidents} incidents
+            INNER JOIN {$workflows} workflows ON workflows.id = incidents.airport_movement_workflow_id
+            INNER JOIN {$vehicles} vehicles ON vehicles.id = workflows.fleet_vehicle_id AND vehicles.id = incidents.fleet_vehicle_id
+            WHERE vehicles.company_id = ?
+            UNION ALL
+            SELECT
+                CASE WHEN receipts.receipt_classification = 'unresolved'
+                    OR (receipts.receipt_classification = 'trip_reimbursement' AND receipts.airport_turo_access_override_incident_id IS NULL)
+                    OR (receipts.receipt_classification = 'airport_operations_expense' AND receipts.airport_operations_expense_id IS NULL)
+                    THEN 1 ELSE 0 END AS needs_setup,
+                0 AS ready_to_file,
+                0 AS filed_pending,
+                CASE WHEN receipts.receipt_classification IN ('non_business','duplicate') THEN 1 ELSE 0 END AS history_count,
+                0 AS expected_total
+            FROM {$receipts} receipts
+            WHERE receipts.company_id = ?
+        ) action_items";
+        $row = $this->db->query($sql, [$companyId, $companyId])->getRowArray() ?? [];
+
+        return [
+            'needs_setup' => (int) ($row['needs_setup'] ?? 0),
+            'ready_to_file' => (int) ($row['ready_to_file'] ?? 0),
+            'filed_pending' => (int) ($row['filed_pending'] ?? 0),
+            'history_count' => (int) ($row['history_count'] ?? 0),
+            'expected_reimbursement_total' => (float) ($row['expected_reimbursement_total'] ?? 0),
+        ];
     }
 
     /** @return array<int, array<string, mixed>> */
@@ -236,7 +349,7 @@ class TuroAccessReimbursementRepository
     {
         $builder = $this->incidentBuilder($companyId)
             ->where('incidents.airport_movement_workflow_id', $workflowId)
-            ->whereNotIn('incidents.claim_status', ['denied', 'closed_without_filing']);
+            ->whereNotIn('incidents.claim_status', ['reimbursed', 'denied', 'closed_without_filing']);
         if ($ticketNumber !== null && trim($ticketNumber) !== '') {
             $builder->where('incidents.ticket_number', trim($ticketNumber));
         }
@@ -245,7 +358,7 @@ class TuroAccessReimbursementRepository
         return $row === null ? null : $row;
     }
 
-    public function linkReceiptToIncident(int $companyId, int $receiptId, int $incidentId): bool
+    public function linkReceiptToIncident(int $companyId, int $receiptId, int $incidentId, ?int $actorUserId = null): bool
     {
         $receipt = $this->receipt($companyId, $receiptId);
         $incident = $this->incident($companyId, $incidentId);
@@ -259,7 +372,7 @@ class TuroAccessReimbursementRepository
             'receipt_classification' => 'trip_reimbursement',
             'turo_trip_normalized_id' => $incident['turo_trip_normalized_id'],
             'fleet_vehicle_id' => $incident['fleet_vehicle_id'],
-        ], 'receipt_linked_to_incident');
+        ], 'receipt_linked_to_incident', $actorUserId);
     }
 
     public function createOperationsRun(int $companyId, array $data): int
@@ -327,7 +440,7 @@ class TuroAccessReimbursementRepository
         return $row === null ? null : $row;
     }
 
-    public function classifyReceipt(int $companyId, int $receiptId, string $classification, ?int $expenseId = null, ?string $note = null): bool
+    public function classifyReceipt(int $companyId, int $receiptId, string $classification, ?int $expenseId = null, ?string $note = null, ?int $actorUserId = null): bool
     {
         if ($expenseId !== null && $this->operationsExpense($companyId, $expenseId) === null) {
             return false;
@@ -338,10 +451,10 @@ class TuroAccessReimbursementRepository
             'airport_operations_expense_id' => $expenseId,
             'airport_turo_access_override_incident_id' => null,
             'classification_note' => $note,
-        ], 'receipt_classified');
+        ], 'receipt_classified', $actorUserId);
     }
 
-    public function linkReceiptToOperationsExpense(int $companyId, int $receiptId, int $expenseId, ?int $runId, string $note): bool
+    public function linkReceiptToOperationsExpense(int $companyId, int $receiptId, int $expenseId, ?int $runId, string $note, ?int $actorUserId = null): bool
     {
         if ($this->receipt($companyId, $receiptId) === null
             || $this->operationsExpense($companyId, $expenseId) === null
@@ -354,7 +467,7 @@ class TuroAccessReimbursementRepository
             'airport_operations_expense_id' => $expenseId,
             'airport_turo_access_override_incident_id' => null,
             'classification_note' => $note,
-        ], 'receipt_linked_to_operations_expense');
+        ], 'receipt_linked_to_operations_expense', $actorUserId);
     }
 
     /** @return array<int, array<string, mixed>> */
@@ -475,6 +588,22 @@ class TuroAccessReimbursementRepository
             ->where('receipts.company_id', $companyId);
     }
 
+    private function receiptActionBuilder(int $companyId): BaseBuilder
+    {
+        return $this->receiptBuilder($companyId)
+            ->groupStart()
+                ->where('receipts.receipt_classification', 'unresolved')
+                ->orGroupStart()
+                    ->where('receipts.receipt_classification', 'trip_reimbursement')
+                    ->where('receipts.airport_turo_access_override_incident_id', null)
+                ->groupEnd()
+                ->orGroupStart()
+                    ->where('receipts.receipt_classification', 'airport_operations_expense')
+                    ->where('receipts.airport_operations_expense_id', null)
+                ->groupEnd()
+            ->groupEnd();
+    }
+
     private function candidateWorkflowBuilder(int $companyId): BaseBuilder
     {
         return $this->db->table('airport_movement_workflows workflows')
@@ -534,13 +663,14 @@ class TuroAccessReimbursementRepository
         }
     }
 
-    private function audit(?int $incidentId, string $action, ?array $old, array $new): void
+    private function audit(?int $incidentId, string $action, ?array $old, array $new, ?int $actorUserId = null): void
     {
         $this->db->table('airport_turo_access_audits')->insert([
             'airport_turo_access_override_incident_id' => $incidentId,
             'action' => $action,
             'old_values' => $old === null ? null : json_encode($old, JSON_THROW_ON_ERROR),
             'new_values' => json_encode($new, JSON_THROW_ON_ERROR),
+            'created_by' => $actorUserId,
             'created_at' => date('Y-m-d H:i:s'),
         ]);
     }
