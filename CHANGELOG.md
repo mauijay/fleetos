@@ -1,5 +1,58 @@
 # Changelog
 
+## v0.9.8 — Operating Expenses & Receipts
+
+Release date: 2026-09-13
+
+### Operating Expenses
+
+- Add manual operating-expense capture for ordinary fleet costs.
+- Support fleet-wide, vehicle-specific, and trip-linked expenses with controlled expense categories.
+- Require positive amounts with exact decimal precision.
+- Support audited correction, archive, and restore workflows.
+
+### Receipt Inbox
+
+- Add a receipt-first capture workflow with a Needs attention queue for unclassified evidence.
+- Create and link an operating expense transactionally when a receipt is classified.
+- Support non-business and duplicate evidence outcomes.
+- Keep missing receipts informational so they do not create queue work.
+
+### Secure Evidence
+
+- Add secure private storage for generic operating-expense receipts.
+- Authorize previews through the company-owned receipt parent rather than a raw file ID.
+- Verify MIME type and SHA-256 checksum, enforce storage-root containment, and return safe preview headers.
+
+### Expenses & Receipts Workspace
+
+- Add Needs attention, Recent, By vehicle, and History views.
+- Add visible receipt-preview actions and authoritative evidence lists on expense details.
+- Show a Recorded operating expenses total limited to active generic records; it is not a complete fleet profit-and-loss total.
+
+### Command Center
+
+- Add a positive-only “Expenses to classify” action when unresolved generic expense receipts exist.
+
+### Duplicate Handling
+
+- Distinguish duplicate receipt evidence from possible duplicate expenses.
+- Avoid creating a second active inbox row for duplicate evidence.
+- Warn on similar expense facts without automatically merging expense records.
+
+### Global FleetOS UI Foundation
+
+- Add reusable success, info, warning, and danger alerts.
+- Improve validation summaries, field-level invalid states, focus visibility, and accessibility semantics.
+- Add shared dark-mode form controls and readable select, option, and optgroup styling.
+- Introduce no Bootstrap or third-party UI framework.
+
+### Reporting Boundary
+
+- Keep operating-expense capture separate from full fleet financial integration.
+- Leave Airport, Maintenance, Charging, acquisition, insurance, financing, and imported Turo cost sources in their specialized domains.
+- Defer full source integration and double-count prevention to Slice 3B.3B.
+
 ## v0.9.7 — Airport Receipts & Follow-up
 
 Release date: 2026-09-12
