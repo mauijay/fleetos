@@ -29,6 +29,7 @@ class DailyOperationsDashboardService
         private readonly MorningBriefingService $briefingService = new MorningBriefingService(),
         private readonly ?TripIncidentalReviewService $incidentalReviewService = null,
         private readonly ?OperatingExpenseService $operatingExpenseService = null,
+        private readonly ?FinancialSummaryService $financialSummaryService = null,
     ) {
     }
 
@@ -38,10 +39,11 @@ class DailyOperationsDashboardService
         $asOf ??= new DateTimeImmutable();
         $fleetSnapshot = $this->fleetSnapshot()->forSingleFleetCompany($asOf);
         $companyId = (int) $fleetSnapshot['company_id'];
+        $financialSummary = $this->financialSummary()->currentMonth($companyId, $asOf);
         $today = $this->tasks()->today($asOf);
         $health = $this->health()->summary($asOf);
         $vehicles = $this->availability()->vehicleStatus($asOf);
-        $currentMonth = $this->statistics()->currentMonth($asOf);
+        $currentMonth = $this->statistics()->currentMonth($asOf, $companyId, $financialSummary);
         $importIssues = $this->importIssues()->attentionSummary();
         $vehicleMappings = $this->vehicleMappings()->attentionSummary();
         $reconciliation = $this->reconciliation()->attentionSummary();
@@ -69,20 +71,26 @@ class DailyOperationsDashboardService
             'fleet_status' => $this->stateService->statusCounts($board, (float) $currentMonth['fleet_utilization'], $fleetSnapshot),
             'operational_queue' => $this->operationalQueue($today, $attention, $importIssues, $vehicleMappings, $reconciliation, $airport, $reimbursements, $incidentals, $expenses, $checklists),
             'financial' => [
-                'current_month_revenue' => '$' . number_format((float) $currentMonth['completed_revenue'], 2),
-                'forecast_revenue' => '$' . number_format((float) $currentMonth['forecast_revenue'], 0),
-                'average_daily_rate' => '$' . number_format((float) $currentMonth['average_daily_rate'], 0),
-                'fleet_utilization' => number_format((float) $currentMonth['fleet_utilization'] * 100, 1) . '%',
-                'revenue_today' => 'Pending capture',
-                'revenue_this_week' => 'Pending capture',
+                'Realized Operating Revenue' => '$' . number_format((float) $financialSummary['realized_operating_revenue'], 2),
+                'Realized Recoveries' => '$' . number_format((float) $financialSummary['realized_recoveries'], 2),
+                'Recorded Operating Costs' => '$' . number_format((float) $financialSummary['recorded_operating_costs'], 2),
+                'Net Realized Operating Result' => '$' . number_format((float) $financialSummary['net_realized_operating_result'], 2),
+                'Forecast Host Payout' => '$' . number_format((float) $financialSummary['forecast_host_payout'], 2),
             ],
+            'financial_summary' => $financialSummary,
             'data_honesty' => [
                 'Condition and energy are shown from the latest recorded movement assessment; missing observations remain explicitly not captured.',
                 'Current locations and rented possession come from active authoritative movement events; scheduled and planned locations never replace current position.',
                 'Confirmed future trips and recommendation strength depend on Turo import freshness; stale snapshots require operator review.',
+                'Recorded Operating Costs are operational records recognized by FleetOS; they are not proof of bank settlement.',
                 'Positioning recommendations do not include live GPS, traffic, travel time, or automatic transportation availability.',
             ],
         ];
+    }
+
+    private function financialSummary(): FinancialSummaryService
+    {
+        return $this->financialSummaryService ?? Services::financialSummaryService();
     }
 
     private function externalAlerts(array $importIssues, array $vehicleMappings, array $reconciliation, array $airport, array $reimbursements, array $health): array

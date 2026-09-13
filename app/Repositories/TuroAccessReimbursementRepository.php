@@ -440,6 +440,26 @@ class TuroAccessReimbursementRepository
         return $row === null ? null : $row;
     }
 
+    /** @return list<array<string, mixed>> */
+    public function recordedOperatingExpenseActivity(int $companyId, string $fromDate, string $toDateExclusive): array
+    {
+        $company = $this->db->escape($companyId);
+
+        return $this->db->table('airport_operations_expenses expenses')
+            ->select('expenses.id, expenses.airport_operations_run_id, expenses.expense_category')
+            ->select('expenses.amount, expenses.expense_date, expenses.business_purpose_note')
+            ->join('airport_turo_access_receipts receipts', 'receipts.id = expenses.airport_turo_access_receipt_id', 'left')
+            ->join('airport_operations_runs runs', 'runs.id = expenses.airport_operations_run_id', 'left')
+            ->where("(receipts.company_id = {$company} OR runs.company_id = {$company})", null, false)
+            ->where('(receipts.company_id IS NULL OR runs.company_id IS NULL OR receipts.company_id = runs.company_id)', null, false)
+            ->whereIn('expenses.accounting_status', ['recorded', 'reimbursable', 'reimbursed'])
+            ->where('expenses.amount >', 0)
+            ->where('expenses.expense_date >=', $fromDate)
+            ->where('expenses.expense_date <', $toDateExclusive)
+            ->orderBy('expenses.id', 'ASC')
+            ->get()->getResultArray();
+    }
+
     public function classifyReceipt(int $companyId, int $receiptId, string $classification, ?int $expenseId = null, ?string $note = null, ?int $actorUserId = null): bool
     {
         if ($expenseId !== null && $this->operationsExpense($companyId, $expenseId) === null) {

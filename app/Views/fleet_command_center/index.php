@@ -127,21 +127,6 @@
                 <?= view('fleet_command_center/components/operational_queue', ['queueView' => $commandCenter['daily_operations']['queue_view']]) ?>
             </section>
 
-            <section class="section" id="operations-financial" aria-labelledby="operations-financial-heading">
-                <div class="section-heading">
-                    <p class="eyebrow">Secondary</p>
-                    <h2 id="operations-financial-heading">Financial Snapshot</h2>
-                </div>
-                <div class="financial-grid compact-financial-grid">
-                    <?php foreach ($commandCenter['daily_operations']['financial'] as $label => $value): ?>
-                        <div class="financial-card">
-                            <span><?= esc(ucwords(str_replace('_', ' ', $label))) ?></span>
-                            <strong><?= esc((string) $value) ?></strong>
-                        </div>
-                    <?php endforeach; ?>
-                </div>
-            </section>
-
             <section class="section" id="data-honesty" aria-labelledby="data-honesty-heading">
                 <div class="section-heading">
                     <p class="eyebrow">Data Honesty</p>

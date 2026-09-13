@@ -2,6 +2,7 @@
 
 use App\Services\Fleet\AirportMovementWorkflowService;
 use App\Services\Fleet\DailyOperationsDashboardService;
+use App\Services\Fleet\FinancialSummaryService;
 use App\Services\Fleet\FleetHealthService;
 use App\Services\Fleet\FleetSnapshotService;
 use App\Services\Fleet\FleetStatisticsService;
@@ -253,6 +254,14 @@ final class DailyOperationsDashboardServiceTest extends CIUnitTestCase
                 && ($board[0]['checklist_href'] ?? null) === '/operations/checklists/41'),
             $this->isInstanceOf(DateTimeImmutable::class),
         )->willReturnArgument(0);
+        $financialSummary = $this->createMock(FinancialSummaryService::class);
+        $financialSummary->expects($this->once())->method('currentMonth')->with(1, $this->isInstanceOf(DateTimeImmutable::class))->willReturn([
+            'realized_operating_revenue' => 0.0,
+            'realized_recoveries' => 0.0,
+            'recorded_operating_costs' => 0.0,
+            'net_realized_operating_result' => 0.0,
+            'forecast_host_payout' => 0.0,
+        ]);
 
         $dashboard = new DailyOperationsDashboardService(
             $tasks,
@@ -269,6 +278,7 @@ final class DailyOperationsDashboardServiceTest extends CIUnitTestCase
             $intelligence,
             $readiness,
             $fleetSnapshot,
+            financialSummaryService: $financialSummary,
         );
         $result = $dashboard->forToday(new DateTimeImmutable('2026-07-19 08:00:00'));
         $queue = $result['operational_queue'];

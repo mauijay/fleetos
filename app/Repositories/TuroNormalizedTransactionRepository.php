@@ -136,6 +136,34 @@ class TuroNormalizedTransactionRepository
         return (float) ($row['total'] ?? 0);
     }
 
+    /**
+     * Returns only rows whose company ownership is authoritative and internally
+     * consistent. Unmatched rows and trip/direct-vehicle conflicts are excluded.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function financialActivityForCompany(int $companyId, string $fromDate, string $toDateExclusive): array
+    {
+        $company = $this->db->escape($companyId);
+
+        return $this->db->table('turo_transactions_normalized txn')
+            ->select('txn.id, txn.turo_transaction_raw_id, txn.turo_trip_normalized_id')
+            ->select('COALESCE(txn.fleet_vehicle_id, trip.fleet_vehicle_id) AS fleet_vehicle_id', false)
+            ->select('txn.transaction_type, txn.normalized_type, txn.event_class')
+            ->select('txn.description, txn.amount, txn.transaction_date, raw.raw_payload')
+            ->join('turo_transaction_raw raw', 'raw.id = txn.turo_transaction_raw_id', 'left')
+            ->join('fleet_vehicles direct_vehicle', 'direct_vehicle.id = txn.fleet_vehicle_id', 'left')
+            ->join('turo_trips_normalized trip', 'trip.id = txn.turo_trip_normalized_id', 'left')
+            ->join('fleet_vehicles trip_vehicle', 'trip_vehicle.id = trip.fleet_vehicle_id', 'left')
+            ->whereIn('txn.event_class', ['operating_revenue', 'reimbursement'])
+            ->where('txn.transaction_date >=', $fromDate)
+            ->where('txn.transaction_date <', $toDateExclusive)
+            ->where("((txn.fleet_vehicle_id IS NOT NULL AND direct_vehicle.company_id = {$company}) OR (txn.fleet_vehicle_id IS NULL AND trip_vehicle.company_id = {$company}))", null, false)
+            ->where('(txn.fleet_vehicle_id IS NULL OR trip.fleet_vehicle_id IS NULL OR txn.fleet_vehicle_id = trip.fleet_vehicle_id)', null, false)
+            ->orderBy('txn.id', 'ASC')
+            ->get()->getResultArray();
+    }
+
     /** @return array<int, array<string, mixed>> */
     public function operatingRevenueByVehicleInPeriod(string $fromDate, string $toDateExclusive): array
     {

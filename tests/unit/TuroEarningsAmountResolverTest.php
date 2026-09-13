@@ -51,7 +51,9 @@ final class TuroEarningsAmountResolverTest extends CIUnitTestCase
 
         $this->assertSame('0.00', $resolver->money('$0.00'));
         $this->assertSame('-71.28', $resolver->money('-$71.28'));
-        $this->assertSame('12.34', $resolver->money('($12.34)'));
+        $this->assertSame('-12.34', $resolver->money('($12.34)'));
+        $this->assertSame('-12.34', $resolver->money('$(12.34)'));
+        $this->assertSame('-12.34', $resolver->money('(12.34)'));
         $this->assertSame('1001.63', $resolver->money('$1,001.63'));
     }
 }

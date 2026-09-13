@@ -73,12 +73,35 @@ class FleetHealthService
     {
         $asOf ??= new DateTimeImmutable();
 
-        return array_map(static function (array $loan) use ($asOf): array {
+        $loans = array_map(function (array $loan) use ($asOf): array {
+            $dueOn = $this->loanDueDateForMonth($loan, $asOf);
+
             return array_merge($loan, [
                 'due_month' => $asOf->format('Y-m'),
+                'due_on' => $dueOn?->format('Y-m-d'),
+                'due_label' => $dueOn === null
+                    ? 'Due date unavailable'
+                    : ($dueOn->format('Y-m-d') === $asOf->format('Y-m-d') ? 'Due today' : 'Due ' . $dueOn->format('M j')),
                 'amount_due' => (float) ($loan['monthly_payment'] ?? 0),
             ]);
         }, $this->repo()->activeLoans());
+
+        usort($loans, static function (array $left, array $right): int {
+            $dateOrder = ($left['due_on'] ?? '9999-12-31') <=> ($right['due_on'] ?? '9999-12-31');
+            if ($dateOrder !== 0) {
+                return $dateOrder;
+            }
+
+            $leftFleetNumber = isset($left['fleet_number']) ? (int) $left['fleet_number'] : PHP_INT_MAX;
+            $rightFleetNumber = isset($right['fleet_number']) ? (int) $right['fleet_number'] : PHP_INT_MAX;
+            $fleetNumberOrder = $leftFleetNumber <=> $rightFleetNumber;
+
+            return $fleetNumberOrder !== 0
+                ? $fleetNumberOrder
+                : strnatcasecmp((string) ($left['display_name'] ?? $left['fleet_code'] ?? ''), (string) ($right['display_name'] ?? $right['fleet_code'] ?? ''));
+        });
+
+        return $loans;
     }
 
     /** Returns open or unpaid claims that need operational follow-up. */
@@ -130,5 +153,37 @@ class FleetHealthService
     private function repo(): FleetIntelligenceRepository
     {
         return $this->repository ?? service('fleetIntelligenceRepository');
+    }
+
+    private function loanDueDateForMonth(array $loan, DateTimeImmutable $asOf): ?DateTimeImmutable
+    {
+        $firstPaymentOn = trim((string) ($loan['first_payment_on'] ?? ''));
+        if ($firstPaymentOn !== '') {
+            $firstPaymentDate = DateTimeImmutable::createFromFormat('!Y-m-d', $firstPaymentOn, $asOf->getTimezone());
+            if ($firstPaymentDate !== false && $firstPaymentDate->format('Y-m-d') === $firstPaymentOn) {
+                if ($firstPaymentDate->format('Y-m') === $asOf->format('Y-m')) {
+                    return $firstPaymentDate;
+                }
+
+                if ($firstPaymentDate > $asOf->modify('last day of this month')->setTime(23, 59, 59)) {
+                    return null;
+                }
+            }
+        }
+
+        $dueDay = filter_var($loan['payment_due_day'] ?? null, FILTER_VALIDATE_INT, [
+            'options' => ['min_range' => 1, 'max_range' => 31],
+        ]);
+        if ($dueDay === false) {
+            return null;
+        }
+
+        $year = (int) $asOf->format('Y');
+        $month = (int) $asOf->format('n');
+        if (! checkdate($month, $dueDay, $year)) {
+            return null;
+        }
+
+        return $asOf->setDate($year, $month, $dueDay)->setTime(0, 0);
     }
 }

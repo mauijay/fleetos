@@ -6,7 +6,10 @@ use App\Services\Fleet\DecisionSupport\DecisionSupportDashboardService;
 use App\Services\Turo\TuroImportIssueService;
 use App\Services\Turo\TuroTripReconciliationService;
 use App\Services\Turo\TuroVehicleMappingService;
+use Config\App;
 use DateTimeImmutable;
+use DateTimeZone;
+use Throwable;
 
 class FleetCommandCenterViewModelService
 {
@@ -29,21 +32,27 @@ class FleetCommandCenterViewModelService
     public function forToday(?DateTimeImmutable $asOf = null, ?string $queueScope = null, ?string $movementFilter = null): array
     {
         $asOf ??= new DateTimeImmutable();
-        $command = $this->command()->snapshot($asOf);
-        $statistics = $this->statistics()->summary($asOf);
+        $dailyOperations = $this->dailyOperations()->forToday($asOf, $movementFilter);
+        $companyId = (int) $dailyOperations['fleet_snapshot']['company_id'];
+        $financialSummary = $dailyOperations['financial_summary'] ?? [
+            'realized_operating_revenue' => 0.0,
+            'realized_recoveries' => 0.0,
+            'recorded_operating_costs' => 0.0,
+            'net_realized_operating_result' => 0.0,
+            'forecast_host_payout' => 0.0,
+        ];
+        $command = $this->command()->snapshot($asOf, $companyId, $financialSummary);
+        $statistics = $this->statistics()->summary($asOf, $companyId, $financialSummary);
         $health = $this->health()->summary($asOf);
         $today = $this->tasks()->today($asOf);
         $tomorrow = $this->tasks()->tomorrow($asOf);
-        $currentMonth = $statistics['current_month'];
-        $timelineStart = $asOf->setTime(0, 0);
+        $timelineStart = $asOf->setTimezone($this->businessTimezone())->setTime(0, 0);
         $timelineEnd = $timelineStart->modify('+7 days');
         $tripAnalytics = $this->tripAnalytics()->summary(new DateTimeImmutable($asOf->format('Y-01-01 00:00:00')), $timelineEnd);
-        $vehiclePerformance = $this->statistics()->vehiclePerformance($asOf);
         $decisionSupport = $this->decisionSupport()->recommendations($asOf);
         $importIssues = $this->importIssues()->attentionSummary();
         $vehicleMappings = $this->vehicleMappings()->attentionSummary();
         $tripReconciliation = $this->tripReconciliation()->attentionSummary();
-        $dailyOperations = $this->dailyOperations()->forToday($asOf, $movementFilter);
         $queueView = $this->queueView($queueScope, $today, $tomorrow, $command['urgent_items'], $dailyOperations['operational_queue']);
         $dailyOperations['queue_view'] = $queueView;
 
@@ -61,9 +70,9 @@ class FleetCommandCenterViewModelService
             'decision_support' => $decisionSupport,
             'vehicles' => $this->vehicleCards($command['vehicle_statuses'], $health),
             'timeline' => $this->timelineCards($command['todays_timeline'], $timelineStart, $timelineEnd),
-            'financial' => $this->financialSnapshot($currentMonth, $statistics),
+            'financial' => $this->financialSnapshot($financialSummary),
             'health_alerts' => $this->healthAlerts($health),
-            'executive_kpis' => $this->executiveKpis($statistics, $tripAnalytics, $vehiclePerformance),
+            'executive_kpis' => $this->executiveKpis($tripAnalytics),
             'activity' => $this->activityPanel($today, $tomorrow, $health, $command, $dailyOperations['fleet_snapshot'], $queueView),
             'future_integrations' => $this->futureIntegrations(),
         ];
@@ -168,10 +177,13 @@ class FleetCommandCenterViewModelService
     /** @return array<string, array<string, mixed>> */
     private function timelineCards(array $today, DateTimeImmutable $timelineStart, DateTimeImmutable $timelineEnd): array
     {
+        $tomorrowStart = $timelineStart->modify('+1 day');
+        $dayAfterTomorrow = $timelineStart->modify('+2 days');
+
         return [
-            'today' => $this->timelineCard('Today', $today),
-            'tomorrow' => $this->timelineCard('Tomorrow', $this->availability()->timeline($timelineStart->modify('+1 day'), $timelineStart->modify('+2 days'))),
-            'next_7_days' => $this->timelineCard('Next 7 Days', $this->availability()->timeline($timelineStart, $timelineEnd)),
+            'today' => $this->timelineCard('Today', $this->scheduledWithin($today, $timelineStart, $tomorrowStart)),
+            'tomorrow' => $this->timelineCard('Tomorrow', $this->scheduledWithin($this->availability()->timeline($tomorrowStart, $dayAfterTomorrow), $tomorrowStart, $dayAfterTomorrow)),
+            'next_7_days' => $this->timelineCard('Next 7 Days', $this->scheduledWithin($this->availability()->timeline($dayAfterTomorrow, $timelineEnd), $dayAfterTomorrow, $timelineEnd)),
         ];
     }
 
@@ -180,33 +192,23 @@ class FleetCommandCenterViewModelService
         return [
             'label' => $label,
             'count' => count($items),
-            'items' => array_map(static fn (array $item): array => array_merge($item, [
+            'items' => array_map(fn (array $item): array => array_merge($item, [
                 'type_label' => ucwords(str_replace('_', ' ', (string) ($item['type'] ?? 'scheduled'))),
-                'starts_at_label' => (string) ($item['starts_at'] ?? 'Pending time'),
+                'title_label' => $this->timelineTitle($item),
+                'starts_at_label' => $this->friendlyDateTime($item['starts_at'] ?? null),
             ]), array_slice($items, 0, 8)),
         ];
     }
 
     /** @return array<int, array<string, mixed>> */
-    private function financialSnapshot(array $currentMonth, array $statistics): array
+    private function financialSnapshot(array $financialSummary): array
     {
-        $premiumBase = $statistics['premium_vs_base'];
-        $capital = $statistics['fleet_value'];
-        $startupCosts = (float) ($capital['startup_costs'] ?? $capital['fleet_value'] ?? 0);
-        $outstandingDebt = (float) ($capital['outstanding_loan_balance'] ?? $capital['loan_balance'] ?? 0);
-
         return [
-            $this->financialCard('Current Month Revenue', $this->money(isset($currentMonth['completed_revenue']) ? (float) $currentMonth['completed_revenue'] : null), 'Recognized operating revenue'),
-            $this->financialCard('Forecast Revenue', $this->money((float) $currentMonth['forecast_revenue']), 'Booked future payout'),
-            $this->financialCard('Cash Flow', $this->money(isset($currentMonth['cash_flow']) ? (float) $currentMonth['cash_flow'] : null), 'Operating revenue plus forecast minus known costs'),
-            $this->financialCard('Operating Profit', $this->money(isset($currentMonth['operating_profit']) ? (float) $currentMonth['operating_profit'] : null), 'Recognized operating revenue minus known costs'),
-            $this->financialCard('Month-to-Date Utilization', $this->percent((float) $currentMonth['fleet_utilization']), 'Occupied vehicle-days this month'),
-            $this->financialCard('ADR', $this->money((float) $currentMonth['average_daily_rate']), 'Average daily rate'),
-            $this->financialCard('RevPAD', $this->money((float) $currentMonth['revenue_per_available_day']), 'Revenue per available day'),
-            $this->financialCard('Premium Revenue', $this->money($this->segmentRevenue($premiumBase, 'premium')), 'Premium fleet segment'),
-            $this->financialCard('Base Revenue', $this->money($this->segmentRevenue($premiumBase, 'base')), 'Base fleet segment'),
-            $this->financialCard('Recorded Startup Costs', $this->money($startupCosts), 'Legacy startup-cost records'),
-            $this->financialCard('Outstanding Vehicle Debt', $this->money($outstandingDebt), 'Latest dated principal or legacy balance'),
+            $this->financialCard('Realized Operating Revenue', $this->money((float) $financialSummary['realized_operating_revenue']), 'Signed Turo operating-revenue postings'),
+            $this->financialCard('Realized Recoveries', $this->money((float) $financialSummary['realized_recoveries']), 'Validated posted recovery transactions'),
+            $this->financialCard('Recorded Operating Costs', $this->money((float) $financialSummary['recorded_operating_costs']), 'Recorded/incurred operational costs; not proof of bank settlement'),
+            $this->financialCard('Net Realized Operating Result', $this->money((float) $financialSummary['net_realized_operating_result']), 'Realized revenue plus recoveries minus recorded operating costs'),
+            $this->financialCard('Forecast Host Payout', $this->money((float) $financialSummary['forecast_host_payout']), 'Booked future payout; excluded from realized result'),
         ];
     }
 
@@ -226,19 +228,11 @@ class FleetCommandCenterViewModelService
     }
 
     /** @return array<int, array<string, mixed>> */
-    private function executiveKpis(array $statistics, array $tripAnalytics, array $vehiclePerformance): array
+    private function executiveKpis(array $tripAnalytics): array
     {
         return [
-            $this->metricCard('Revenue / Recorded Startup Cost', $this->averageRoi($statistics['vehicle_roi']), 'Known startup-cost records only', '#financial-snapshot', 'neutral'),
-            $this->metricCard('Lifetime Revenue', $this->money((float) $statistics['lifetime_revenue']), 'All completed history', '#financial-snapshot', 'success'),
-            $this->metricCard('Revenue Less Recorded Startup Costs', $this->money((float) $statistics['lifetime_profit']), 'Not accounting profit', '#financial-snapshot', 'success'),
             $this->metricCard('Average Trip Length', number_format((float) $tripAnalytics['average_trip_length'], 1) . ' days', 'Year to date', '#fleet-timeline', 'neutral'),
             $this->metricCard('Year-to-Date + 7-Day Utilization', $this->percent((float) $tripAnalytics['utilization']), 'Occupied vehicle-days through the operational horizon', '#fleet-timeline', 'neutral'),
-            $this->metricCard('Revenue per Vehicle', $this->money((float) $statistics['current_month']['revenue_per_vehicle']), 'Current month', '#financial-snapshot', 'success'),
-            $this->metricCard('Revenue per Available Day', $this->money((float) $statistics['current_month']['revenue_per_available_day']), 'Current month', '#financial-snapshot', 'success'),
-            $this->metricCard('Highest Performing Vehicle', $this->vehicleLabel($vehiclePerformance[0] ?? null), 'By revenue', '#fleet-activity', 'success'),
-            $this->metricCard('Lowest Performing Vehicle', $this->vehicleLabel($vehiclePerformance[count($vehiclePerformance) - 1] ?? null), 'By revenue', '#fleet-activity', 'warning'),
-            $this->metricCard('Most Utilized Vehicle', $this->vehicleLabel($this->mostUtilizedVehicle($vehiclePerformance)), 'By utilization', '#fleet-activity', 'info'),
         ];
     }
 
@@ -368,11 +362,77 @@ class FleetCommandCenterViewModelService
             'label' => $label,
             'items' => $items,
             'count' => count($items),
-            'preview_items' => array_map(static fn (array $item): string => (string) ($item['fleet_code'] ?? $item['display_name'] ?? $item['guest_name'] ?? $item['source_reservation_id'] ?? 'Task ready'), array_slice($items, 0, 3)),
+            'preview_items' => array_map(fn (array $item): string => $this->taskPreview($item, $type), array_slice($items, 0, 3)),
             'empty_text' => 'No action due.',
             'type' => $type,
             'tone' => count($items) > 0 ? $tone : 'neutral',
         ];
+    }
+
+    private function taskPreview(array $item, string $type): string
+    {
+        $vehicle = (string) ($item['display_name'] ?? $item['fleet_code'] ?? $item['guest_name'] ?? $item['source_reservation_id'] ?? 'Task ready');
+
+        return $type === 'loan'
+            ? $vehicle . ' — ' . (string) ($item['due_label'] ?? 'Due date unavailable')
+            : $vehicle;
+    }
+
+    private function timelineTitle(array $item): string
+    {
+        if (($item['type'] ?? '') !== 'reservation') {
+            return ucwords(str_replace('_', ' ', (string) ($item['type'] ?? 'scheduled')));
+        }
+
+        $guestName = trim((string) ($item['guest_name'] ?? $item['reservation']['guest_name'] ?? ''));
+        if ($guestName === '' || in_array(strtolower($guestName), ['unknown guest', 'guest not captured'], true)) {
+            return 'Reservation';
+        }
+
+        $nameParts = preg_split('/\s+/u', $guestName);
+
+        return $nameParts[0] ?? 'Reservation';
+    }
+
+    private function friendlyDateTime(mixed $value): string
+    {
+        $dateTime = trim((string) $value);
+        if ($dateTime === '') {
+            return 'Pending time';
+        }
+
+        try {
+            $timezone = $this->businessTimezone();
+
+            return (new DateTimeImmutable($dateTime, $timezone))->setTimezone($timezone)->format('M j · g:i A');
+        } catch (Throwable) {
+            return 'Pending time';
+        }
+    }
+
+    /** @param array<int, array<string, mixed>> $items */
+    private function scheduledWithin(array $items, DateTimeImmutable $startsAt, DateTimeImmutable $endsAt): array
+    {
+        return array_values(array_filter($items, function (array $item) use ($startsAt, $endsAt): bool {
+            $scheduledAt = trim((string) ($item['starts_at'] ?? ''));
+            if ($scheduledAt === '') {
+                return false;
+            }
+
+            try {
+                $localScheduledAt = (new DateTimeImmutable($scheduledAt, $this->businessTimezone()))
+                    ->setTimezone($this->businessTimezone());
+
+                return $localScheduledAt >= $startsAt && $localScheduledAt < $endsAt;
+            } catch (Throwable) {
+                return false;
+            }
+        }));
+    }
+
+    private function businessTimezone(): DateTimeZone
+    {
+        return new DateTimeZone((new App())->appTimezone);
     }
 
     private function financialCard(string $label, string $value, string $detail): array
@@ -429,46 +489,6 @@ class FleetCommandCenterViewModelService
         }
 
         return $issues;
-    }
-
-    private function segmentRevenue(array $segments, string $group): float
-    {
-        foreach ($segments as $segment) {
-            if (($segment['group'] ?? '') === $group) {
-                return (float) ($segment['completed_revenue'] ?? 0);
-            }
-        }
-
-        return 0.0;
-    }
-
-    private function averageRoi(array $vehicles): string
-    {
-        $known = array_values(array_filter($vehicles, static fn (array $vehicle): bool => $vehicle['roi'] !== null));
-
-        if ($known === []) {
-            return 'Pending';
-        }
-
-        $total = array_reduce($known, static fn (float $carry, array $vehicle): float => $carry + (float) $vehicle['roi'], 0.0);
-
-        return $this->percent($total / count($known));
-    }
-
-    private function mostUtilizedVehicle(array $vehiclePerformance): ?array
-    {
-        usort($vehiclePerformance, static fn (array $left, array $right): int => (float) ($right['utilization'] ?? 0) <=> (float) ($left['utilization'] ?? 0));
-
-        return $vehiclePerformance[0] ?? null;
-    }
-
-    private function vehicleLabel(?array $vehicle): string
-    {
-        if ($vehicle === null) {
-            return 'Pending';
-        }
-
-        return (string) ($vehicle['fleet_code'] ?? $vehicle['display_name'] ?? 'Pending');
     }
 
     private function money(?float $amount): string

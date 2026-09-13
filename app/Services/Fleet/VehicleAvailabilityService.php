@@ -3,7 +3,10 @@
 namespace App\Services\Fleet;
 
 use App\Repositories\FleetIntelligenceRepository;
+use Config\App;
 use DateTimeImmutable;
+use DateTimeZone;
+use Throwable;
 
 class VehicleAvailabilityService
 {
@@ -30,6 +33,10 @@ class VehicleAvailabilityService
     /** Returns reservation and delivery timeline entries for the requested period. */
     public function timeline(DateTimeImmutable $startsAt, DateTimeImmutable $endsAt): array
     {
+        $timezone = $this->businessTimezone();
+        $startsAt = $startsAt->setTimezone($timezone);
+        $endsAt = $endsAt->setTimezone($timezone);
+
         $reservations = array_map(static function (array $reservation): array {
             return [
                 'type' => 'reservation',
@@ -38,11 +45,13 @@ class VehicleAvailabilityService
                 'starts_at' => $reservation['starts_at'],
                 'ends_at' => $reservation['ends_at'],
                 'status' => $reservation['status_code'],
+                'guest_name' => $reservation['guest_name'] ?? null,
                 'reservation' => $reservation,
             ];
         }, array_values(array_filter(
             $this->repo()->operationalReservationsBetween($startsAt->format('Y-m-d H:i:s'), $endsAt->format('Y-m-d H:i:s')),
-            static fn (array $reservation): bool => ! str_starts_with((string) ($reservation['status_code'] ?? ''), 'canceled'),
+            fn (array $reservation): bool => ! str_starts_with((string) ($reservation['status_code'] ?? ''), 'canceled')
+                && $this->isScheduledWithin($reservation['starts_at'] ?? null, $startsAt, $endsAt),
         )));
 
         $deliveries = array_map(static function (array $delivery): array {
@@ -54,7 +63,10 @@ class VehicleAvailabilityService
                 'status' => $delivery['delivery_status_lookup_value_id'],
                 'delivery' => $delivery,
             ];
-        }, $this->repo()->airportDeliveriesBetween($startsAt->format('Y-m-d H:i:s'), $endsAt->format('Y-m-d H:i:s')));
+        }, array_values(array_filter(
+            $this->repo()->airportDeliveriesBetween($startsAt->format('Y-m-d H:i:s'), $endsAt->format('Y-m-d H:i:s')),
+            fn (array $delivery): bool => $this->isScheduledWithin($delivery['scheduled_at'] ?? null, $startsAt, $endsAt),
+        )));
 
         $timeline = array_merge($reservations, $deliveries);
         usort($timeline, static fn (array $left, array $right): int => strcmp((string) $left['starts_at'], (string) $right['starts_at']));
@@ -101,6 +113,28 @@ class VehicleAvailabilityService
     private function repo(): FleetIntelligenceRepository
     {
         return $this->repository ?? service('fleetIntelligenceRepository');
+    }
+
+    private function isScheduledWithin(mixed $value, DateTimeImmutable $startsAt, DateTimeImmutable $endsAt): bool
+    {
+        $scheduledAt = trim((string) $value);
+        if ($scheduledAt === '') {
+            return false;
+        }
+
+        try {
+            $localScheduledAt = (new DateTimeImmutable($scheduledAt, $this->businessTimezone()))
+                ->setTimezone($this->businessTimezone());
+
+            return $localScheduledAt >= $startsAt && $localScheduledAt < $endsAt;
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
+    private function businessTimezone(): DateTimeZone
+    {
+        return new DateTimeZone((new App())->appTimezone);
     }
 
     /** @param array<int, array<string, mixed>> $reservations */

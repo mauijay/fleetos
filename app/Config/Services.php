@@ -4,16 +4,20 @@ namespace Config;
 
 use App\Repositories\AirportMovementRepository;
 use App\Repositories\AuditLogRepository;
+use App\Repositories\ChargingCostRepository;
 use App\Repositories\FileRepository;
 use App\Repositories\FleetIntelligenceRepository;
 use App\Repositories\LookupRepository;
+use App\Repositories\MaintenanceCostRepository;
 use App\Repositories\MovementChecklistRepository;
 use App\Repositories\MovementReadinessReadModelRepository;
 use App\Repositories\OperatingExpenseRepository;
 use App\Repositories\OperationalFactsRepository;
 use App\Repositories\TripIncidentalReviewRepository;
+use App\Repositories\TripMonthAllocationRepository;
 use App\Repositories\TuroAccessReimbursementRepository;
 use App\Repositories\TuroImportErrorRepository;
+use App\Repositories\TuroNormalizedTransactionRepository;
 use App\Repositories\TuroNormalizedTripRepository;
 use App\Repositories\TuroVehicleMappingIssueRepository;
 use App\Repositories\VehicleCapitalRepository;
@@ -31,6 +35,8 @@ use App\Services\Fleet\DecisionSupport\MaintenancePredictionService;
 use App\Services\Fleet\DecisionSupport\PricingRecommendationService;
 use App\Services\Fleet\DecisionSupport\RecommendationFactory;
 use App\Services\Fleet\DecisionSupport\RevenueForecastService;
+use App\Services\Fleet\FinancialActivityReadService;
+use App\Services\Fleet\FinancialSummaryService;
 use App\Services\Fleet\FleetCommandCenterViewModelService;
 use App\Services\Fleet\FleetCommandService;
 use App\Services\Fleet\FleetHealthService;
@@ -92,6 +98,67 @@ use CodeIgniter\Config\BaseService;
  */
 class Services extends BaseService
 {
+    public static function turoNormalizedTransactionRepository(bool $getShared = true): TuroNormalizedTransactionRepository
+    {
+        if ($getShared) {
+            return static::getSharedInstance('turoNormalizedTransactionRepository');
+        }
+
+        return new TuroNormalizedTransactionRepository();
+    }
+
+    public static function tripMonthAllocationRepository(bool $getShared = true): TripMonthAllocationRepository
+    {
+        if ($getShared) {
+            return static::getSharedInstance('tripMonthAllocationRepository');
+        }
+
+        return new TripMonthAllocationRepository();
+    }
+
+    public static function maintenanceCostRepository(bool $getShared = true): MaintenanceCostRepository
+    {
+        if ($getShared) {
+            return static::getSharedInstance('maintenanceCostRepository');
+        }
+
+        return new MaintenanceCostRepository();
+    }
+
+    public static function chargingCostRepository(bool $getShared = true): ChargingCostRepository
+    {
+        if ($getShared) {
+            return static::getSharedInstance('chargingCostRepository');
+        }
+
+        return new ChargingCostRepository();
+    }
+
+    public static function financialActivityReadService(bool $getShared = true): FinancialActivityReadService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('financialActivityReadService');
+        }
+
+        return new FinancialActivityReadService(
+            static::turoNormalizedTransactionRepository(),
+            static::tripMonthAllocationRepository(),
+            static::operatingExpenseRepository(),
+            static::maintenanceCostRepository(),
+            static::chargingCostRepository(),
+            static::turoAccessReimbursementRepository(),
+        );
+    }
+
+    public static function financialSummaryService(bool $getShared = true): FinancialSummaryService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('financialSummaryService');
+        }
+
+        return new FinancialSummaryService(static::financialActivityReadService());
+    }
+
     public static function tripIncidentalReviewRepository(bool $getShared = true): TripIncidentalReviewRepository
     {
         if ($getShared) {
@@ -626,7 +693,11 @@ class Services extends BaseService
             return static::getSharedInstance('fleetStatisticsService');
         }
 
-        return new FleetStatisticsService(static::fleetIntelligenceRepository(), static::revenueService());
+        return new FleetStatisticsService(
+            static::fleetIntelligenceRepository(),
+            static::revenueService(),
+            financialSummaryService: static::financialSummaryService(),
+        );
     }
 
     public static function fleetHealthService(bool $getShared = true): FleetHealthService
@@ -723,6 +794,7 @@ class Services extends BaseService
             static::fleetSnapshotService(),
             incidentalReviewService: static::tripIncidentalReviewService(),
             operatingExpenseService: static::operatingExpenseService(),
+            financialSummaryService: static::financialSummaryService(),
         );
     }
 

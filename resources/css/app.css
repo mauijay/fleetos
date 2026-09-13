@@ -1394,6 +1394,13 @@ h3 {
   font-size: 13px;
 }
 
+.task-card li,
+.timeline-list span,
+.timeline-list strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .vehicle-card {
   display: grid;
   grid-template-columns: 118px minmax(0, 1fr);

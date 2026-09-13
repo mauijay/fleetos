@@ -2,6 +2,8 @@
 
 Phase 5 turns FleetOS from a reporting surface into a deterministic business advisor. It does not add artificial intelligence. Every recommendation is produced by explicit business rules, references measurable data, and can explain why it exists.
 
+> Slice 3B.3B-1 temporarily suppresses pricing, fleet-optimization, revenue-forecast, and business-profit recommendation categories in the Command Center. Their legacy financial inputs are not compatible with the new company-scoped methodology. Maintenance and guest-risk recommendations remain active. Financial/per-vehicle recommendations resume only after the 3B.3B-2 read model is approved.
+
 ## Architecture
 
 - Decision logic lives in `app/Services/Fleet/DecisionSupport`.
@@ -98,7 +100,7 @@ Rules:
 - Repeat guests are informational positive signals based on measured repeat booking counts.
 - Unsupported guest risk categories produce no recommendation until data exists.
 
-### RevenueForecastService
+### RevenueForecastService (legacy/deferred Command Center consumer)
 
 Responsibilities:
 
@@ -117,7 +119,7 @@ Rules:
 - No seasonality is applied until enough seasonal history exists.
 - Zero completed revenue returns no forecast recommendation.
 
-### BusinessInsightService
+### BusinessInsightService (legacy/deferred Command Center consumer)
 
 Responsibilities:
 

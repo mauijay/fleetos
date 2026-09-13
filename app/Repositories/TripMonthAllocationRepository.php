@@ -50,4 +50,27 @@ class TripMonthAllocationRepository
             throw new RuntimeException("Unable to replace month allocations for Turo trip record {$tripId}.");
         }
     }
+
+    /** @return list<array<string, mixed>> */
+    public function forecastActivityForCompany(int $companyId, string $fromDate, string $toDateExclusive): array
+    {
+        $builder = $this->db->table('trip_month_allocations allocation')
+            ->select('allocation.id, allocation.fleet_vehicle_id, allocation.turo_trip_normalized_id')
+            ->select('allocation.allocation_month, allocation.allocated_host_payout_amount')
+            ->join('turo_trips_normalized trip', 'trip.id = allocation.turo_trip_normalized_id AND trip.fleet_vehicle_id = allocation.fleet_vehicle_id')
+            ->join('fleet_vehicles vehicle', 'vehicle.id = allocation.fleet_vehicle_id')
+            ->join('lookup_values trip_status', 'trip_status.id = trip.trip_status_lookup_value_id', 'left')
+            ->where('vehicle.company_id', $companyId)
+            ->where('trip.deleted_at', null)
+            ->where('allocation.is_forecast', true)
+            ->where('allocation.allocation_month >=', $fromDate)
+            ->where('allocation.allocation_month <', $toDateExclusive)
+            ->where('allocation.allocated_host_payout_amount !=', 0)
+            ->groupStart()
+                ->whereNotIn('trip_status.code', ['canceled', 'canceled_zero_payout', 'canceled_host_payout'])
+                ->orWhere('trip_status.code', null)
+            ->groupEnd();
+
+        return $builder->orderBy('allocation.id', 'ASC')->get()->getResultArray();
+    }
 }

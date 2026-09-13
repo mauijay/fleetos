@@ -11,7 +11,7 @@ Phase 4 adds the FleetOS operational homepage: a dark, responsive Mission Contro
 - `VehicleDailyStateService` owns vehicle daily state, same-day turnaround calculation, timeline event shaping, immediate-attention rules, and daily fleet counts.
 - `MorningBriefingService` builds the deterministic one- or two-sentence briefing from the prepared movement board and attention list.
 - `TripMovementChecklistService` idempotently creates and summarizes current-day pickup and return checklists for Command Center.
-- Business calculations remain in Phase 3 services. Financial metrics come from `RevenueService` and `FleetStatisticsService`; operational tasks come from `TaskService`, `FleetHealthService`, `VehicleAvailabilityService`, and `FleetCommandService`.
+- Business calculations remain in services. The financial snapshot comes from the company-scoped `FinancialSummaryService`; operational tasks come from `TaskService`, `FleetHealthService`, `VehicleAvailabilityService`, and `FleetCommandService`.
 - `AssetManifestService` resolves built Vite asset paths before rendering, so views do not parse manifests or perform file-system asset lookup.
 - Views render prepared arrays and reusable components. They do not query the database and do not calculate fleet metrics.
 
@@ -36,7 +36,7 @@ Phase 4 adds the FleetOS operational homepage: a dark, responsive Mission Contro
 - `daily_operations.attention` powers immediate operational issues only.
 - `daily_operations.fleet_status` powers compact daily counts.
 - `daily_operations.operational_queue` powers direct workflow actions.
-- `daily_operations.financial` powers secondary financial signals.
+- `daily_operations.financial_summary` carries the same source-explicit company summary used by the primary Financial Snapshot; the former duplicate secondary financial panel is no longer rendered.
 - `daily_operations.data_honesty` lists important inputs FleetOS does not yet capture reliably.
 - Movement board and timeline entries link to trip movement checklists when current-day movement records exist.
 
@@ -68,7 +68,7 @@ Morning Briefing priority:
 3. Pickup and return counts.
 4. Calm positive message when there are no tight turnarounds or urgent issues.
 
-Reliable current data includes normalized Turo pickup/return times, guests, statuses, vehicle links, current month revenue/utilization metrics, airport delivery records, fleet health records, and import cleanup attention counts.
+Reliable current data includes normalized Turo pickup/return times, guests, statuses, vehicle links, company-scoped realized/forecast financial summaries, airport delivery records, fleet health records, and import cleanup attention counts.
 
 Not yet reliably captured: battery telemetry, cleaning completion workflow state, non-airport pickup/return locations, travel-time/departure deadlines, and guest messages.
 
@@ -133,7 +133,8 @@ Future-only integrations are placeholders, not fake data. Battery, location, wea
 - No SQL was added to controllers or views.
 - No query builder calls were added to Fleet Command Center view files.
 - No manifest parsing or asset file reads are performed by Fleet Command Center views.
-- Financial, utilization, ADR, RevPAD, ROI, cash flow, and forecast values are consumed from Fleet Intelligence services.
+- The Financial Snapshot shows Realized Operating Revenue, Realized Recoveries, Recorded Operating Costs, Net Realized Operating Result, and Forecast Host Payout. Forecast never enters the realized result.
+- Cash Flow, Operating Profit, Lifetime Profit, and startup-capital comparisons are not presented as operating-performance metrics.
 - Future metrics return `null`, empty arrays, `Future`, or `Reserved` display states rather than fabricated data.
 - Reusable components are isolated as partials.
 - Navigation, layout, status cards, mission tasks, vehicle activity, timeline, financial snapshot, health warnings, executive KPIs, and future integration placeholders are implemented.

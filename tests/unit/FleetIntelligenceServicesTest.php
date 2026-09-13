@@ -15,6 +15,7 @@ use App\Services\Fleet\VehicleAvailabilityService;
 use App\Services\Turo\TuroImportIssueService;
 use App\Services\Turo\TuroTripReconciliationService;
 use App\Services\Turo\TuroVehicleMappingService;
+use CodeIgniter\Config\Services as CoreServices;
 use CodeIgniter\Test\CIUnitTestCase;
 use PHPUnit\Framework\MockObject\MockObject;
 
@@ -198,6 +199,29 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
         $this->assertSame([], $summary['vehicles_below_battery_threshold']);
     }
 
+    public function testFleetHealthServicePresentsAndSortsAuthoritativeLoanDueDates(): void
+    {
+        $repository = $this->repositoryMock(['activeLoans']);
+        $repository->method('activeLoans')->willReturn([
+            ['fleet_vehicle_id' => 10, 'fleet_number' => 10, 'display_name' => 'Spaceship10-100', 'payment_due_day' => 20, 'monthly_payment' => '500.00'],
+            ['fleet_vehicle_id' => 11, 'fleet_number' => 11, 'display_name' => 'Bronco11-087', 'payment_due_day' => 15, 'monthly_payment' => '525.00'],
+            ['fleet_vehicle_id' => 1, 'fleet_number' => 1, 'display_name' => 'Spaceship01-001', 'payment_due_day' => null, 'monthly_payment' => '450.00'],
+            ['fleet_vehicle_id' => 4, 'fleet_number' => 4, 'display_name' => 'Spaceship04-608', 'first_payment_on' => '2026-06-10', 'payment_due_day' => null, 'monthly_payment' => '475.00'],
+        ]);
+
+        $payments = (new FleetHealthService($repository))->loanPaymentDue(new DateTimeImmutable('2026-06-15 12:00:00'));
+
+        $this->assertSame([4, 11, 10, 1], array_column($payments, 'fleet_vehicle_id'));
+        $this->assertSame('2026-06-10', $payments[0]['due_on']);
+        $this->assertSame('Due Jun 10', $payments[0]['due_label']);
+        $this->assertSame('2026-06-15', $payments[1]['due_on']);
+        $this->assertSame('Due today', $payments[1]['due_label']);
+        $this->assertSame('Due Jun 20', $payments[2]['due_label']);
+        $this->assertNull($payments[3]['due_on']);
+        $this->assertSame('Due date unavailable', $payments[3]['due_label']);
+        $this->assertSame(525.0, $payments[1]['amount_due']);
+    }
+
     public function testVehicleAvailabilityServiceReturnsOperationalStatus(): void
     {
         $repository = $this->repositoryMock(['fleetVehicles', 'operationalReservationsBetween', 'airportDeliveriesBetween']);
@@ -206,10 +230,15 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
             ['id' => 2, 'fleet_code' => 'Spaceship-002', 'display_name' => 'Spaceship-002', 'is_available_for_booking' => true, 'odometer_miles' => 2200],
         ]);
         $repository->method('operationalReservationsBetween')->willReturn([
-            ['fleet_vehicle_id' => 1, 'starts_at' => '2026-06-15 08:00:00', 'ends_at' => '2026-06-16 10:00:00', 'status_code' => 'in_progress'],
+            ['fleet_vehicle_id' => 1, 'starts_at' => '2026-06-15 08:00:00', 'ends_at' => '2026-06-16 10:00:00', 'status_code' => 'in_progress', 'guest_name' => 'Joy Kealoha'],
             ['fleet_vehicle_id' => 2, 'starts_at' => '2026-06-20 08:00:00', 'ends_at' => '2026-06-22 10:00:00', 'status_code' => 'booked'],
         ]);
-        $repository->method('airportDeliveriesBetween')->willReturn([['fleet_vehicle_id' => 2, 'scheduled_at' => '2026-06-20 07:00:00']]);
+        $repository->method('airportDeliveriesBetween')->willReturn([[
+            'fleet_vehicle_id' => 2,
+            'scheduled_at' => '2026-06-20 07:00:00',
+            'completed_at' => null,
+            'delivery_status_lookup_value_id' => 1,
+        ]]);
 
         $service = new VehicleAvailabilityService($repository);
         $statuses = $service->vehicleStatus(new DateTimeImmutable('2026-06-15 12:00:00'));
@@ -220,6 +249,7 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
         $this->assertSame('available', $statuses[1]['status']);
         $this->assertTrue($statuses[1]['airport_delivery_scheduled']);
         $this->assertCount(1, $service->availableNow(new DateTimeImmutable('2026-06-15 12:00:00')));
+        $this->assertSame('Joy Kealoha', $service->timeline(new DateTimeImmutable('2026-06-15'), new DateTimeImmutable('2026-06-23'))[0]['guest_name']);
     }
 
     public function testTripAnalyticsServiceAggregatesTripMetrics(): void
@@ -379,6 +409,26 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
         $this->assertSame([], $snapshot['weather_alerts']);
     }
 
+    public function testFleetCommandServiceUsesHonoluluCalendarBoundsForTodaysTimeline(): void
+    {
+        $availability = $this->getMockBuilder(VehicleAvailabilityService::class)
+            ->disableOriginalConstructor()
+            ->onlyMethods(['timeline'])
+            ->getMock();
+        $availability->expects($this->once())
+            ->method('timeline')
+            ->with(
+                $this->callback(static fn (DateTimeImmutable $date): bool => $date->format('Y-m-d H:i:s P') === '2026-09-13 00:00:00 -10:00'),
+                $this->callback(static fn (DateTimeImmutable $date): bool => $date->format('Y-m-d H:i:s P') === '2026-09-14 00:00:00 -10:00'),
+            )
+            ->willReturn([]);
+
+        $timeline = (new FleetCommandService(availabilityService: $availability))
+            ->todaysTimeline(new DateTimeImmutable('2026-09-14 09:30:00+00:00'));
+
+        $this->assertSame([], $timeline);
+    }
+
     public function testFleetCommandCenterViewModelReturnsPredictableUiContract(): void
     {
         $command = $this->getMockBuilder(FleetCommandService::class)->disableOriginalConstructor()->onlyMethods(['snapshot'])->getMock();
@@ -409,7 +459,29 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
                 'current_odometer' => null,
                 'cleaning_status' => 'ready',
             ]],
-            'todays_timeline' => [],
+            'todays_timeline' => [
+                [
+                    'id' => 9,
+                    'type' => 'reservation',
+                    'starts_at' => '2026-06-09 12:00:00',
+                    'guest_name' => 'Stale Guest',
+                    'reservation' => ['guest_name' => 'Stale Guest'],
+                ],
+                [
+                    'id' => 13,
+                    'type' => 'reservation',
+                    'starts_at' => '2026-06-15 12:00:00',
+                    'guest_name' => 'Joy Kealoha',
+                    'reservation' => ['guest_name' => 'Joy Kealoha'],
+                ],
+                [
+                    'id' => 131,
+                    'type' => 'reservation',
+                    'starts_at' => '2026-06-15 21:00:00',
+                    'guest_name' => null,
+                    'reservation' => ['guest_name' => null],
+                ],
+            ],
             'todays_pickups' => [],
             'todays_returns' => [],
             'airport_deliveries' => [],
@@ -420,11 +492,22 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
         $statistics->method('summary')->willReturn($this->statisticsSummary());
         $statistics->method('vehiclePerformance')->willReturn([['fleet_code' => 'Spaceship-008', 'utilization' => 0.75]]);
         $health->method('summary')->willReturn($this->healthSummary());
-        $tasks->method('today')->willReturn($this->emptyTasks());
+        $todayTasks = $this->emptyTasks();
+        $todayTasks['loan_payments'] = [
+            ['fleet_vehicle_id' => 11, 'display_name' => 'Bronco11-087', 'due_on' => '2026-06-15', 'due_label' => 'Due today'],
+            ['fleet_vehicle_id' => 4, 'display_name' => 'Spaceship04-608', 'due_on' => '2026-06-20', 'due_label' => 'Due Jun 20'],
+            ['fleet_vehicle_id' => 9, 'display_name' => 'Spaceship09-294', 'due_on' => null, 'due_label' => 'Due date unavailable'],
+        ];
+        $tasks->method('today')->willReturn($todayTasks);
         $tomorrowTasks = $this->emptyTasks();
         $tomorrowTasks['todays_returns'] = [['fleet_vehicle_id' => 8]];
         $tasks->method('tomorrow')->willReturn($tomorrowTasks);
-        $availability->method('timeline')->willReturn([]);
+        $availability->method('timeline')->willReturn([
+            ['id' => 9, 'type' => 'reservation', 'starts_at' => '2026-06-09 12:00:00', 'guest_name' => 'Stale Guest'],
+            ['id' => 16, 'type' => 'reservation', 'starts_at' => '2026-06-16 09:00:00', 'guest_name' => 'Tomorrow Guest'],
+            ['id' => 17, 'type' => 'reservation', 'starts_at' => '2026-06-17 09:00:00', 'guest_name' => 'Future Guest'],
+            ['id' => 22, 'type' => 'reservation', 'starts_at' => '2026-06-22 00:00:00', 'guest_name' => 'Outside Guest'],
+        ]);
         $analytics->method('summary')->willReturn(['average_trip_length' => 2.5, 'utilization' => 0.6]);
         $decisionSupport->method('recommendations')->willReturn([
             'todays_recommendations' => [['title' => 'Pricing rec', 'priority' => 'High', 'confidence' => 90]],
@@ -472,7 +555,7 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
         ], array_slice(array_column($viewModel['navigation'], 'label'), 0, 8));
         $this->assertSame('true', $viewModel['navigation'][0]['active']);
         $this->assertNotContains('Fleet', array_column($viewModel['navigation'], 'label'));
-        $this->assertTrue($viewModel['mission_clear']);
+        $this->assertFalse($viewModel['mission_clear']);
         $this->assertCount(8, $viewModel['fleet_status']);
         $this->assertSame('Premium', $viewModel['vehicles'][0]['segment']);
         $this->assertSame('info', $viewModel['vehicles'][0]['segment_tone']);
@@ -492,9 +575,45 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
         $this->assertFalse($viewModel['vehicle_mappings']['has_unmatched']);
         $this->assertFalse($viewModel['trip_reconciliation']['has_reconciliation_work']);
 
-        $financialCards = array_values(array_filter($viewModel['financial'], static fn (array $card): bool => ($card['label'] ?? '') === 'Month-to-Date Utilization'));
-        $this->assertCount(1, $financialCards);
-        $this->assertSame('Occupied vehicle-days this month', $financialCards[0]['detail']);
+        $loanCard = array_values(array_filter($viewModel['mission'], static fn (array $card): bool => $card['label'] === 'Loan Payments Due'))[0];
+        $this->assertSame([
+            'Bronco11-087 — Due today',
+            'Spaceship04-608 — Due Jun 20',
+            'Spaceship09-294 — Due date unavailable',
+        ], $loanCard['preview_items']);
+        $this->assertSame('Joy', $viewModel['timeline']['today']['items'][0]['title_label']);
+        $this->assertSame('Jun 15 · 12:00 PM', $viewModel['timeline']['today']['items'][0]['starts_at_label']);
+        $this->assertSame('Reservation', $viewModel['timeline']['today']['items'][1]['title_label']);
+        $this->assertSame('Jun 15 · 9:00 PM', $viewModel['timeline']['today']['items'][1]['starts_at_label']);
+        $this->assertNotSame('Joy Kealoha', $viewModel['timeline']['today']['items'][0]['title_label']);
+        $this->assertSame([13, 131], array_column($viewModel['timeline']['today']['items'], 'id'));
+        $this->assertSame([16], array_column($viewModel['timeline']['tomorrow']['items'], 'id'));
+        $this->assertSame([17], array_column($viewModel['timeline']['next_7_days']['items'], 'id'));
+        $this->assertNotContains(9, array_merge(
+            array_column($viewModel['timeline']['today']['items'], 'id'),
+            array_column($viewModel['timeline']['tomorrow']['items'], 'id'),
+            array_column($viewModel['timeline']['next_7_days']['items'], 'id'),
+        ));
+        $this->assertSame(1, $viewModel['daily_operations']['fleet_snapshot']['company_id']);
+
+        $loanHtml = CoreServices::renderer()->setData(['task' => $loanCard])->render('fleet_command_center/components/task_card');
+        $timelineHtml = CoreServices::renderer()->setData(['timeline' => $viewModel['timeline']['today']])->render('fleet_command_center/components/timeline_card');
+        $this->assertStringContainsString('Bronco11-087 — Due today', $loanHtml);
+        $this->assertStringContainsString('Joy', $timelineHtml);
+        $this->assertStringContainsString('Jun 15 · 12:00 PM', $timelineHtml);
+        $this->assertStringNotContainsString('Joy Kealoha', $timelineHtml);
+
+        $this->assertSame([
+            'Realized Operating Revenue',
+            'Realized Recoveries',
+            'Recorded Operating Costs',
+            'Net Realized Operating Result',
+            'Forecast Host Payout',
+        ], array_column($viewModel['financial'], 'label'));
+        $this->assertSame('$1,000.00', $viewModel['financial'][0]['value']);
+        $this->assertNotContains('Cash Flow', array_column($viewModel['financial'], 'label'));
+        $this->assertNotContains('Operating Profit', array_column($viewModel['financial'], 'label'));
+        $this->assertNotContains('Lifetime Profit', array_column($viewModel['executive_kpis'], 'label'));
 
         $kpiCards = array_values(array_filter($viewModel['executive_kpis'], static fn (array $card): bool => ($card['label'] ?? '') === 'Year-to-Date + 7-Day Utilization'));
         $this->assertCount(1, $kpiCards);
@@ -611,6 +730,13 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
             'fleet_status' => [],
             'operational_queue' => [],
             'financial' => [],
+            'financial_summary' => [
+                'realized_operating_revenue' => 1000.0,
+                'realized_recoveries' => 0.0,
+                'recorded_operating_costs' => 200.0,
+                'net_realized_operating_result' => 800.0,
+                'forecast_host_payout' => 250.0,
+            ],
             'data_honesty' => [],
         ];
     }

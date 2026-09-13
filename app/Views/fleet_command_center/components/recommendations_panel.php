@@ -1,7 +1,7 @@
 <?php /** @var array<string, array<int, array<string, mixed>>> $decisionSupport */ ?>
 <?php $recommendations = $decisionSupport['todays_recommendations'] ?? []; ?>
 <?php if ($recommendations === []): ?>
-    <div class="empty-state">No decision support recommendations need attention.</div>
+    <div class="empty-state">No decision-support recommendations require attention right now.</div>
 <?php else: ?>
     <div class="recommendation-grid">
         <?php foreach ($recommendations as $recommendation): ?>

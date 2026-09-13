@@ -146,14 +146,15 @@ final class DecisionSupportServicesTest extends CIUnitTestCase
         $this->assertSame([], (new FleetOptimizationService($statistics, $this->config(), $this->factory()))->recommendations(new DateTimeImmutable('2026-06-15')));
     }
 
-    public function testGuestRiskCoversCancelledTripsRepeatGuestsAndLongTermRentals(): void
+    public function testGuestRiskKeepsActionableSignalsWithoutRepeatGuestRecommendation(): void
     {
+        $repeatGuests = [['guest_name' => 'Repeat Guest', 'trip_count' => 3]];
         $analytics = $this->getMockBuilder(TripAnalyticsService::class)->disableOriginalConstructor()->onlyMethods(['summary'])->getMock();
         $analytics->method('summary')->willReturn([
             'trip_count' => 5,
             'cancellation_rate' => 0.4,
             'average_trip_length' => 16.0,
-            'repeat_guests' => [['guest_name' => 'Repeat Guest', 'trip_count' => 3]],
+            'repeat_guests' => $repeatGuests,
         ]);
 
         $recommendations = (new GuestRiskService($analytics, $this->config(), $this->factory()))
@@ -162,7 +163,29 @@ final class DecisionSupportServicesTest extends CIUnitTestCase
         $this->assertSame('Review guest cancellation exposure', $recommendations[0]->title);
         $this->assertSame(40, $recommendations[0]->metrics['cancellation_rate']);
         $this->assertSame('Review long-term rental exposure', $recommendations[1]->title);
-        $this->assertSame('Prioritize repeat guest Repeat Guest', $recommendations[2]->title);
+        $this->assertCount(2, $recommendations);
+
+        $tripAnalyticsSource = file_get_contents(dirname(__DIR__, 2) . '/app/Services/Fleet/TripAnalyticsService.php');
+        $this->assertIsString($tripAnalyticsSource);
+        $this->assertStringContainsString("'repeat_guests' => \$this->repeatGuests", $tripAnalyticsSource);
+
+        $operatorCopy = implode(' ', array_map(
+            static fn ($recommendation): string => $recommendation->title . ' ' . $recommendation->reason . ' ' . $recommendation->action,
+            $recommendations,
+        ));
+        $this->assertStringNotContainsString('Prioritize repeat guest', $operatorCopy);
+        $this->assertStringNotContainsString('guest review reminder', strtolower($operatorCopy));
+        $this->assertStringNotContainsString('guest rating reminder', strtolower($operatorCopy));
+    }
+
+    public function testDecisionSupportPanelHasConciseZeroRecommendationEmptyState(): void
+    {
+        $view = file_get_contents(dirname(__DIR__, 2) . '/app/Views/fleet_command_center/components/recommendations_panel.php');
+
+        $this->assertIsString($view);
+        $this->assertStringContainsString('No decision-support recommendations require attention right now.', $view);
+        $this->assertStringContainsString('class="empty-state"', $view);
+        $this->assertStringNotContainsString('Prioritize repeat guest', $view);
     }
 
     public function testZeroRevenueDoesNotCreateRevenueForecastRecommendation(): void
@@ -187,17 +210,17 @@ final class DecisionSupportServicesTest extends CIUnitTestCase
         $guestRisk = $this->getMockBuilder(GuestRiskService::class)->disableOriginalConstructor()->onlyMethods(['recommendations'])->getMock();
         $insights = $this->getMockBuilder(BusinessInsightService::class)->disableOriginalConstructor()->onlyMethods(['recommendations'])->getMock();
 
-        $pricing->expects($this->once())->method('recommendations')->willReturn([$this->factory()->make('Pricing rec', 'Pricing', 'Medium', 80, 'Measured pricing reason.', ['occupancy' => 90], 'Change price.', $asOf, PricingRecommendationService::class)]);
+        $pricing->expects($this->never())->method('recommendations');
         $maintenance->expects($this->once())->method('recommendations')->willReturn([$this->factory()->make('Maintenance rec', 'Maintenance', 'High', 85, 'Known maintenance reason.', ['fleet_vehicle_id' => 7], 'Schedule service.', $asOf, MaintenancePredictionService::class)]);
-        $optimization->expects($this->once())->method('recommendations')->willReturn([]);
-        $revenue->expects($this->once())->method('recommendations')->willReturn([]);
+        $optimization->expects($this->never())->method('recommendations');
+        $revenue->expects($this->never())->method('recommendations');
         $guestRisk->expects($this->once())->method('recommendations')->willReturn([]);
-        $insights->expects($this->once())->method('recommendations')->willReturn([]);
+        $insights->expects($this->never())->method('recommendations');
 
         $dashboard = (new DecisionSupportDashboardService($pricing, $maintenance, $optimization, $revenue, $guestRisk, $insights))->recommendations($asOf);
 
         $this->assertSame('Maintenance rec', $dashboard['todays_recommendations'][0]['title']);
-        $this->assertSame('Pricing rec', $dashboard['pricing'][0]['title']);
+        $this->assertSame([], $dashboard['pricing']);
         $this->assertSame('Maintenance rec', $dashboard['maintenance'][0]['title']);
         $this->assertSame([], $dashboard['fleet_health']);
     }

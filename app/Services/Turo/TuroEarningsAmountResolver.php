@@ -65,12 +65,20 @@ class TuroEarningsAmountResolver
 
     public function money(string $value): ?string
     {
-        $normalized = preg_replace('/[^0-9.\-]/', '', $value);
+        $compacted = preg_replace('/[\s,$]/', '', trim($value));
+        if ($compacted === null || $compacted === '') {
+            return null;
+        }
+        $parenthesized = preg_match('/^(?:\(-?\d+(?:\.\d+)?\)|-?\(\d+(?:\.\d+)?\))$/', $compacted) === 1;
+        $negative = $parenthesized || str_contains($compacted, '-');
+        $normalized = preg_replace('/[^0-9.]/', '', $compacted);
 
         if ($normalized === null || $normalized === '' || ! is_numeric($normalized)) {
             return null;
         }
 
-        return number_format((float) $normalized, 2, '.', '');
+        $formatted = number_format((float) $normalized, 2, '.', '');
+
+        return $negative && $formatted !== '0.00' ? '-' . $formatted : $formatted;
     }
 }

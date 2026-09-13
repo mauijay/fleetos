@@ -2,11 +2,9 @@
 
 namespace App\Services\Fleet;
 
-use App\Services\Fleet\FleetHealthService;
-use App\Services\Fleet\FleetStatisticsService;
-use App\Services\Fleet\TaskService;
-use App\Services\Fleet\VehicleAvailabilityService;
+use Config\App;
 use DateTimeImmutable;
+use DateTimeZone;
 
 class FleetCommandService
 {
@@ -19,12 +17,13 @@ class FleetCommandService
     }
 
     /** Returns the mission-control operational snapshot for FleetOS. */
-    public function snapshot(?DateTimeImmutable $asOf = null): array
+    public function snapshot(?DateTimeImmutable $asOf = null, ?int $companyId = null, ?array $financialSummary = null): array
     {
         $asOf ??= new DateTimeImmutable();
-        $fleetStatus = $this->statistics()->summary($asOf);
+        $fleetStatus = $this->statistics()->summary($asOf, $companyId, $financialSummary);
         $health = $this->health()->summary($asOf);
         $today = $this->tasks()->today($asOf);
+        $todayStart = $this->businessDayStart($asOf);
 
         return [
             'as_of' => $asOf->format('Y-m-d H:i:s'),
@@ -37,7 +36,7 @@ class FleetCommandService
                 'out_of_service' => $fleetStatus['vehicles_out_of_service'],
             ],
             'vehicle_statuses' => $this->availability()->vehicleStatus($asOf),
-            'todays_timeline' => $this->availability()->timeline($asOf->setTime(0, 0), $asOf->modify('+1 day')->setTime(0, 0)),
+            'todays_timeline' => $this->availability()->timeline($todayStart, $todayStart->modify('+1 day')),
             'todays_pickups' => $today['todays_pickups'],
             'todays_returns' => $today['todays_returns'],
             'airport_deliveries' => $today['airport_deliveries'],
@@ -61,8 +60,9 @@ class FleetCommandService
     public function todaysTimeline(?DateTimeImmutable $asOf = null): array
     {
         $asOf ??= new DateTimeImmutable();
+        $todayStart = $this->businessDayStart($asOf);
 
-        return $this->availability()->timeline($asOf->setTime(0, 0), $asOf->modify('+1 day')->setTime(0, 0));
+        return $this->availability()->timeline($todayStart, $todayStart->modify('+1 day'));
     }
 
     /** Returns urgent operational items for command-center consumers. */
@@ -89,5 +89,12 @@ class FleetCommandService
     private function tasks(): TaskService
     {
         return $this->taskService ?? service('taskService');
+    }
+
+    private function businessDayStart(DateTimeImmutable $asOf): DateTimeImmutable
+    {
+        return $asOf
+            ->setTimezone(new DateTimeZone((new App())->appTimezone))
+            ->setTime(0, 0);
     }
 }

@@ -38,12 +38,14 @@ class DecisionSupportDashboardService
     private function categories(DateTimeImmutable $asOf): array
     {
         return [
-            'pricing' => $this->pricing()->recommendations($asOf),
+            // Financial/per-vehicle recommendations are deferred until the
+            // company-scoped vehicle read model lands in 3B.3B-2.
+            'pricing' => [],
             'maintenance' => $this->maintenance()->recommendations($asOf),
-            'fleet_health' => $this->optimization()->recommendations($asOf),
-            'revenue' => $this->revenueForecast()->recommendations($asOf),
+            'fleet_health' => [],
+            'revenue' => [],
             'guest_risk' => $this->guestRisk()->recommendations($asOf),
-            'business_insights' => $this->businessInsights()->recommendations($asOf),
+            'business_insights' => [],
         ];
     }
 
@@ -68,7 +70,7 @@ class DecisionSupportDashboardService
         return array_map(static fn (Recommendation $recommendation): array => $recommendation->toArray(), $recommendations);
     }
 
-    private function pricing(): PricingRecommendationService
+    protected function pricing(): PricingRecommendationService
     {
         return $this->pricingService ?? service('pricingRecommendationService');
     }
@@ -78,12 +80,12 @@ class DecisionSupportDashboardService
         return $this->maintenanceService ?? service('maintenancePredictionService');
     }
 
-    private function optimization(): FleetOptimizationService
+    protected function optimization(): FleetOptimizationService
     {
         return $this->optimizationService ?? service('fleetOptimizationService');
     }
 
-    private function revenueForecast(): RevenueForecastService
+    protected function revenueForecast(): RevenueForecastService
     {
         return $this->revenueForecastService ?? service('revenueForecastService');
     }
@@ -93,8 +95,9 @@ class DecisionSupportDashboardService
         return $this->guestRiskService ?? service('guestRiskService');
     }
 
-    private function businessInsights(): BusinessInsightService
+    protected function businessInsights(): BusinessInsightService
     {
         return $this->businessInsightService ?? service('businessInsightService');
     }
+
 }

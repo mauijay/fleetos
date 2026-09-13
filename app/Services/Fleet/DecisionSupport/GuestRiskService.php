@@ -52,20 +52,6 @@ class GuestRiskService
             );
         }
 
-        foreach ($summary['repeat_guests'] ?? [] as $guest) {
-            $recommendations[] = $this->factory()->make(
-                'Prioritize repeat guest ' . (string) ($guest['guest_name'] ?? 'profile'),
-                'Guest Risk',
-                'Informational',
-                78,
-                'Guest has repeat booking behavior in the measured period.',
-                ['guest_name' => (string) ($guest['guest_name'] ?? ''), 'trip_count' => (int) ($guest['trip_count'] ?? 0)],
-                'Use repeat booking history as a positive signal during manual guest review.',
-                $asOf,
-                self::class,
-            );
-        }
-
         return $recommendations;
     }
 

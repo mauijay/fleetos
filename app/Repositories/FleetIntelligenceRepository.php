@@ -395,7 +395,7 @@ class FleetIntelligenceRepository
     public function activeLoans(): array
     {
         $builder = $this->db->table('loans')
-            ->select('loans.*, fv.fleet_code, fv.display_name, lookup_values.code AS status_code')
+            ->select('loans.*, fv.fleet_number, fv.fleet_code, fv.display_name, lookup_values.code AS status_code')
             ->join('fleet_vehicles fv', 'fv.id = loans.fleet_vehicle_id')
             ->join('lookup_values', 'lookup_values.id = loans.loan_status_lookup_value_id', 'left')
             ->where('loans.deleted_at', null)

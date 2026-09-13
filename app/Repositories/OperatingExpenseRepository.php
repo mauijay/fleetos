@@ -226,6 +226,23 @@ class OperatingExpenseRepository
         return $matches[1] . '.' . substr(str_pad($matches[2] ?? '', 2, '0'), 0, 2);
     }
 
+    /** @return list<array<string, mixed>> */
+    public function recordedFinancialActivity(int $companyId, string $fromDate, string $toDateExclusive): array
+    {
+        return $this->db->table('operating_expenses expense')
+            ->select('expense.id, expense.company_id, expense.fleet_vehicle_id, expense.turo_trip_normalized_id')
+            ->select('expense.expense_date, expense.amount, expense.business_purpose, expense.vendor, category.code AS category_code')
+            ->join('lookup_values category', 'category.id = expense.expense_category_lookup_value_id', 'left')
+            ->where('expense.company_id', $companyId)
+            ->where('expense.status_code', 'recorded')
+            ->where('expense.archived_at', null)
+            ->where('expense.amount >', 0)
+            ->where('expense.expense_date >=', $fromDate)
+            ->where('expense.expense_date <', $toDateExclusive)
+            ->orderBy('expense.id', 'ASC')
+            ->get()->getResultArray();
+    }
+
     public function needsClassificationCount(int $companyId): int
     {
         if (! $this->db->tableExists('operating_expense_receipts')) {

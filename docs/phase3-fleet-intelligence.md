@@ -2,6 +2,8 @@
 
 Phase 3 adds reusable business services for FleetOS reporting, operations, availability, revenue, analytics, daily work, and command-center snapshots. No UI was added in this phase.
 
+> Financial methodology was corrected by Slice 3B.3B-1. The company-scoped `FinancialActivityReadService` and `FinancialSummaryService` now own the Command Center financial summary. See [Financial Methodology](financial-methodology.md). Legacy `RevenueService` methods remain for older nonprimary consumers and must not be used to introduce new operating-result presentation.
+
 ## Architecture
 
 Fleet Intelligence keeps calculations in service classes:
@@ -17,7 +19,9 @@ The new services live in `App\Services\Fleet`. Shared read access lives in `App\
 ## Dependencies
 
 - `FleetIntelligenceRepository` depends on CodeIgniter's database connection and centralizes Phase 3 read SQL.
-- `RevenueService` depends on `FleetIntelligenceRepository` and owns all financial formulas.
+- Source repositories own company/date-scoped reads for Turo, forecast allocation, generic expense, maintenance, charging, and airport expense data.
+- `FinancialActivityReadService` applies source inclusion, identity, sign-safety, and precedence rules.
+- `FinancialSummaryService` owns the five company-level summary formulas.
 - `FleetStatisticsService` depends on `FleetIntelligenceRepository` and `RevenueService`.
 - `FleetHealthService` depends on `FleetIntelligenceRepository`.
 - `VehicleAvailabilityService` depends on `FleetIntelligenceRepository`.
@@ -178,7 +182,7 @@ Current reads are backed by normalized Turo tables because Phase 2 imports Turo 
 - Corporate fleet
 - Vehicle sharing
 
-Financial formulas should remain in `RevenueService` as these sources are added.
+New financial formulas belong in `FinancialSummaryService`; new source queries belong in the relevant source repository.
 
 ## Architectural Audit
 

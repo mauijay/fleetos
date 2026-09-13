@@ -3,6 +3,7 @@
 namespace App\Services\Fleet;
 
 use App\Repositories\FleetIntelligenceRepository;
+use Config\Services;
 use DateTimeImmutable;
 
 class FleetStatisticsService
@@ -11,32 +12,41 @@ class FleetStatisticsService
         private readonly ?FleetIntelligenceRepository $repository = null,
         private readonly ?RevenueService $revenueService = null,
         private readonly ?FleetCapacityService $capacityService = null,
+        private readonly ?FinancialSummaryService $financialSummaryService = null,
     ) {
     }
 
     /** Returns executive fleet, revenue, utilization, equity, and ROI metrics. */
-    public function summary(?DateTimeImmutable $asOf = null): array
+    public function summary(?DateTimeImmutable $asOf = null, ?int $companyId = null, ?array $financialSummary = null): array
     {
         $asOf ??= new DateTimeImmutable();
-        $currentMonth = $this->currentMonth($asOf);
-        $fleetValue = $this->fleetValue();
+        $currentMonth = $this->currentMonth($asOf, $companyId, $financialSummary);
+        $fleetValue = $companyId === null ? $this->fleetValue() : [];
 
         return array_merge($this->fleetSize($asOf), [
             'current_month' => $currentMonth,
             'fleet_value' => $fleetValue,
-            'premium_vs_base' => $this->premiumVsBase($asOf),
-            'lifetime_revenue' => $this->lifetimeRevenue(),
-            'lifetime_profit' => $this->lifetimeProfit(),
-            'vehicle_roi' => $this->vehicleRoi(),
+            'premium_vs_base' => $companyId === null ? $this->premiumVsBase($asOf) : [],
+            'lifetime_revenue' => $companyId === null ? $this->lifetimeRevenue() : null,
+            'lifetime_profit' => $companyId === null ? $this->lifetimeProfit() : null,
+            'vehicle_roi' => $companyId === null ? $this->vehicleRoi() : [],
         ]);
     }
 
     /** Returns current-month executive revenue and utilization metrics. */
-    public function currentMonth(?DateTimeImmutable $asOf = null): array
+    public function currentMonth(?DateTimeImmutable $asOf = null, ?int $companyId = null, ?array $financialSummary = null): array
     {
         $asOf ??= new DateTimeImmutable();
         $month = $asOf->format('Y-m-01');
-        $revenue = $this->revenue()->currentMonth($asOf);
+        if ($companyId === null) {
+            $revenue = $this->revenue()->currentMonth($asOf);
+        } else {
+            $truthfulSummary = $financialSummary ?? $this->financialSummary()->currentMonth($companyId, $asOf);
+            $revenue = array_merge($truthfulSummary, [
+                'completed_revenue' => (float) $truthfulSummary['realized_operating_revenue'],
+                'forecast_revenue' => (float) $truthfulSummary['forecast_host_payout'],
+            ]);
+        }
         $periodStart = new DateTimeImmutable($month . ' 00:00:00');
         $periodEndExclusive = $asOf->modify('+1 day')->setTime(0, 0);
         $capacity = $this->capacity()->utilizationForRange($periodStart, $periodEndExclusive);
@@ -194,6 +204,11 @@ class FleetStatisticsService
     private function capacity(): FleetCapacityService
     {
         return $this->capacityService ?? new FleetCapacityService($this->repo());
+    }
+
+    private function financialSummary(): FinancialSummaryService
+    {
+        return $this->financialSummaryService ?? Services::financialSummaryService();
     }
 
     private static function utilization(float $billableDays, int $availableDays): float

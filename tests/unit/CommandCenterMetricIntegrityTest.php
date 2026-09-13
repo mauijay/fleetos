@@ -102,6 +102,40 @@ final class CommandCenterMetricIntegrityTest extends CIUnitTestCase
         $this->assertSame('booked', $timeline[0]['status']);
     }
 
+    public function testVehicleAvailabilityTimelineBucketsByHonoluluScheduledStartWithoutMutatingStaleRows(): void
+    {
+        $repository = $this->repositoryMock(['operationalReservationsBetween', 'airportDeliveriesBetween']);
+        $sourceRows = [
+            ['id' => 9, 'fleet_vehicle_id' => 10, 'source' => 'turo', 'starts_at' => '2026-09-09 12:00:00', 'ends_at' => '2026-09-15 12:00:00', 'status_code' => 'in_progress', 'guest_name' => 'Stale Guest'],
+            ['id' => 13, 'fleet_vehicle_id' => 10, 'source' => 'turo', 'starts_at' => '2026-09-13 12:00:00', 'ends_at' => '2026-09-13 16:00:00', 'status_code' => 'booked', 'guest_name' => 'Today Guest'],
+            ['id' => 131, 'fleet_vehicle_id' => 10, 'source' => 'turo', 'starts_at' => '2026-09-14 09:59:59+00:00', 'ends_at' => '2026-09-14 12:00:00+00:00', 'status_code' => 'booked', 'guest_name' => 'Boundary Today'],
+            ['id' => 14, 'fleet_vehicle_id' => 10, 'source' => 'turo', 'starts_at' => '2026-09-14 10:00:00+00:00', 'ends_at' => '2026-09-14 14:00:00+00:00', 'status_code' => 'booked', 'guest_name' => 'Boundary Tomorrow'],
+            ['id' => 15, 'fleet_vehicle_id' => 10, 'source' => 'turo', 'starts_at' => '2026-09-15 09:00:00', 'ends_at' => '2026-09-15 12:00:00', 'status_code' => 'booked', 'guest_name' => 'Future Guest'],
+        ];
+        $repository->method('operationalReservationsBetween')->willReturn($sourceRows);
+        $repository->method('airportDeliveriesBetween')->willReturn([]);
+
+        $service = new VehicleAvailabilityService($repository);
+        $timezone = new DateTimeZone('Pacific/Honolulu');
+        $todayStart = new DateTimeImmutable('2026-09-13 00:00:00', $timezone);
+        $tomorrowStart = $todayStart->modify('+1 day');
+        $dayAfterTomorrow = $todayStart->modify('+2 days');
+        $horizonEnd = $todayStart->modify('+7 days');
+
+        $today = $service->timeline($todayStart, $tomorrowStart);
+        $tomorrow = $service->timeline($tomorrowStart, $dayAfterTomorrow);
+        $nextSevenDays = $service->timeline($dayAfterTomorrow, $horizonEnd);
+
+        $this->assertSame([13, 131], array_column(array_column($today, 'reservation'), 'id'));
+        $this->assertSame([14], array_column(array_column($tomorrow, 'reservation'), 'id'));
+        $this->assertSame([15], array_column(array_column($nextSevenDays, 'reservation'), 'id'));
+        $this->assertNotContains(9, array_merge(
+            array_column(array_column($today, 'reservation'), 'id'),
+            array_column(array_column($tomorrow, 'reservation'), 'id'),
+            array_column(array_column($nextSevenDays, 'reservation'), 'id'),
+        ));
+    }
+
     public function testCurrentMonthRevenueUsesOperatingRevenueOnlyAndExcludesCashMovement(): void
     {
         $repository = $this->repositoryMock([

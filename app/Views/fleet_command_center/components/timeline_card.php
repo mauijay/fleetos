@@ -10,7 +10,7 @@
         <ol class="timeline-list">
             <?php foreach ($timeline['items'] as $item): ?>
                 <li>
-                    <span><?= esc($item['type_label']) ?></span>
+                    <span><?= esc($item['title_label']) ?></span>
                     <strong><?= esc($item['starts_at_label']) ?></strong>
                 </li>
             <?php endforeach; ?>

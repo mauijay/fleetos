@@ -115,13 +115,17 @@ final class OperatingExpensesUxAndCommandCenterTest extends CIUnitTestCase
         $this->assertStringNotContainsString('/files/', $html);
     }
 
-    public function testFinancialIntegrationFirewallRemainsUntouchedByFeatureSources(): void
+    public function testExpensesHubRemainsGenericDespiteFinancialSummaryIntegration(): void
     {
-        $changed = shell_exec('git diff --name-only');
-        $this->assertIsString($changed);
-        foreach (['FleetIntelligenceRepository.php', 'RevenueService.php', 'FleetStatisticsService.php'] as $forbidden) {
-            $this->assertStringNotContainsString($forbidden, $changed);
-        }
+        $controller = file_get_contents(__DIR__ . '/../../app/Controllers/OperatingExpenses.php');
+        $view = file_get_contents(__DIR__ . '/../../app/Views/operating_expenses/index.php');
+
+        $this->assertIsString($controller);
+        $this->assertIsString($view);
+        $this->assertStringNotContainsString('FinancialActivityReadService', $controller);
+        $this->assertStringNotContainsString('maintenance_log', $view);
+        $this->assertStringNotContainsString('charging_session', $view);
+        $this->assertStringNotContainsString('airport_operations_expense', $view);
     }
 
     /** @param array<string,mixed> $overrides */
