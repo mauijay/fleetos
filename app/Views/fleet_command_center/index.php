@@ -15,7 +15,7 @@
 <body class="fleet-shell">
     <a class="skip-link" href="#main-content">Skip to main content</a>
 
-    <div class="app-frame">
+    <div class="app-frame command-center-frame">
         <?= view('fleet_command_center/components/navigation', ['items' => $commandCenter['navigation']]) ?>
 
         <main id="main-content" class="command-main" tabindex="-1">
@@ -36,6 +36,17 @@
                 <p class="eyebrow">Morning Briefing</p>
                 <h2 id="briefing-heading"><?= esc($commandCenter['daily_operations']['briefing']['greeting']) ?></h2>
                 <p class="briefing-copy"><?= esc($commandCenter['daily_operations']['briefing']['message']) ?></p>
+            </section>
+
+            <section class="section fleet-timeline" id="fleet-timeline" aria-labelledby="fleet-timeline-heading">
+                <div class="section-heading split-heading">
+                    <div>
+                        <p class="eyebrow">Next Moves</p>
+                        <h2 id="fleet-timeline-heading">Fleet Timeline</h2>
+                    </div>
+                    <span class="count-pill"><?= esc((string) $commandCenter['timeline']['count']) ?> upcoming</span>
+                </div>
+                <?= view('fleet_command_center/components/fleet_timeline', ['timeline' => $commandCenter['timeline']]) ?>
             </section>
 
             <section class="section" id="movement-board" aria-labelledby="movement-board-heading">
@@ -61,25 +72,6 @@
                         <?php endforeach; ?>
                     </div>
                 <?php endif; ?>
-            </section>
-
-            <section class="section" id="daily-timeline" aria-labelledby="daily-timeline-heading">
-                <div class="section-heading">
-                    <p class="eyebrow">Chronological</p>
-                    <h2 id="daily-timeline-heading">Today's Timeline</h2>
-                </div>
-                <div class="daily-timeline-list">
-                    <?php if ($commandCenter['daily_operations']['timeline'] === []): ?>
-                        <div class="empty-state">No pickups, returns, or airport deliveries are scheduled today.</div>
-                    <?php endif; ?>
-                    <?php foreach ($commandCenter['daily_operations']['timeline'] as $event): ?>
-                        <article class="timeline-event">
-                            <strong><?= esc($event['time_label']) ?> - <?= esc($event['event_type']) ?></strong>
-                            <p><?= esc($event['vehicle_label']) ?> · <?= esc($event['location_label']) ?> · <?= esc($event['guest_name']) ?></p>
-                            <small><?= esc($event['action_label']) ?> · <a class="text-link" href="<?= esc($event['checklist_href'], 'attr') ?>"><?= esc($event['checklist_status_label']) ?></a></small>
-                        </article>
-                    <?php endforeach; ?>
-                </div>
             </section>
 
             <section class="section" id="immediate-attention" aria-labelledby="attention-heading">
@@ -221,18 +213,6 @@
                     <?php foreach ($commandCenter['vehicles'] as $vehicle): ?>
                         <?= view('fleet_command_center/components/vehicle_card', ['vehicle' => $vehicle]) ?>
                     <?php endforeach; ?>
-                </div>
-            </section>
-
-            <section class="section" id="fleet-timeline" aria-labelledby="timeline-heading">
-                <div class="section-heading">
-                    <p class="eyebrow">Scheduling</p>
-                    <h2 id="timeline-heading">Fleet Timeline</h2>
-                </div>
-                <div class="timeline-layout">
-                    <?= view('fleet_command_center/components/timeline_card', ['timeline' => $commandCenter['timeline']['today']]) ?>
-                    <?= view('fleet_command_center/components/timeline_card', ['timeline' => $commandCenter['timeline']['tomorrow']]) ?>
-                    <?= view('fleet_command_center/components/timeline_card', ['timeline' => $commandCenter['timeline']['next_7_days']]) ?>
                 </div>
             </section>
 

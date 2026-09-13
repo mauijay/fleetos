@@ -1,6 +1,16 @@
 import "../css/app.css";
+import { initializeFleetTimelineDisclosure } from "./fleet-timeline-disclosure.js";
+import { createPostSubmissionGuard } from "./form-submit-guard.js";
 import { resolveHnlParkingState } from "./hnl-parking-state.js";
 import { combineLocalDateTime } from "./local-datetime.js";
+
+const postSubmissionGuard = createPostSubmissionGuard(document.documentElement);
+document.addEventListener("submit", postSubmissionGuard.handleSubmit);
+window.addEventListener("pageshow", postSubmissionGuard.reset);
+
+document
+  .querySelectorAll("[data-fleet-timeline]")
+  .forEach(initializeFleetTimelineDisclosure);
 
 const initializeHnlParking = (group) => {
   const garage = group.querySelector("[data-hnl-garage]");

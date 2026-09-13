@@ -2,6 +2,7 @@
 
 namespace App\Services\Fleet;
 
+use App\Repositories\OperationalFactsRepository;
 use App\Services\Fleet\DecisionSupport\DecisionSupportDashboardService;
 use App\Services\Turo\TuroImportIssueService;
 use App\Services\Turo\TuroTripReconciliationService;
@@ -25,6 +26,7 @@ class FleetCommandCenterViewModelService
         private readonly ?TuroVehicleMappingService $vehicleMappingService = null,
         private readonly ?TuroTripReconciliationService $tripReconciliationService = null,
         private readonly ?DailyOperationsDashboardService $dailyOperationsService = null,
+        private readonly ?OperationalFactsRepository $operationalFactsRepository = null,
     ) {
     }
 
@@ -48,6 +50,12 @@ class FleetCommandCenterViewModelService
         $tomorrow = $this->tasks()->tomorrow($asOf);
         $timelineStart = $asOf->setTimezone($this->businessTimezone())->setTime(0, 0);
         $timelineEnd = $timelineStart->modify('+7 days');
+        $timelineItems = $this->availability()->timeline($timelineStart, $timelineEnd, $companyId);
+        $timelineCompletions = $this->operationalFacts()->authoritativeMovementCompletionsForCompany(
+            $companyId,
+            $this->timelineTripIds($timelineItems),
+            $asOf->setTimezone($this->businessTimezone())->format('Y-m-d H:i:s'),
+        );
         $tripAnalytics = $this->tripAnalytics()->summary(new DateTimeImmutable($asOf->format('Y-01-01 00:00:00')), $timelineEnd);
         $decisionSupport = $this->decisionSupport()->recommendations($asOf);
         $importIssues = $this->importIssues()->attentionSummary();
@@ -69,7 +77,7 @@ class FleetCommandCenterViewModelService
             'daily_operations' => $dailyOperations,
             'decision_support' => $decisionSupport,
             'vehicles' => $this->vehicleCards($command['vehicle_statuses'], $health),
-            'timeline' => $this->timelineCards($command['todays_timeline'], $timelineStart, $timelineEnd),
+            'timeline' => $this->fleetTimeline($timelineItems, $command['vehicle_statuses'], $dailyOperations['timeline'], $timelineStart, $timelineEnd, $timelineCompletions),
             'financial' => $this->financialSnapshot($financialSummary),
             'health_alerts' => $this->healthAlerts($health),
             'executive_kpis' => $this->executiveKpis($tripAnalytics),
@@ -174,30 +182,297 @@ class FleetCommandCenterViewModelService
         }, $vehicles);
     }
 
-    /** @return array<string, array<string, mixed>> */
-    private function timelineCards(array $today, DateTimeImmutable $timelineStart, DateTimeImmutable $timelineEnd): array
+    /** @return array{today_date:string,groups:list<array{date:string,label:string,events:list<array<string,mixed>>}>,count:int,completed_today:list<array<string,mixed>>,completed_count:int} */
+    private function fleetTimeline(array $items, array $vehicles, array $todayReadiness, DateTimeImmutable $startsAt, DateTimeImmutable $endsAt, array $completionFacts = []): array
     {
-        $tomorrowStart = $timelineStart->modify('+1 day');
-        $dayAfterTomorrow = $timelineStart->modify('+2 days');
+        $vehiclesById = array_column($vehicles, null, 'fleet_vehicle_id');
+        $readinessByMovement = $this->readinessByMovement($todayReadiness);
+        $completionsByMovement = $this->completionByMovement($completionFacts);
+        $events = [];
+        $pickupIndexes = [];
+
+        foreach ($items as $item) {
+            if (($item['type'] ?? null) !== 'reservation') {
+                continue;
+            }
+
+            foreach (['pickup' => 'starts_at', 'return' => 'ends_at'] as $movementType => $field) {
+                $event = $this->timelineMovementEvent($item, $movementType, $item[$field] ?? null, $vehiclesById, $readinessByMovement, $completionsByMovement, $startsAt, $endsAt);
+                if ($event === null) {
+                    continue;
+                }
+                if ($movementType === 'pickup') {
+                    $pickupIndexes[$this->movementIdentity($event)] = count($events);
+                }
+                $events[] = $event;
+            }
+        }
+
+        foreach ($items as $item) {
+            if (($item['type'] ?? null) !== 'airport_delivery') {
+                continue;
+            }
+
+            $event = $this->timelineMovementEvent($item, 'pickup', $item['starts_at'] ?? null, $vehiclesById, $readinessByMovement, $completionsByMovement, $startsAt, $endsAt);
+            if ($event === null) {
+                continue;
+            }
+
+            $matchingPickup = $pickupIndexes[$this->movementIdentity($event)] ?? null;
+            if ($matchingPickup !== null) {
+                if ($events[$matchingPickup]['location_label'] === null && $event['location_label'] !== null) {
+                    $events[$matchingPickup]['location_label'] = $event['location_label'];
+                }
+                continue;
+            }
+
+            $events[] = $event;
+        }
+
+        usort($events, function (array $left, array $right): int {
+            $timeOrder = ($left['timestamp'] ?? PHP_INT_MAX) <=> ($right['timestamp'] ?? PHP_INT_MAX);
+            if ($timeOrder !== 0) {
+                return $timeOrder;
+            }
+
+            $numberOrder = ($left['fleet_number'] ?? PHP_INT_MAX) <=> ($right['fleet_number'] ?? PHP_INT_MAX);
+            if ($numberOrder !== 0) {
+                return $numberOrder;
+            }
+
+            $codeOrder = strnatcasecmp((string) $left['fleet_code'], (string) $right['fleet_code']);
+            if ($codeOrder !== 0) {
+                return $codeOrder;
+            }
+
+            $vehicleOrder = ((int) $left['fleet_vehicle_id']) <=> ((int) $right['fleet_vehicle_id']);
+            if ($vehicleOrder !== 0) {
+                return $vehicleOrder;
+            }
+
+            return strcmp((string) $left['movement_type'], (string) $right['movement_type']);
+        });
+
+        $groups = [];
+        $completedToday = [];
+        foreach ($events as $event) {
+            if ($event['completed']) {
+                if ($event['completed_on'] === $startsAt->format('Y-m-d')) {
+                    $completedToday[] = $event;
+                }
+                continue;
+            }
+
+            $date = (string) $event['date'];
+            if (! isset($groups[$date])) {
+                $groups[$date] = [
+                    'date' => $date,
+                    'label' => $this->timelineDateLabel($event['date_time'], $startsAt),
+                    'events' => [],
+                ];
+            }
+            $groups[$date]['events'][] = $event;
+        }
+
+        $upcomingCount = array_sum(array_map(static fn (array $group): int => count($group['events']), $groups));
 
         return [
-            'today' => $this->timelineCard('Today', $this->scheduledWithin($today, $timelineStart, $tomorrowStart)),
-            'tomorrow' => $this->timelineCard('Tomorrow', $this->scheduledWithin($this->availability()->timeline($tomorrowStart, $dayAfterTomorrow), $tomorrowStart, $dayAfterTomorrow)),
-            'next_7_days' => $this->timelineCard('Next 7 Days', $this->scheduledWithin($this->availability()->timeline($dayAfterTomorrow, $timelineEnd), $dayAfterTomorrow, $timelineEnd)),
+            'today_date' => $startsAt->format('Y-m-d'),
+            'groups' => array_values($groups),
+            'count' => $upcomingCount,
+            'completed_today' => $completedToday,
+            'completed_count' => count($completedToday),
         ];
     }
 
-    private function timelineCard(string $label, array $items): array
+    /** @param array<int|string, array<string, mixed>> $vehiclesById @param array<string, array<string, string>> $readinessByMovement @param array<string, array<string, mixed>> $completionsByMovement */
+    private function timelineMovementEvent(array $item, string $movementType, mixed $scheduledValue, array $vehiclesById, array $readinessByMovement, array $completionsByMovement, DateTimeImmutable $startsAt, DateTimeImmutable $endsAt): ?array
     {
+        $scheduledAt = $this->localDateTime($scheduledValue);
+        if ($scheduledAt === null || $scheduledAt < $startsAt || $scheduledAt >= $endsAt) {
+            return null;
+        }
+
+        $vehicleId = (int) ($item['fleet_vehicle_id'] ?? $item['reservation']['fleet_vehicle_id'] ?? $item['delivery']['fleet_vehicle_id'] ?? 0);
+        $vehicle = $vehiclesById[$vehicleId] ?? [];
+        $source = ($item['type'] ?? null) === 'reservation' ? ($item['reservation'] ?? $item) : ($item['delivery'] ?? $item);
+        $fleetCode = trim((string) ($vehicle['fleet_code'] ?? $source['fleet_code'] ?? ''));
+        $fleetNumber = isset($vehicle['fleet_number']) && (int) $vehicle['fleet_number'] > 0 ? (int) $vehicle['fleet_number'] : null;
+        $tripId = (int) ($source['id'] ?? 0);
+        $readiness = ($item['type'] ?? null) === 'reservation' ? ($readinessByMovement[$tripId . ':' . $movementType] ?? null) : null;
+        $completion = ($item['type'] ?? null) === 'reservation' ? ($completionsByMovement[$tripId . ':' . $movementType] ?? null) : null;
+        $completedAt = $this->localDateTime($completion['recorded_at'] ?? null);
+        $href = trim((string) ($readiness['href'] ?? ''));
+        if ($href === '') {
+            $href = $tripId > 0 && $vehicleId > 0
+                ? '/operations/vehicles/' . $vehicleId . '/trip-history?trip=' . $tripId
+                : '/operations/airport';
+        }
+
         return [
-            'label' => $label,
-            'count' => count($items),
-            'items' => array_map(fn (array $item): array => array_merge($item, [
-                'type_label' => ucwords(str_replace('_', ' ', (string) ($item['type'] ?? 'scheduled'))),
-                'title_label' => $this->timelineTitle($item),
-                'starts_at_label' => $this->friendlyDateTime($item['starts_at'] ?? null),
-            ]), array_slice($items, 0, 8)),
+            'trip_id' => ($item['type'] ?? null) === 'reservation' && $tripId > 0 ? $tripId : null,
+            'date' => $scheduledAt->format('Y-m-d'),
+            'date_time' => $scheduledAt,
+            'timestamp' => $scheduledAt->getTimestamp(),
+            'time_label' => $scheduledAt->format('g:i A'),
+            'guest_label' => $this->guestFirstName($item['guest_name'] ?? $source['guest_name'] ?? null),
+            'vehicle_label' => $this->timelineVehicleLabel($vehicle, $source, $vehicleId),
+            'fleet_vehicle_id' => $vehicleId,
+            'fleet_number' => $fleetNumber,
+            'fleet_code' => $fleetCode,
+            'movement_type' => $movementType,
+            'movement_label' => $movementType === 'return' ? 'Return' : 'Pickup',
+            'tone' => $movementType === 'return' ? 'danger' : 'success',
+            'location_label' => $this->timelineLocation($source, $movementType),
+            'readiness_label' => $readiness['label'] ?? null,
+            'readiness_href' => $readiness['href'] ?? null,
+            'href' => $href,
+            'completed' => $completion !== null,
+            'completed_on' => $completedAt?->format('Y-m-d'),
+            'completion_event_code' => $completion['event_code'] ?? null,
         ];
+    }
+
+    /** @return list<int> */
+    private function timelineTripIds(array $items): array
+    {
+        $tripIds = [];
+        foreach ($items as $item) {
+            if (($item['type'] ?? null) !== 'reservation') {
+                continue;
+            }
+            $tripId = (int) ($item['reservation']['id'] ?? $item['id'] ?? 0);
+            if ($tripId > 0) {
+                $tripIds[] = $tripId;
+            }
+        }
+
+        return array_values(array_unique($tripIds));
+    }
+
+    /** @return array<string, array<string, mixed>> */
+    private function completionByMovement(array $facts): array
+    {
+        $completions = [];
+        foreach ($facts as $fact) {
+            $tripId = (int) ($fact['turo_trip_normalized_id'] ?? 0);
+            $eventCode = (string) ($fact['event_code'] ?? '');
+            $movementType = match ($eventCode) {
+                'actual_handoff' => 'pickup',
+                'actual_return', 'vehicle_recovered' => 'return',
+                default => null,
+            };
+            $recordedAt = trim((string) ($fact['created_at'] ?? $fact['occurred_at'] ?? ''));
+            if ($tripId < 1 || $movementType === null || $recordedAt === '') {
+                continue;
+            }
+
+            $key = $tripId . ':' . $movementType;
+            if (! isset($completions[$key]) || $recordedAt > $completions[$key]['recorded_at']) {
+                $completions[$key] = array_merge($fact, ['recorded_at' => $recordedAt]);
+            }
+        }
+
+        return $completions;
+    }
+
+    /** @return array<string, array<string, string>> */
+    private function readinessByMovement(array $events): array
+    {
+        $readiness = [];
+        foreach ($events as $event) {
+            $label = trim((string) ($event['checklist_status_label'] ?? ''));
+            $tripId = (int) ($event['reservation']['id'] ?? 0);
+            $movementType = strtolower((string) ($event['event_type'] ?? ''));
+            if ($tripId < 1 || ! in_array($movementType, ['pickup', 'return'], true) || $label === '' || $label === 'Checklist not created') {
+                continue;
+            }
+            $readiness[$tripId . ':' . $movementType] = [
+                'label' => $label,
+                'href' => (string) ($event['checklist_href'] ?? '#operational-queue'),
+            ];
+        }
+
+        return $readiness;
+    }
+
+    private function movementIdentity(array $event): string
+    {
+        return (int) $event['fleet_vehicle_id'] . ':' . (int) $event['timestamp'];
+    }
+
+    private function timelineDateLabel(DateTimeImmutable $date, DateTimeImmutable $today): string
+    {
+        $prefix = match ($date->format('Y-m-d')) {
+            $today->format('Y-m-d') => 'Today',
+            $today->modify('+1 day')->format('Y-m-d') => 'Tomorrow',
+            default => $date->format('l'),
+        };
+
+        return $prefix . ' — ' . $date->format('M j');
+    }
+
+    private function timelineVehicleLabel(array $vehicle, array $source, int $vehicleId): string
+    {
+        foreach (['display_name', 'fleet_code'] as $field) {
+            $label = trim((string) ($vehicle[$field] ?? $source[$field] ?? ''));
+            if ($label !== '') {
+                return $label;
+            }
+        }
+        $fleetNumber = (int) ($vehicle['fleet_number'] ?? $source['fleet_number'] ?? 0);
+
+        return $fleetNumber > 0 ? 'Fleet #' . $fleetNumber : ($vehicleId > 0 ? 'Vehicle #' . $vehicleId : 'Vehicle');
+    }
+
+    private function timelineLocation(array $source, string $movementType): ?string
+    {
+        $sourceText = trim((string) ($source[$movementType . '_location_source_text'] ?? ''));
+        if ($sourceText !== '') {
+            return $sourceText;
+        }
+
+        if (isset($source['airport_name']) || isset($source['airport_code'])) {
+            $airport = trim((string) ($source['airport_code'] ?? $source['airport_name']));
+            if ($airport !== '') {
+                return $airport;
+            }
+        }
+
+        return match ((string) ($source[$movementType . '_location_class'] ?? '')) {
+            'home' => 'Home',
+            'airport_hnl' => 'HNL',
+            'other' => 'Other',
+            default => null,
+        };
+    }
+
+    private function guestFirstName(mixed $value): string
+    {
+        $guestName = trim((string) $value);
+        if ($guestName === '' || in_array(strtolower($guestName), ['unknown guest', 'guest not captured'], true)) {
+            return 'Reservation';
+        }
+
+        $nameParts = preg_split('/\s+/u', $guestName);
+
+        return $nameParts[0] ?? 'Reservation';
+    }
+
+    private function localDateTime(mixed $value): ?DateTimeImmutable
+    {
+        $dateTime = trim((string) $value);
+        if ($dateTime === '') {
+            return null;
+        }
+
+        try {
+            $timezone = $this->businessTimezone();
+
+            return (new DateTimeImmutable($dateTime, $timezone))->setTimezone($timezone);
+        } catch (Throwable) {
+            return null;
+        }
     }
 
     /** @return array<int, array<string, mixed>> */
@@ -378,58 +653,6 @@ class FleetCommandCenterViewModelService
             : $vehicle;
     }
 
-    private function timelineTitle(array $item): string
-    {
-        if (($item['type'] ?? '') !== 'reservation') {
-            return ucwords(str_replace('_', ' ', (string) ($item['type'] ?? 'scheduled')));
-        }
-
-        $guestName = trim((string) ($item['guest_name'] ?? $item['reservation']['guest_name'] ?? ''));
-        if ($guestName === '' || in_array(strtolower($guestName), ['unknown guest', 'guest not captured'], true)) {
-            return 'Reservation';
-        }
-
-        $nameParts = preg_split('/\s+/u', $guestName);
-
-        return $nameParts[0] ?? 'Reservation';
-    }
-
-    private function friendlyDateTime(mixed $value): string
-    {
-        $dateTime = trim((string) $value);
-        if ($dateTime === '') {
-            return 'Pending time';
-        }
-
-        try {
-            $timezone = $this->businessTimezone();
-
-            return (new DateTimeImmutable($dateTime, $timezone))->setTimezone($timezone)->format('M j · g:i A');
-        } catch (Throwable) {
-            return 'Pending time';
-        }
-    }
-
-    /** @param array<int, array<string, mixed>> $items */
-    private function scheduledWithin(array $items, DateTimeImmutable $startsAt, DateTimeImmutable $endsAt): array
-    {
-        return array_values(array_filter($items, function (array $item) use ($startsAt, $endsAt): bool {
-            $scheduledAt = trim((string) ($item['starts_at'] ?? ''));
-            if ($scheduledAt === '') {
-                return false;
-            }
-
-            try {
-                $localScheduledAt = (new DateTimeImmutable($scheduledAt, $this->businessTimezone()))
-                    ->setTimezone($this->businessTimezone());
-
-                return $localScheduledAt >= $startsAt && $localScheduledAt < $endsAt;
-            } catch (Throwable) {
-                return false;
-            }
-        }));
-    }
-
     private function businessTimezone(): DateTimeZone
     {
         return new DateTimeZone((new App())->appTimezone);
@@ -558,5 +781,10 @@ class FleetCommandCenterViewModelService
     private function dailyOperations(): DailyOperationsDashboardService
     {
         return $this->dailyOperationsService ?? service('dailyOperationsDashboardService');
+    }
+
+    private function operationalFacts(): OperationalFactsRepository
+    {
+        return $this->operationalFactsRepository ?? \Config\Services::operationalFactsRepository();
     }
 }

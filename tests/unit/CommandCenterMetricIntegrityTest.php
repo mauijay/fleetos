@@ -102,7 +102,7 @@ final class CommandCenterMetricIntegrityTest extends CIUnitTestCase
         $this->assertSame('booked', $timeline[0]['status']);
     }
 
-    public function testVehicleAvailabilityTimelineBucketsByHonoluluScheduledStartWithoutMutatingStaleRows(): void
+    public function testVehicleAvailabilityTimelineReturnsRowsWithBoundariesInHonoluluWindowWithoutMutatingRows(): void
     {
         $repository = $this->repositoryMock(['operationalReservationsBetween', 'airportDeliveriesBetween']);
         $sourceRows = [
@@ -127,13 +127,9 @@ final class CommandCenterMetricIntegrityTest extends CIUnitTestCase
         $nextSevenDays = $service->timeline($dayAfterTomorrow, $horizonEnd);
 
         $this->assertSame([13, 131], array_column(array_column($today, 'reservation'), 'id'));
-        $this->assertSame([14], array_column(array_column($tomorrow, 'reservation'), 'id'));
-        $this->assertSame([15], array_column(array_column($nextSevenDays, 'reservation'), 'id'));
-        $this->assertNotContains(9, array_merge(
-            array_column(array_column($today, 'reservation'), 'id'),
-            array_column(array_column($tomorrow, 'reservation'), 'id'),
-            array_column(array_column($nextSevenDays, 'reservation'), 'id'),
-        ));
+        $this->assertSame([131, 14], array_column(array_column($tomorrow, 'reservation'), 'id'));
+        $this->assertSame([9, 15], array_column(array_column($nextSevenDays, 'reservation'), 'id'));
+        $this->assertNotContains(9, array_column(array_column($today, 'reservation'), 'id'));
     }
 
     public function testCurrentMonthRevenueUsesOperatingRevenueOnlyAndExcludesCashMovement(): void

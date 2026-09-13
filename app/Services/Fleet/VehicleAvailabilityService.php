@@ -31,7 +31,7 @@ class VehicleAvailabilityService
     }
 
     /** Returns reservation and delivery timeline entries for the requested period. */
-    public function timeline(DateTimeImmutable $startsAt, DateTimeImmutable $endsAt): array
+    public function timeline(DateTimeImmutable $startsAt, DateTimeImmutable $endsAt, ?int $companyId = null): array
     {
         $timezone = $this->businessTimezone();
         $startsAt = $startsAt->setTimezone($timezone);
@@ -49,9 +49,10 @@ class VehicleAvailabilityService
                 'reservation' => $reservation,
             ];
         }, array_values(array_filter(
-            $this->repo()->operationalReservationsBetween($startsAt->format('Y-m-d H:i:s'), $endsAt->format('Y-m-d H:i:s')),
+            $this->repo()->operationalReservationsBetween($startsAt->format('Y-m-d H:i:s'), $endsAt->format('Y-m-d H:i:s'), $companyId),
             fn (array $reservation): bool => ! str_starts_with((string) ($reservation['status_code'] ?? ''), 'canceled')
-                && $this->isScheduledWithin($reservation['starts_at'] ?? null, $startsAt, $endsAt),
+                && ($this->isScheduledWithin($reservation['starts_at'] ?? null, $startsAt, $endsAt)
+                    || $this->isScheduledWithin($reservation['ends_at'] ?? null, $startsAt, $endsAt)),
         )));
 
         $deliveries = array_map(static function (array $delivery): array {
@@ -64,7 +65,7 @@ class VehicleAvailabilityService
                 'delivery' => $delivery,
             ];
         }, array_values(array_filter(
-            $this->repo()->airportDeliveriesBetween($startsAt->format('Y-m-d H:i:s'), $endsAt->format('Y-m-d H:i:s')),
+            $this->repo()->airportDeliveriesBetween($startsAt->format('Y-m-d H:i:s'), $endsAt->format('Y-m-d H:i:s'), $companyId),
             fn (array $delivery): bool => $this->isScheduledWithin($delivery['scheduled_at'] ?? null, $startsAt, $endsAt),
         )));
 

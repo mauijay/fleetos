@@ -701,6 +701,16 @@ select:-webkit-autofill {
   min-height: 100vh;
 }
 
+.command-center-frame {
+  grid-template-columns: 252px minmax(0, 1440px) 300px;
+  justify-content: center;
+}
+
+.command-center-frame .command-main {
+  justify-self: center;
+  width: 100%;
+}
+
 .import-frame {
   grid-template-columns: 252px minmax(0, 1fr);
 }
@@ -1351,6 +1361,221 @@ h3 {
   color: var(--muted);
 }
 
+.fleet-timeline__content {
+  display: grid;
+  gap: 22px;
+  width: 100%;
+}
+
+.fleet-timeline__pending {
+  display: grid;
+  gap: 22px;
+  min-width: 0;
+}
+
+.fleet-timeline__disclosure {
+  width: fit-content;
+  min-height: 40px;
+  border: 1px solid var(--control-border);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+  padding: 9px 15px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease;
+}
+
+.fleet-timeline__disclosure[hidden] {
+  display: none;
+}
+
+.fleet-timeline__disclosure:hover {
+  border-color: var(--info);
+  background: var(--surface-3);
+}
+
+.fleet-timeline__disclosure:focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: 3px;
+}
+
+.fleet-timeline__day {
+  min-width: 0;
+}
+
+.fleet-timeline__day h3 {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.fleet-timeline__events {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fleet-timeline__event {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-left-width: 4px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.fleet-timeline__event-link {
+  display: grid;
+  grid-template-columns:
+    82px minmax(70px, 0.75fr) minmax(100px, 1.25fr) max-content
+    minmax(70px, 0.8fr) minmax(80px, 0.9fr);
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 13px 14px;
+  color: var(--text);
+  text-decoration: none;
+  transition:
+    background-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.fleet-timeline__event-link:hover {
+  background: var(--surface-3);
+}
+
+.fleet-timeline__event-link:focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: -3px;
+}
+
+.fleet-timeline__event time {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.fleet-timeline__guest,
+.fleet-timeline__vehicle,
+.fleet-timeline__location,
+.fleet-timeline__readiness {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.fleet-timeline__guest {
+  font-size: 15px;
+}
+
+.fleet-timeline__vehicle {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.movement-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  min-height: 26px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 3px 9px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.movement-badge.tone-success {
+  background: var(--success-bg);
+  color: var(--success-text);
+}
+
+.movement-badge.tone-danger {
+  background: var(--danger-bg);
+  color: var(--danger-text);
+}
+
+.fleet-timeline__readiness {
+  justify-self: end;
+  font-size: 12px;
+  text-align: right;
+}
+
+.fleet-timeline__location {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.fleet-timeline__location::before {
+  content: none;
+  margin: 0;
+}
+
+.fleet-timeline__location.is-empty,
+.fleet-timeline__readiness.is-empty {
+  color: var(--subtle);
+}
+
+.fleet-timeline__readiness.is-complete {
+  color: var(--success-text);
+  font-weight: 750;
+}
+
+.fleet-timeline__completed {
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+
+.fleet-timeline__completed > summary {
+  width: fit-content;
+  min-height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--muted);
+  cursor: pointer;
+  padding: 9px 14px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.fleet-timeline__completed > summary:hover {
+  border-color: var(--control-border);
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.fleet-timeline__completed > summary:focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: 3px;
+}
+
+.fleet-timeline__completed-events {
+  margin-top: 12px;
+}
+
+.fleet-timeline__event.is-completed {
+  border-left-color: var(--success-border);
+  background: color-mix(in srgb, var(--surface-2) 80%, transparent);
+  opacity: 0.78;
+}
+
+.fleet-timeline__event.is-completed:hover,
+.fleet-timeline__event.is-completed:focus-within {
+  opacity: 1;
+}
+
 .compact-financial-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
@@ -1552,7 +1777,13 @@ h3 {
 }
 
 .fleet-snapshot h2 {
-  margin-bottom: 12px;
+  margin-bottom: 4px;
+}
+
+.fleet-snapshot__context {
+  margin: 0 0 12px;
+  color: var(--subtle);
+  font-size: 12px;
 }
 
 .fleet-snapshot__buckets {
@@ -1565,19 +1796,13 @@ h3 {
 
 .fleet-snapshot__buckets li {
   display: grid;
-  grid-template-columns: 54px 24px minmax(0, 1fr);
+  grid-template-columns: 62px minmax(0, 1fr);
   align-items: start;
   gap: 8px;
 }
 
-.fleet-snapshot__label,
-.fleet-snapshot__count {
+.fleet-snapshot__label {
   line-height: 1.5;
-}
-
-.fleet-snapshot__count {
-  color: var(--text);
-  text-align: right;
 }
 
 .fleet-snapshot__vehicles {
@@ -1801,6 +2026,13 @@ h3 {
   font: inherit;
   font-weight: 850;
   padding: 0 22px;
+}
+
+[data-post-submitting="true"] form[method="post" i]
+  :is(button[type="submit"], input[type="submit"]) {
+  cursor: wait;
+  opacity: 0.68;
+  pointer-events: none;
 }
 
 .form-actions {
@@ -2882,6 +3114,10 @@ h3 {
     padding: 16px;
   }
 
+  .fleet-timeline__content {
+    max-width: none;
+  }
+
   .activity-panel {
     position: static;
     grid-area: snapshot;
@@ -2985,6 +3221,22 @@ h3 {
   .site-footer {
     align-items: flex-start;
     flex-direction: column;
+  }
+}
+
+@media (max-width: 700px) {
+  .fleet-timeline__event-link {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 7px;
+  }
+
+  .fleet-timeline__event time {
+    white-space: normal;
+  }
+
+  .fleet-timeline__readiness {
+    justify-self: start;
+    text-align: left;
   }
 }
 

@@ -99,6 +99,44 @@ class OperationalFactsRepository
         return $latest;
     }
 
+    /**
+     * Returns active authoritative movement-completion facts for the requested
+     * company and trips in one bounded query.
+     *
+     * @param array<int, int|string> $tripIds
+     * @return list<array<string, mixed>>
+     */
+    public function authoritativeMovementCompletionsForCompany(int $companyId, array $tripIds, string $asOf): array
+    {
+        $tripIds = array_values(array_unique(array_filter(array_map('intval', $tripIds), static fn (int $id): bool => $id > 0)));
+        if ($companyId < 1 || $tripIds === []) {
+            return [];
+        }
+
+        return $this->db->table('trip_movement_events events')
+            ->select('events.id, events.company_id, events.fleet_vehicle_id, events.turo_trip_normalized_id')
+            ->select('events.event_code, events.movement_type, events.occurred_at, events.created_at')
+            ->join('fleet_vehicles vehicles', 'vehicles.id = events.fleet_vehicle_id AND vehicles.company_id = events.company_id')
+            ->join('turo_trips_normalized trips', 'trips.id = events.turo_trip_normalized_id AND trips.fleet_vehicle_id = events.fleet_vehicle_id')
+            ->where('events.company_id', $companyId)
+            ->whereIn('events.turo_trip_normalized_id', $tripIds)
+            ->whereIn('events.event_code', ['actual_handoff', 'actual_return', 'vehicle_recovered'])
+            ->where('events.voided_at', null)
+            ->where('trips.deleted_at', null)
+            ->groupStart()
+                ->groupStart()
+                    ->where('events.created_at', null)
+                    ->where('events.occurred_at <=', $asOf)
+                ->groupEnd()
+                ->orWhere('events.created_at <=', $asOf)
+            ->groupEnd()
+            ->orderBy('events.created_at', 'DESC')
+            ->orderBy('events.occurred_at', 'DESC')
+            ->orderBy('events.id', 'DESC')
+            ->get()
+            ->getResultArray();
+    }
+
     public function upsertScheduledLocation(int $tripId, ?int $vehicleId, string $movementType, array $classification): int
     {
         $now = date('Y-m-d H:i:s');

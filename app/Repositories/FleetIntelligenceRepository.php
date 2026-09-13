@@ -22,7 +22,7 @@ class FleetIntelligenceRepository
     public function fleetVehicles(): array
     {
         return $this->db->table('fleet_vehicles fv')
-            ->select('fv.id, fv.fleet_code, fv.display_name, fv.vin, fv.license_plate, fv.odometer_miles')
+            ->select('fv.id, fv.fleet_number, fv.fleet_code, fv.display_name, fv.vin, fv.license_plate, fv.odometer_miles')
             ->select('fv.in_service_date, fv.out_of_service_date, vs.code AS status_code, vs.name AS status_name')
             ->select('vs.is_available_for_booking, vtl.code AS trim_code, vtl.name AS trim_name, vtl.is_premium')
             ->select('vm.name AS model_name, vma.name AS make_name, vsp.model_year')
@@ -112,17 +112,27 @@ class FleetIntelligenceRepository
     }
 
     /** @return array<int, array<string, mixed>> */
-    public function operationalReservationsBetween(string $startsAt, string $endsAt): array
+    public function operationalReservationsBetween(string $startsAt, string $endsAt, ?int $companyId = null): array
     {
         $builder = $this->db->table('turo_trips_normalized trips')
             ->select('trips.id, trips.fleet_vehicle_id, trips.turo_trip_id AS source_reservation_id')
             ->select('trips.guest_name, trips.starts_at, trips.ends_at, trips.trip_days, trips.billable_days')
             ->select('trips.gross_revenue_amount, trips.host_payout_amount, trips.delivery_fee_amount')
             ->select('trips.reimbursement_amount, trips.is_forecast')
+            ->select('pickup.location_class AS pickup_location_class, pickup.source_text AS pickup_location_source_text')
+            ->select('return_location.location_class AS return_location_class, return_location.source_text AS return_location_source_text')
             ->select("'turo' AS source", false)
+            ->join('scheduled_movement_locations pickup', "pickup.turo_trip_normalized_id = trips.id AND pickup.movement_type = 'pickup'", 'left')
+            ->join('scheduled_movement_locations return_location', "return_location.turo_trip_normalized_id = trips.id AND return_location.movement_type = 'return'", 'left')
             ->where('trips.deleted_at', null)
             ->where('trips.starts_at <', $endsAt)
             ->where('trips.ends_at >', $startsAt);
+
+        if ($companyId !== null) {
+            $builder->join('fleet_vehicles company_vehicle', 'company_vehicle.id = trips.fleet_vehicle_id')
+                ->where('company_vehicle.company_id', $companyId)
+                ->where('company_vehicle.deleted_at', null);
+        }
 
         if ($this->hasTripStatusLookups()) {
             $builder->select('lookup_values.code AS status_code')
@@ -431,16 +441,22 @@ class FleetIntelligenceRepository
     }
 
     /** @return array<int, array<string, mixed>> */
-    public function airportDeliveriesBetween(string $startsAt, string $endsAt): array
+    public function airportDeliveriesBetween(string $startsAt, string $endsAt, ?int $companyId = null): array
     {
-        return $this->db->table('airport_deliveries deliveries')
+        $builder = $this->db->table('airport_deliveries deliveries')
             ->select('deliveries.*, fv.fleet_code, fv.display_name, airports.code AS airport_code, airports.name AS airport_name')
             ->join('fleet_vehicles fv', 'fv.id = deliveries.fleet_vehicle_id')
             ->join('airports', 'airports.id = deliveries.airport_id')
             ->where('deliveries.deleted_at', null)
             ->where('deliveries.scheduled_at >=', $startsAt)
-            ->where('deliveries.scheduled_at <', $endsAt)
-            ->orderBy('deliveries.scheduled_at', 'ASC')
+            ->where('deliveries.scheduled_at <', $endsAt);
+
+        if ($companyId !== null) {
+            $builder->where('fv.company_id', $companyId)
+                ->where('fv.deleted_at', null);
+        }
+
+        return $builder->orderBy('deliveries.scheduled_at', 'ASC')
             ->get()
             ->getResultArray();
     }

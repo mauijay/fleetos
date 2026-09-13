@@ -768,6 +768,7 @@ class Services extends BaseService
             static::turoVehicleMappingService(),
             static::turoTripReconciliationService(),
             static::dailyOperationsDashboardService(),
+            static::operationalFactsRepository(),
         );
     }
 

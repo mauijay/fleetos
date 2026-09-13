@@ -1,6 +1,7 @@
 <?php
 
 use App\Repositories\FleetIntelligenceRepository;
+use App\Repositories\OperationalFactsRepository;
 use App\Repositories\TuroNormalizedTransactionRepository;
 use App\Services\Fleet\DailyOperationsDashboardService;
 use App\Services\Fleet\DecisionSupport\DecisionSupportDashboardService;
@@ -397,7 +398,7 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
             'claims_requiring_follow_up' => [['fleet_vehicle_id' => 3]],
         ]);
         $availability->method('vehicleStatus')->willReturn([['fleet_vehicle_id' => 1, 'status' => 'available']]);
-        $availability->method('timeline')->willReturn([['type' => 'reservation']]);
+        $availability->expects($this->never())->method('timeline');
         $tasks->method('today')->willReturn(['todays_pickups' => [[]], 'todays_returns' => [], 'airport_deliveries' => []]);
         $tasks->method('highPriority')->willReturn(['claims' => [[]]]);
 
@@ -442,6 +443,7 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
         $vehicleMappings = $this->getMockBuilder(TuroVehicleMappingService::class)->disableOriginalConstructor()->onlyMethods(['attentionSummary'])->getMock();
         $tripReconciliation = $this->getMockBuilder(TuroTripReconciliationService::class)->disableOriginalConstructor()->onlyMethods(['attentionSummary'])->getMock();
         $dailyOperations = $this->getMockBuilder(DailyOperationsDashboardService::class)->disableOriginalConstructor()->onlyMethods(['forToday'])->getMock();
+        $operationalFacts = $this->getMockBuilder(OperationalFactsRepository::class)->disableOriginalConstructor()->onlyMethods(['authoritativeMovementCompletionsForCompany'])->getMock();
 
         $command->method('snapshot')->willReturn([
             'as_of' => '2026-06-15 08:00:00',
@@ -502,11 +504,13 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
         $tomorrowTasks = $this->emptyTasks();
         $tomorrowTasks['todays_returns'] = [['fleet_vehicle_id' => 8]];
         $tasks->method('tomorrow')->willReturn($tomorrowTasks);
-        $availability->method('timeline')->willReturn([
-            ['id' => 9, 'type' => 'reservation', 'starts_at' => '2026-06-09 12:00:00', 'guest_name' => 'Stale Guest'],
-            ['id' => 16, 'type' => 'reservation', 'starts_at' => '2026-06-16 09:00:00', 'guest_name' => 'Tomorrow Guest'],
-            ['id' => 17, 'type' => 'reservation', 'starts_at' => '2026-06-17 09:00:00', 'guest_name' => 'Future Guest'],
-            ['id' => 22, 'type' => 'reservation', 'starts_at' => '2026-06-22 00:00:00', 'guest_name' => 'Outside Guest'],
+        $availability->expects($this->exactly(2))->method('timeline')->willReturn([
+            ['type' => 'reservation', 'fleet_vehicle_id' => 8, 'starts_at' => '2026-06-09 12:00:00', 'ends_at' => '2026-06-10 12:00:00', 'guest_name' => 'Stale Guest', 'reservation' => ['id' => 9, 'fleet_vehicle_id' => 8, 'guest_name' => 'Stale Guest']],
+            ['type' => 'reservation', 'fleet_vehicle_id' => 8, 'starts_at' => '2026-06-15 12:00:00', 'ends_at' => '2026-06-15 16:00:00', 'guest_name' => 'Joy Kealoha', 'reservation' => ['id' => 13, 'fleet_vehicle_id' => 8, 'guest_name' => 'Joy Kealoha', 'pickup_location_class' => 'airport_hnl', 'return_location_source_text' => 'Waikīkī']],
+            ['type' => 'reservation', 'fleet_vehicle_id' => 8, 'starts_at' => '2026-06-15 21:00:00', 'ends_at' => '2026-06-16 02:00:00', 'guest_name' => null, 'reservation' => ['id' => 131, 'fleet_vehicle_id' => 8, 'guest_name' => null]],
+            ['type' => 'reservation', 'fleet_vehicle_id' => 8, 'starts_at' => '2026-06-16 09:00:00', 'ends_at' => '2026-06-16 12:00:00', 'guest_name' => 'Tomorrow Guest', 'reservation' => ['id' => 16, 'fleet_vehicle_id' => 8, 'guest_name' => 'Tomorrow Guest']],
+            ['type' => 'reservation', 'fleet_vehicle_id' => 8, 'starts_at' => '2026-06-17 09:00:00', 'ends_at' => '2026-06-17 12:00:00', 'guest_name' => 'Future Guest', 'reservation' => ['id' => 17, 'fleet_vehicle_id' => 8, 'guest_name' => 'Future Guest']],
+            ['type' => 'reservation', 'fleet_vehicle_id' => 8, 'starts_at' => '2026-06-22 00:00:00', 'ends_at' => '2026-06-22 12:00:00', 'guest_name' => 'Outside Guest', 'reservation' => ['id' => 22, 'fleet_vehicle_id' => 8, 'guest_name' => 'Outside Guest']],
         ]);
         $analytics->method('summary')->willReturn(['average_trip_length' => 2.5, 'utilization' => 0.6]);
         $decisionSupport->method('recommendations')->willReturn([
@@ -537,8 +541,9 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
             'href' => '/turo/vehicle-matches',
         ]);
         $dailyOperations->method('forToday')->willReturn($this->dailyOperations());
+        $operationalFacts->method('authoritativeMovementCompletionsForCompany')->willReturn([]);
 
-        $service = new FleetCommandCenterViewModelService($command, $statistics, $health, $tasks, $availability, $analytics, $decisionSupport, $importIssues, $vehicleMappings, $tripReconciliation, $dailyOperations);
+        $service = new FleetCommandCenterViewModelService($command, $statistics, $health, $tasks, $availability, $analytics, $decisionSupport, $importIssues, $vehicleMappings, $tripReconciliation, $dailyOperations, $operationalFacts);
         $viewModel = $service->forToday(new DateTimeImmutable('2026-06-15 08:00:00'));
         $tomorrowViewModel = $service->forToday(new DateTimeImmutable('2026-06-15 08:00:00'), 'tomorrow', 'return');
 
@@ -581,26 +586,27 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
             'Spaceship04-608 — Due Jun 20',
             'Spaceship09-294 — Due date unavailable',
         ], $loanCard['preview_items']);
-        $this->assertSame('Joy', $viewModel['timeline']['today']['items'][0]['title_label']);
-        $this->assertSame('Jun 15 · 12:00 PM', $viewModel['timeline']['today']['items'][0]['starts_at_label']);
-        $this->assertSame('Reservation', $viewModel['timeline']['today']['items'][1]['title_label']);
-        $this->assertSame('Jun 15 · 9:00 PM', $viewModel['timeline']['today']['items'][1]['starts_at_label']);
-        $this->assertNotSame('Joy Kealoha', $viewModel['timeline']['today']['items'][0]['title_label']);
-        $this->assertSame([13, 131], array_column($viewModel['timeline']['today']['items'], 'id'));
-        $this->assertSame([16], array_column($viewModel['timeline']['tomorrow']['items'], 'id'));
-        $this->assertSame([17], array_column($viewModel['timeline']['next_7_days']['items'], 'id'));
-        $this->assertNotContains(9, array_merge(
-            array_column($viewModel['timeline']['today']['items'], 'id'),
-            array_column($viewModel['timeline']['tomorrow']['items'], 'id'),
-            array_column($viewModel['timeline']['next_7_days']['items'], 'id'),
-        ));
+        $this->assertSame(['Today — Jun 15', 'Tomorrow — Jun 16', 'Wednesday — Jun 17'], array_column($viewModel['timeline']['groups'], 'label'));
+        $todayEvents = $viewModel['timeline']['groups'][0]['events'];
+        $this->assertSame(['Joy', 'Joy', 'Reservation'], array_column($todayEvents, 'guest_label'));
+        $this->assertSame(['12:00 PM', '4:00 PM', '9:00 PM'], array_column($todayEvents, 'time_label'));
+        $this->assertSame(['Pickup', 'Return', 'Pickup'], array_column($todayEvents, 'movement_label'));
+        $this->assertSame(['HNL', 'Waikīkī', null], array_column($todayEvents, 'location_label'));
+        $this->assertNotContains('Joy Kealoha', array_column($todayEvents, 'guest_label'));
+        $allEvents = array_merge(...array_column($viewModel['timeline']['groups'], 'events'));
+        $this->assertNotContains(9, array_column($allEvents, 'trip_id'));
+        $this->assertNotContains(22, array_column($allEvents, 'trip_id'));
+        $this->assertContains(17, array_column($allEvents, 'trip_id'));
         $this->assertSame(1, $viewModel['daily_operations']['fleet_snapshot']['company_id']);
 
         $loanHtml = CoreServices::renderer()->setData(['task' => $loanCard])->render('fleet_command_center/components/task_card');
-        $timelineHtml = CoreServices::renderer()->setData(['timeline' => $viewModel['timeline']['today']])->render('fleet_command_center/components/timeline_card');
+        $timelineHtml = CoreServices::renderer()->setData(['timeline' => $viewModel['timeline']])->render('fleet_command_center/components/fleet_timeline');
         $this->assertStringContainsString('Bronco11-087 — Due today', $loanHtml);
         $this->assertStringContainsString('Joy', $timelineHtml);
-        $this->assertStringContainsString('Jun 15 · 12:00 PM', $timelineHtml);
+        $this->assertStringContainsString('Today — Jun 15', $timelineHtml);
+        $this->assertStringContainsString('12:00 PM', $timelineHtml);
+        $this->assertStringContainsString('Pickup', $timelineHtml);
+        $this->assertStringContainsString('Return', $timelineHtml);
         $this->assertStringNotContainsString('Joy Kealoha', $timelineHtml);
 
         $this->assertSame([
@@ -640,6 +646,7 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
         $vehicleMappings = $this->getMockBuilder(TuroVehicleMappingService::class)->disableOriginalConstructor()->onlyMethods(['attentionSummary'])->getMock();
         $tripReconciliation = $this->getMockBuilder(TuroTripReconciliationService::class)->disableOriginalConstructor()->onlyMethods(['attentionSummary'])->getMock();
         $dailyOperations = $this->getMockBuilder(DailyOperationsDashboardService::class)->disableOriginalConstructor()->onlyMethods(['forToday'])->getMock();
+        $operationalFacts = $this->getMockBuilder(OperationalFactsRepository::class)->disableOriginalConstructor()->onlyMethods(['authoritativeMovementCompletionsForCompany'])->getMock();
 
         $command->method('snapshot')->willReturn([
             'fleet_status' => ['available' => 1, 'reserved' => 0, 'in_progress' => 0, 'cleaning' => 0, 'maintenance' => 0, 'out_of_service' => 0],
@@ -676,8 +683,9 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
             'href' => '/turo/vehicle-matches',
         ]);
         $dailyOperations->method('forToday')->willReturn($this->dailyOperations());
+        $operationalFacts->method('authoritativeMovementCompletionsForCompany')->willReturn([]);
 
-        $viewModel = (new FleetCommandCenterViewModelService($command, $statistics, $health, $tasks, $availability, $analytics, $decisionSupport, $importIssues, $vehicleMappings, $tripReconciliation, $dailyOperations))
+        $viewModel = (new FleetCommandCenterViewModelService($command, $statistics, $health, $tasks, $availability, $analytics, $decisionSupport, $importIssues, $vehicleMappings, $tripReconciliation, $dailyOperations, $operationalFacts))
             ->forToday(new DateTimeImmutable('2026-06-15 08:00:00'));
 
         $this->assertTrue($viewModel['import_issues']['has_unresolved']);

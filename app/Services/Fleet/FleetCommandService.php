@@ -23,7 +23,6 @@ class FleetCommandService
         $fleetStatus = $this->statistics()->summary($asOf, $companyId, $financialSummary);
         $health = $this->health()->summary($asOf);
         $today = $this->tasks()->today($asOf);
-        $todayStart = $this->businessDayStart($asOf);
 
         return [
             'as_of' => $asOf->format('Y-m-d H:i:s'),
@@ -36,7 +35,6 @@ class FleetCommandService
                 'out_of_service' => $fleetStatus['vehicles_out_of_service'],
             ],
             'vehicle_statuses' => $this->availability()->vehicleStatus($asOf),
-            'todays_timeline' => $this->availability()->timeline($todayStart, $todayStart->modify('+1 day')),
             'todays_pickups' => $today['todays_pickups'],
             'todays_returns' => $today['todays_returns'],
             'airport_deliveries' => $today['airport_deliveries'],

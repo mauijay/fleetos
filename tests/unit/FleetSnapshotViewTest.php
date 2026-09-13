@@ -6,15 +6,18 @@ use CodeIgniter\Test\CIUnitTestCase;
 /** @internal */
 final class FleetSnapshotViewTest extends CIUnitTestCase
 {
-    public function testSnapshotRendersBeforeOperationsQueueWithCountsAndUniqueVehicleLinks(): void
+    public function testSnapshotRendersOnlyNonEmptyCurrentGroupsAndUniqueVehicleLinks(): void
     {
         $html = html_entity_decode(CoreServices::renderer()->setData(['activity' => $this->activity()])->render('fleet_command_center/components/activity_panel'), ENT_QUOTES | ENT_HTML5);
 
         $this->assertLessThan(strpos($html, 'Operations Queue'), strpos($html, 'Fleet Snapshot'));
-        $this->assertStringContainsString('10 vehicles', $html);
+        $this->assertStringNotContainsString('10 vehicles', $html);
+        $this->assertStringNotContainsString('fleet-snapshot__count', $html);
         $this->assertStringContainsString('Rented', $html);
         $this->assertStringContainsString('Home', $html);
         $this->assertStringContainsString('HNL', $html);
+        $this->assertStringNotContainsString('Other', $html);
+        $this->assertStringNotContainsString('Unknown', $html);
         foreach ([2, 3, 4, 5, 6, 7, 8, 9, 10, 11] as $number) {
             $this->assertSame(1, substr_count($html, 'aria-label="Open vehicle ' . $number . '"'));
         }
@@ -26,6 +29,7 @@ final class FleetSnapshotViewTest extends CIUnitTestCase
 
         $this->assertIsString($css);
         $this->assertStringContainsString('.fleet-snapshot__buckets li', $css);
+        $this->assertStringContainsString('grid-template-columns: 62px minmax(0, 1fr)', $css);
         $this->assertStringContainsString('overflow-wrap: anywhere', $css);
         $this->assertStringContainsString('grid-template-areas:', $css);
         $this->assertStringContainsString('grid-area: snapshot', $css);

@@ -1,8 +1,8 @@
 <?php /** @var array<string, mixed> $activity */ ?>
 <aside class="activity-panel" aria-label="Activity panel">
     <section class="panel-card fleet-snapshot" id="fleet-snapshot" aria-labelledby="fleet-snapshot-heading">
-        <p class="eyebrow">Fleet Snapshot</p>
-        <h2 id="fleet-snapshot-heading"><?= esc((string) $activity['fleet_snapshot']['total']) ?> vehicles</h2>
+        <h2 id="fleet-snapshot-heading">Fleet Snapshot</h2>
+        <p class="fleet-snapshot__context">Current authoritative locations</p>
         <ul class="fleet-snapshot__buckets">
             <?php foreach ($activity['fleet_snapshot']['buckets'] as $bucket): ?>
                 <?php if ((int) $bucket['count'] === 0) {
@@ -10,7 +10,6 @@
                 } ?>
                 <li>
                     <span class="fleet-snapshot__label"><?= esc($bucket['label']) ?></span>
-                    <strong class="fleet-snapshot__count"><?= esc((string) $bucket['count']) ?></strong>
                     <span class="fleet-snapshot__vehicles">
                         <?php foreach ($bucket['vehicles'] as $index => $vehicle): ?>
                             <?= $index === 0 ? '' : ', ' ?><a href="<?= esc($vehicle['href'], 'attr') ?>" aria-label="Open vehicle <?= esc($vehicle['label'], 'attr') ?>"><?= esc($vehicle['label']) ?></a>
