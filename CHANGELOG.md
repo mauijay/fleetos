@@ -1,5 +1,65 @@
 # Changelog
 
+## v0.10.0 — Financial Truth & Planning
+
+Release date: 2026-09-13
+
+### Truthful Financial Summary
+
+- Replace mixed financial metrics with company-scoped realized and recorded reporting.
+- Add Realized Operating Revenue, Realized Recoveries, Recorded Operating Costs, Net Realized Operating Result, and Forecast Host Payout.
+- Keep forecast payout visibly separate from realized activity.
+- Remove misleading Cash Flow, Operating Profit, Lifetime Profit, and similar mixed-accounting terminology.
+
+### Realized Revenue
+
+- Recognize signed Turo operating-revenue transactions using transaction date.
+- Apply negative signed revenue postings directly against realized revenue.
+- Do not separately subtract generic Turo fee or expense rows when their semantics may already be reflected in host earnings.
+
+### Recorded Operating Costs
+
+- Include recorded generic operating expenses, completed maintenance costs, ended charging-session costs, and authoritative Airport operating expenses.
+- Exclude scheduled or canceled maintenance, unfinished charging, and legacy Airport parking sources from the new realized-cost metric.
+
+### Loans, Insurance & Capital
+
+- Treat loan payments as scheduled obligations rather than realized costs.
+- Keep insurance premiums as policy and obligation information until payment semantics are authoritative.
+- Keep startup and acquisition records outside operating results.
+
+### Turo Import Integrity
+
+- Correct accounting-parentheses parsing for negative amounts.
+- Continue excluding ambiguous and unsafe transaction classes.
+- Do not silently rewrite existing historical normalized rows.
+- Keep recovery recognition behind an exact-label validation gate.
+
+### Company Isolation
+
+- Explicitly scope financial queries to the active company.
+- Exclude unmatched, conflicting, and ambiguous source ownership.
+- Keep server-side active-company ownership authoritative.
+
+### Decision Support
+
+- Remove non-actionable repeat-guest recommendations.
+- Preserve genuinely actionable maintenance, cancellation-exposure, and long-term-rental recommendations.
+- Show a clean empty state when no recommendation requires action.
+
+### Command Center Planning
+
+- Show resolved payment due dates in Loan Payments Due.
+- Show guest first names when available and format schedule times for Honolulu local time.
+- Prevent stale historical reservations from appearing in Today, Tomorrow, or Next 7 Days.
+- Separate schedule truth from operational overlap and state truth.
+
+### Reporting Methodology
+
+- Add explicit source taxonomy and recognition-date documentation.
+- Document realized, recorded-incurred, forecast, and scheduled semantics.
+- Note that historical totals may differ because ambiguous and scheduled inputs are intentionally excluded from realized operating results.
+
 ## v0.9.9 — Expense Workspace Polish
 
 Release date: 2026-09-13
