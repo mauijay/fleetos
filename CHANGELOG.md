@@ -1,5 +1,53 @@
 # Changelog
 
+## v0.10.1 — Command Center Planning
+
+Release date: 2026-09-13
+
+### Fleet Timeline
+
+- Consolidate Scheduling and Chronological views into one Fleet Timeline near the top of Command Center.
+- Show all remaining Today movements plus the next three future movements by default.
+- Make the full seven-day schedule available through Show next 7 days.
+- Separate completed movements into a collapsed Completed today section.
+
+### Authoritative Movement Completion
+
+- Require authoritative actual handoff for Pickup completion.
+- Require authoritative actual return or vehicle recovery for Return completion.
+- Do not treat vehicle positioning alone as movement completion.
+- Keep a future Return visible after its Pickup has been completed.
+
+### Scheduling Accuracy
+
+- Exclude stale historical reservations from current-day movements.
+- Use Honolulu-local movement boundaries for Today, Tomorrow, and future grouping.
+- Preserve guest first names and friendly local schedule times.
+
+### Command Center Layout
+
+- Center and widen the Command Center workspace.
+- Improve desktop timeline density with horizontal movement rows.
+- Preserve stacked mobile behavior.
+- Reduce initial timeline height through progressive disclosure.
+
+### Fleet Snapshot
+
+- Simplify Fleet Snapshot to current positional unit groups.
+- Remove redundant fleet-total and per-group counts.
+- Keep Fleet Status as the quantitative count and metrics surface.
+
+### Timeline Navigation
+
+- Link movement rows directly to the appropriate checklist or trip workflow.
+- Keep timeline clicks read-only so navigation never mutates trip state.
+
+### CSRF Submission Protection
+
+- Add browser-side duplicate POST protection.
+- Prevent overlapping submissions from racing CSRF token regeneration.
+- Preserve global CSRF, token regeneration, and the zero-exception security policy.
+
 ## v0.10.0 — Financial Truth & Planning
 
 Release date: 2026-09-13
