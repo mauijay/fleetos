@@ -14,6 +14,24 @@
   --info: #38bdf8;
   --warning: #fbbf24;
   --danger: #fb7185;
+  --control-bg: var(--surface-2);
+  --control-bg-disabled: var(--surface-3);
+  --control-text: var(--text);
+  --control-text-disabled: var(--subtle);
+  --control-border: rgba(166, 183, 201, 0.28);
+  --control-placeholder: #718294;
+  --success-bg: rgba(52, 211, 153, 0.1);
+  --success-border: rgba(52, 211, 153, 0.48);
+  --success-text: #7ee7bd;
+  --info-bg: rgba(56, 189, 248, 0.1);
+  --info-border: rgba(56, 189, 248, 0.48);
+  --info-text: #7dd3fc;
+  --warning-bg: rgba(251, 191, 36, 0.11);
+  --warning-border: rgba(251, 191, 36, 0.52);
+  --warning-text: #fcd76b;
+  --danger-bg: rgba(251, 113, 133, 0.12);
+  --danger-border: rgba(251, 113, 133, 0.58);
+  --danger-text: #fda4af;
   --radius: 8px;
   --shadow: 0 20px 80px rgba(0, 0, 0, 0.34);
 }
@@ -23,6 +41,7 @@
   width: 100%;
 }
 
+.operator-main,
 .airport-receipts-main {
   justify-self: stretch;
   width: 100%;
@@ -230,11 +249,160 @@
   padding: 8px;
 }
 
+/* Generic operating expense capture */
+.expenses-header,
+.expense-summary,
+.expense-capture-grid,
+.expense-management,
+.receipt-decisions {
+  display: flex;
+  gap: 16px;
+}
+
+.expenses-header,
+.expense-management {
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.expense-summary {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.expense-summary span {
+  display: grid;
+  gap: 3px;
+  min-width: 160px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--muted);
+  padding: 10px 14px;
+  font-size: 12px;
+}
+
+.expense-summary strong {
+  color: var(--text);
+  font-size: 18px;
+}
+
+.expense-capture-grid {
+  align-items: stretch;
+}
+
+.capture-panel {
+  flex: 1 1 0;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-2);
+  padding: 18px;
+}
+
+.primary-capture {
+  border-color: rgba(56, 189, 248, 0.38);
+}
+
+.expense-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  align-items: end;
+}
+
+.expense-form label,
+.receipt-decisions form {
+  min-width: 0;
+}
+
+.expense-form .form-wide,
+.expense-form > button,
+.compact-form {
+  grid-column: 1 / -1;
+}
+
+.expense-form small {
+  display: block;
+  color: var(--muted);
+  margin-top: 5px;
+}
+
+.domain-guidance {
+  border-left: 4px solid var(--info);
+  background: rgba(56, 189, 248, 0.07);
+  padding: 12px 14px;
+}
+
+.receipt-decisions {
+  flex-wrap: wrap;
+  margin-top: 18px;
+}
+
+.receipt-decisions form {
+  display: flex;
+  flex: 1 1 230px;
+  gap: 8px;
+}
+
+.receipt-decisions input {
+  flex: 1 1 auto;
+}
+
+.expense-management > * {
+  flex: 1 1 0;
+}
+
+.history-heading {
+  margin-top: 30px;
+}
+
+.receipt-fact-value {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+.receipt-preview-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  border-radius: 6px;
+  padding: 2px 4px;
+}
+
+.receipt-preview-link:hover,
+.receipt-preview-link:focus-visible {
+  background: rgba(52, 211, 153, 0.1);
+  color: var(--text);
+  text-decoration: underline;
+}
+
+.expense-evidence-list {
+  margin-top: 16px;
+}
+
+.expense-evidence-card .mapping-card-main {
+  align-items: center;
+}
+
+.vehicle-group-heading {
+  margin: 20px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 @media (max-width: 760px) {
+  .operator-main,
   .airport-receipts-main {
     padding: 12px;
   }
 
+  .operator-main .top-status,
+  .operator-main .section,
   .airport-receipts-main .top-status,
   .airport-receipts-main .section {
     padding: 16px;
@@ -257,6 +425,30 @@
   .policy-guidance,
   .filed-outcomes .compact-action {
     grid-template-columns: 1fr;
+  }
+
+  .expenses-header,
+  .expense-capture-grid,
+  .expense-management {
+    flex-direction: column;
+  }
+
+  .expense-summary {
+    justify-content: flex-start;
+  }
+
+  .expense-form {
+    grid-template-columns: 1fr;
+  }
+
+  .expense-form .form-wide,
+  .expense-form > button {
+    grid-column: auto;
+  }
+
+  .capture-panel,
+  .expense-management > * {
+    width: 100%;
   }
 }
 
@@ -294,6 +486,190 @@ summary:focus-visible,
 [tabindex]:focus-visible {
   outline: 2px solid var(--info);
   outline-offset: 3px;
+}
+
+/* Shared FleetOS feedback */
+.alert,
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  max-width: 100%;
+  margin: 18px 0 0;
+  border: 1px solid var(--line);
+  border-left-width: 4px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text);
+  padding: 14px 16px;
+  overflow-wrap: anywhere;
+}
+
+.alert-indicator {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  margin-top: 7px;
+  border-radius: 50%;
+  background: currentcolor;
+  box-shadow: 0 0 0 4px rgb(255 255 255 / 4%);
+}
+
+.alert-content {
+  min-width: 0;
+}
+
+.alert strong,
+.notice strong {
+  display: block;
+  color: inherit;
+}
+
+.alert p,
+.alert ul,
+.notice p,
+.notice ul {
+  margin: 5px 0 0;
+}
+
+.alert ul,
+.notice ul {
+  padding-left: 20px;
+}
+
+.alert-success,
+.notice.success {
+  border-color: var(--success-border);
+  background: var(--success-bg);
+  color: var(--success-text);
+}
+
+.alert-info,
+.notice.info {
+  border-color: var(--info-border);
+  background: var(--info-bg);
+  color: var(--info-text);
+}
+
+.alert-warning,
+.notice.warning {
+  border-color: var(--warning-border);
+  background: var(--warning-bg);
+  color: var(--warning-text);
+}
+
+.alert-danger,
+.notice.error {
+  border-color: var(--danger-border);
+  background: var(--danger-bg);
+  color: var(--danger-text);
+}
+
+.import-message.tone-success {
+  background: var(--success-bg);
+  color: var(--success-text);
+}
+
+.import-message.tone-info {
+  background: var(--info-bg);
+  color: var(--info-text);
+}
+
+.import-message.tone-warning {
+  background: var(--warning-bg);
+  color: var(--warning-text);
+}
+
+.import-message.tone-danger {
+  background: var(--danger-bg);
+  color: var(--danger-text);
+}
+
+/* Shared FleetOS form controls. Native checkbox/radio presentation is preserved. */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="hidden"]),
+select,
+textarea {
+  max-width: 100%;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius);
+  background-color: var(--control-bg);
+  color: var(--control-text);
+  caret-color: var(--control-text);
+  font: inherit;
+  min-height: 42px;
+  padding: 9px 10px;
+}
+
+select,
+select option,
+select optgroup {
+  color-scheme: dark;
+  background-color: var(--control-bg);
+  color: var(--control-text);
+}
+
+select optgroup {
+  font-weight: 750;
+}
+
+select option:disabled,
+select optgroup:disabled {
+  color: var(--control-text-disabled);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--control-placeholder);
+  opacity: 1;
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="hidden"]):not(:disabled):hover,
+select:not(:disabled):hover,
+textarea:not(:disabled):hover {
+  border-color: var(--muted);
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="hidden"]):focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  border-color: var(--info);
+  box-shadow: 0 0 0 3px rgb(56 189 248 / 12%);
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="hidden"]):disabled,
+select:disabled,
+textarea:disabled {
+  background-color: var(--control-bg-disabled);
+  color: var(--control-text-disabled);
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+input:not([type="checkbox"]):not([type="radio"])[aria-invalid="true"],
+select[aria-invalid="true"],
+textarea[aria-invalid="true"],
+.is-invalid {
+  border-color: var(--danger-border);
+  box-shadow: 0 0 0 3px rgb(251 113 133 / 12%);
+}
+
+.field-error {
+  display: block;
+  margin-top: 5px;
+  color: var(--danger-text);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill,
+select:-webkit-autofill {
+  -webkit-text-fill-color: var(--control-text);
+  caret-color: var(--control-text);
+  box-shadow: 0 0 0 1000px var(--control-bg) inset;
 }
 
 .skip-link {

@@ -85,7 +85,7 @@ class FleetCommandCenterViewModelService
             ['label' => 'Reservations', 'href' => '#fleet-timeline', 'active' => 'false'],
             ['label' => 'Trips', 'href' => '#executive-kpis', 'active' => 'false'],
             ['label' => 'Revenue', 'href' => '#financial-snapshot', 'active' => 'false'],
-            ['label' => 'Expenses', 'href' => '#financial-snapshot', 'active' => 'false'],
+            ['label' => 'Expenses & Receipts', 'href' => '/operations/expenses?view=needs_attention', 'active' => 'false'],
             ['label' => 'Maintenance', 'href' => '#fleet-health', 'active' => 'false'],
             ['label' => 'Claims', 'href' => '#fleet-health', 'active' => 'false'],
             ['label' => 'Charging', 'href' => '#todays-mission', 'active' => 'false'],

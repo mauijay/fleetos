@@ -63,6 +63,21 @@ $routes->group('', ['filter' => 'session'], static function (RouteCollection $ro
     $routes->post('operations/incidentals/(:num)/plan', 'Incidentals::confirmPlan/$1', ['filter' => 'permission:admin.access']);
     $routes->post('operations/incidentals/(:num)/invoice-sent', 'Incidentals::invoiceSent/$1', ['filter' => 'permission:admin.access']);
     $routes->post('operations/incidentals/(:num)/no-invoice-needed', 'Incidentals::noInvoiceNeeded/$1', ['filter' => 'permission:admin.access']);
+    $routes->group('operations/expenses', ['filter' => 'permission:admin.access'], static function (RouteCollection $routes): void {
+        $routes->get('', 'OperatingExpenses::index');
+        $routes->post('', 'OperatingExpenses::create');
+        $routes->post('receipts', 'OperatingExpenses::uploadReceipt');
+        $routes->get('receipts/(:num)/file', 'OperatingExpenses::receiptFile/$1');
+        $routes->post('receipts/(:num)/classify', 'OperatingExpenses::classifyReceipt/$1');
+        $routes->post('receipts/(:num)/non-business', 'OperatingExpenses::nonBusinessReceipt/$1');
+        $routes->post('receipts/(:num)/duplicate', 'OperatingExpenses::duplicateReceipt/$1');
+        $routes->post('receipts/(:num)/archive', 'OperatingExpenses::archiveReceipt/$1');
+        $routes->get('(:num)', 'OperatingExpenses::show/$1');
+        $routes->post('(:num)/correct', 'OperatingExpenses::correct/$1');
+        $routes->post('(:num)/archive', 'OperatingExpenses::archive/$1');
+        $routes->post('(:num)/restore', 'OperatingExpenses::restore/$1');
+        $routes->post('(:num)/receipt', 'OperatingExpenses::attachReceipt/$1');
+    });
     $routes->group('operations/airport', ['filter' => 'permission:admin.access'], static function (RouteCollection $routes): void {
         $routes->get('', 'AirportOperations::index');
         $routes->get('(:num)', 'AirportOperations::show/$1');

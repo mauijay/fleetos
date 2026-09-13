@@ -3,10 +3,13 @@
 namespace Config;
 
 use App\Repositories\AirportMovementRepository;
+use App\Repositories\AuditLogRepository;
 use App\Repositories\FileRepository;
 use App\Repositories\FleetIntelligenceRepository;
+use App\Repositories\LookupRepository;
 use App\Repositories\MovementChecklistRepository;
 use App\Repositories\MovementReadinessReadModelRepository;
+use App\Repositories\OperatingExpenseRepository;
 use App\Repositories\OperationalFactsRepository;
 use App\Repositories\TripIncidentalReviewRepository;
 use App\Repositories\TuroAccessReimbursementRepository;
@@ -15,6 +18,7 @@ use App\Repositories\TuroNormalizedTripRepository;
 use App\Repositories\TuroVehicleMappingIssueRepository;
 use App\Repositories\VehicleCapitalRepository;
 use App\Repositories\VehicleTuroListingRepository;
+use App\Services\Files\PrivateEvidenceStorageService;
 use App\Services\Files\PrivateFileStorageService;
 use App\Services\Fleet\AirportMovementWorkflowService;
 use App\Services\Fleet\CurrentVehicleLocationService;
@@ -47,6 +51,7 @@ use App\Services\Fleet\MovementReadinessProjectionService;
 use App\Services\Fleet\MovementReadinessReadService;
 use App\Services\Fleet\MovementStateResolver;
 use App\Services\Fleet\NextConfirmedTripService;
+use App\Services\Fleet\OperatingExpenseService;
 use App\Services\Fleet\PlanningHorizonService;
 use App\Services\Fleet\RevenueService;
 use App\Services\Fleet\ScheduledLocationBackfillService;
@@ -426,6 +431,38 @@ class Services extends BaseService
         return new PrivateFileStorageService(static::fileRepository());
     }
 
+    public static function privateEvidenceStorageService(bool $getShared = true): PrivateEvidenceStorageService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('privateEvidenceStorageService');
+        }
+
+        return new PrivateEvidenceStorageService(static::fileRepository());
+    }
+
+    public static function operatingExpenseRepository(bool $getShared = true): OperatingExpenseRepository
+    {
+        if ($getShared) {
+            return static::getSharedInstance('operatingExpenseRepository');
+        }
+
+        return new OperatingExpenseRepository();
+    }
+
+    public static function operatingExpenseService(bool $getShared = true): OperatingExpenseService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('operatingExpenseService');
+        }
+
+        return new OperatingExpenseService(
+            static::operatingExpenseRepository(),
+            new AuditLogRepository(),
+            new LookupRepository(),
+            static::privateEvidenceStorageService(),
+        );
+    }
+
     public static function airportMovementRepository(bool $getShared = true): AirportMovementRepository
     {
         if ($getShared) {
@@ -685,6 +722,7 @@ class Services extends BaseService
             static::movementReadinessReadService(),
             static::fleetSnapshotService(),
             incidentalReviewService: static::tripIncidentalReviewService(),
+            operatingExpenseService: static::operatingExpenseService(),
         );
     }
 

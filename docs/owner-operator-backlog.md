@@ -81,3 +81,7 @@ Airport receipt capture and classification is complete. FleetOS now uploads rece
 Evaluate a general **Receipts & Expenses / Operating Expenses hub** that can capture all Turo-host business expenses while preserving the specialized airport receipt and reimbursement workflows. This is a Slice 3B design item, not an expansion of the current airport-specific domain.
 
 Candidate expense categories include charging, parking, tolls, car wash, supplies, mileage, maintenance-related costs, and other operating expenses. The design must distinguish ordinary operating expenses, guest-recoverable expenses, reimbursement opportunities, deadline obligations, and reimbursed, denied, or waived outcomes.
+
+### Slice 3B.3A - Capture and Visibility
+
+Generic operating expense and receipt capture is implemented with a positive-only Command Center classification queue. The `Recorded operating expenses` total includes only active generic records. Specialized Airport, Maintenance, Charging, financing, insurance, acquisition, and Turo-import financial sources remain outside this total; unified source reporting and double-count prevention are deferred to 3B.3B.

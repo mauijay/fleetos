@@ -45,4 +45,17 @@ class FileRepository
 
         return $row === null ? null : $row;
     }
+
+    /** @return array<string, mixed>|null */
+    public function findByChecksumInDirectory(string $checksum, string $directory): ?array
+    {
+        $row = $this->db->table('files')
+            ->where('checksum', $checksum)
+            ->like('path', trim($directory, '/') . '/', 'after')
+            ->where('deleted_at', null)
+            ->get()
+            ->getRowArray();
+
+        return $row === null ? null : $row;
+    }
 }
