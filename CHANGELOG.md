@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.9.9 — Expense Workspace Polish
+
+Release date: 2026-09-13
+
+### Expense Workspace
+
+- Balance the Expenses & Receipts summary cards on desktop.
+- Give the summary cards equal sizing and centered values.
+- Retain fluid wrapping and stacking on narrow screens.
+
+### Vehicle Selection
+
+- Simplify vehicle option labels in the operating-expense workflow.
+- Show the normal FleetOS display name instead of the redundant `Fleet #N · ...` prefix.
+- Keep underlying vehicle IDs, ownership validation, filters, and trip matching unchanged.
+
+### Responsive UX
+
+- Preserve mobile and wide-screen behavior.
+- Introduce no fixed-width overflow.
+
 ## v0.9.8 — Operating Expenses & Receipts
 
 Release date: 2026-09-13
