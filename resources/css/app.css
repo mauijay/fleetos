@@ -251,7 +251,6 @@
 
 /* Generic operating expense capture */
 .expenses-header,
-.expense-summary,
 .expense-capture-grid,
 .expense-management,
 .receipt-decisions {
@@ -266,20 +265,26 @@
 }
 
 .expense-summary {
-  flex-wrap: wrap;
-  justify-content: flex-end;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: min(100%, 400px);
+  gap: 16px;
 }
 
 .expense-summary span {
   display: grid;
+  min-width: 0;
+  min-height: 68px;
+  align-content: center;
+  justify-items: center;
   gap: 3px;
-  min-width: 160px;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--surface-2);
   color: var(--muted);
   padding: 10px 14px;
   font-size: 12px;
+  text-align: center;
 }
 
 .expense-summary strong {
@@ -434,7 +439,8 @@
   }
 
   .expense-summary {
-    justify-content: flex-start;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+    width: 100%;
   }
 
   .expense-form {

@@ -30,6 +30,40 @@ final class OperatingExpensesUxAndCommandCenterTest extends CIUnitTestCase
         }
     }
 
+    public function testExpenseSummaryUsesEqualDesktopColumnsAndResponsiveNarrowLayout(): void
+    {
+        $css = file_get_contents(dirname(__DIR__, 2) . '/resources/css/app.css');
+        $this->assertMatchesRegularExpression('/\.expense-summary\s*\{[^}]*display: grid;[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);[^}]*width: min\(100%, 400px\);/s', $css);
+        $this->assertMatchesRegularExpression('/\.expense-summary span\s*\{[^}]*min-height: 68px;[^}]*justify-items: center;[^}]*text-align: center;/s', $css);
+        $this->assertMatchesRegularExpression('/@media \(max-width: 760px\).*?\.expense-summary\s*\{[^}]*grid-template-columns: repeat\(auto-fit, minmax\(min\(100%, 180px\), 1fr\)\);[^}]*width: 100%;/s', $css);
+    }
+
+    public function testExpenseVehicleSelectorsUseDisplayNameWithoutChangingOptionIds(): void
+    {
+        $render = static fn (array $vehicle, bool $isSelected = false): string => CoreServices::renderer()->setData([
+            'vehicle' => $vehicle,
+            'isSelected' => $isSelected,
+        ])->render('operating_expenses/components/vehicle_option');
+
+        $html = $render(['id' => 2, 'fleet_number' => 2, 'fleet_code' => 'Legacy02', 'display_name' => 'Spaceship02-90U']);
+        $fleetCodeFallback = $render(['id' => 3, 'fleet_number' => 3, 'fleet_code' => 'Spaceship03-519', 'display_name' => '']);
+        $fleetNumberFallback = $render(['id' => 11, 'fleet_number' => 11, 'fleet_code' => '', 'display_name' => null], true);
+        $identifierFallback = $render(['id' => 42, 'fleet_number' => null, 'fleet_code' => '', 'display_name' => null]);
+
+        $this->assertStringContainsString('<option value="2">Spaceship02-90U</option>', $html);
+        $this->assertStringNotContainsString('Fleet #2 · Spaceship02-90U', $html);
+        $this->assertStringContainsString('<option value="3">Spaceship03-519</option>', $fleetCodeFallback);
+        $this->assertStringContainsString('<option value="11" selected>Fleet #11</option>', $fleetNumberFallback);
+        $this->assertStringContainsString('<option value="42">Vehicle #42</option>', $identifierFallback);
+
+        $index = file_get_contents(dirname(__DIR__, 2) . '/app/Views/operating_expenses/index.php');
+        $show = file_get_contents(dirname(__DIR__, 2) . '/app/Views/operating_expenses/show.php');
+        $this->assertSame(3, substr_count($index, "view('operating_expenses/components/vehicle_option'"));
+        $this->assertSame(1, substr_count($show, "view('operating_expenses/components/vehicle_option'"));
+        $this->assertStringContainsString('<option value="">Fleet-wide</option>', $index);
+        $this->assertStringContainsString('<option value="">Fleet-wide</option>', $show);
+    }
+
     public function testCommandCenterHasOnePositiveOnlyClassificationAction(): void
     {
         $dashboard = file_get_contents(dirname(__DIR__, 2) . '/app/Services/Fleet/DailyOperationsDashboardService.php');
