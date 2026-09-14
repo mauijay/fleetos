@@ -105,6 +105,10 @@ $routes->group('', ['filter' => 'session'], static function (RouteCollection $ro
         $routes->post('reimbursements/(:num)/reimbursed', 'AirportReimbursements::markReimbursed/$1');
         $routes->post('reimbursements/(:num)/denied', 'AirportReimbursements::deny/$1');
     });
+    $routes->group('reports/vehicle-financial-results', ['filter' => 'permission:admin.access'], static function (RouteCollection $routes): void {
+        $routes->get('', 'VehicleFinancialResults::index');
+        $routes->get('(:num)', 'VehicleFinancialResults::show/$1');
+    });
 });
 
 service('auth')->routes($routes, ['except' => ['logout']]);

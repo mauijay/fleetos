@@ -430,6 +430,21 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
         $this->assertStringContainsString('Normal turnaround is driven by recorded condition and energy.', $html);
     }
 
+    public function testActionRequiredRowsUseSharedAlignedActionColumnWithoutChangingPostSecurity(): void
+    {
+        $view = file_get_contents(dirname(__DIR__, 2) . '/app/Views/trip_movement_checklists/_readiness.php');
+        $css = file_get_contents(dirname(__DIR__, 2) . '/resources/css/app.css');
+
+        $this->assertStringContainsString('class="is-pending readiness-action-row', $view);
+        $this->assertStringContainsString('class="readiness-action-label"', $view);
+        $this->assertStringContainsString('<div class="readiness-action-controls"><a class="action-link" href="#handoff-entry">Record facts</a></div>', $view);
+        $this->assertSame(3, substr_count($view, '<button class="primary-action" type="submit">Confirm</button>'));
+        $this->assertGreaterThanOrEqual(3, substr_count($view, 'method="post"><?= csrf_field() ?>'));
+        $this->assertMatchesRegularExpression('/\.readiness-actions li\.readiness-action-row\s*\{[^}]*grid-template-columns: 22px minmax\(0, 1fr\) minmax\(124px, auto\);/s', $css);
+        $this->assertMatchesRegularExpression('/\.readiness-action-row \.readiness-action-controls \.primary-action,.*?min-width: 124px;.*?justify-content: center;/s', $css);
+        $this->assertMatchesRegularExpression('/@media \(max-width: 560px\).*?\.readiness-actions li\.readiness-action-row\s*\{[^}]*grid-template-columns: 22px minmax\(0, 1fr\);.*?\.readiness-action-row > \.readiness-action-controls\s*\{[^}]*grid-column: 2;/s', $css);
+    }
+
     public function testLegacyRowsRemainOnlyInCollapsedChecklistHistory(): void
     {
         $html = $this->render('return', $this->facts(), false, [], $this->readinessViewData());
@@ -526,7 +541,7 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
         $this->assertStringContainsString('Maintenance required', $html);
         $this->assertStringContainsString('Claim / damage review required', $html);
         $this->assertStringContainsString('Offline / unavailable', $html);
-        $this->assertMatchesRegularExpression('/class="is-pending"><span[^>]*>○<\/span><div><strong>Inspect exterior<\/strong>/', $html);
+        $this->assertMatchesRegularExpression('/class="is-pending readiness-action-row"><span[^>]*>○<\/span><div class="readiness-action-label"><strong>Inspect exterior<\/strong>/', $html);
         $this->assertStringNotContainsString('Needs Cleaning</option>', $html);
         $this->assertStringNotContainsString('Needs Charging</option>', $html);
         $this->assertStringContainsString('Recorded vehicle disposition', $html);

@@ -217,9 +217,12 @@
             </section>
 
             <section class="section" id="financial-snapshot" aria-labelledby="financial-heading">
-                <div class="section-heading">
-                    <p class="eyebrow">Owner View</p>
-                    <h2 id="financial-heading">Financial Snapshot</h2>
+                <div class="section-heading split-heading">
+                    <div>
+                        <p class="eyebrow">Owner View</p>
+                        <h2 id="financial-heading">Financial Snapshot</h2>
+                    </div>
+                    <a class="text-link" href="/reports/vehicle-financial-results">View vehicle financial results</a>
                 </div>
                 <div class="financial-grid">
                     <?php foreach ($commandCenter['financial'] as $card): ?>

@@ -448,8 +448,13 @@ class TuroAccessReimbursementRepository
         return $this->db->table('airport_operations_expenses expenses')
             ->select('expenses.id, expenses.airport_operations_run_id, expenses.expense_category')
             ->select('expenses.amount, expenses.expense_date, expenses.business_purpose_note')
+            ->select('allocations.id AS allocation_id, allocations.fleet_vehicle_id AS allocation_fleet_vehicle_id')
+            ->select('allocations.allocation_method, allocations.allocated_amount, allocations.allocated_percentage')
+            ->select('allocation_vehicle.company_id AS allocation_vehicle_company_id')
             ->join('airport_turo_access_receipts receipts', 'receipts.id = expenses.airport_turo_access_receipt_id', 'left')
             ->join('airport_operations_runs runs', 'runs.id = expenses.airport_operations_run_id', 'left')
+            ->join('airport_operations_expense_allocations allocations', 'allocations.airport_operations_expense_id = expenses.id', 'left')
+            ->join('fleet_vehicles allocation_vehicle', 'allocation_vehicle.id = allocations.fleet_vehicle_id', 'left')
             ->where("(receipts.company_id = {$company} OR runs.company_id = {$company})", null, false)
             ->where('(receipts.company_id IS NULL OR runs.company_id IS NULL OR receipts.company_id = runs.company_id)', null, false)
             ->whereIn('expenses.accounting_status', ['recorded', 'reimbursable', 'reimbursed'])
@@ -457,6 +462,7 @@ class TuroAccessReimbursementRepository
             ->where('expenses.expense_date >=', $fromDate)
             ->where('expenses.expense_date <', $toDateExclusive)
             ->orderBy('expenses.id', 'ASC')
+            ->orderBy('allocations.id', 'ASC')
             ->get()->getResultArray();
     }
 

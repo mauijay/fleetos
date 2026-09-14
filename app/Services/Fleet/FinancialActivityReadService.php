@@ -43,7 +43,7 @@ class FinancialActivityReadService
     /**
      * @return array{
      *   activities:list<array<string,mixed>>,
-     *   diagnostics:array{source_query_count:int,unsafe_turo_rows_excluded:int,unvalidated_recovery_rows_excluded:int,validated_recovery_transaction_types:list<string>}
+     *   diagnostics:array{source_query_count:int,unsafe_turo_rows_excluded:int,unvalidated_recovery_rows_excluded:int,validated_recovery_transaction_types:list<string>,invalid_airport_allocations_excluded:int}
      * }
      */
     public function forPeriod(int $companyId, string $fromDate, string $toDateExclusive): array
@@ -55,6 +55,7 @@ class FinancialActivityReadService
         $activities = [];
         $unsafeTuroRows = 0;
         $unvalidatedRecoveries = 0;
+        $invalidAirportAllocations = 0;
 
         foreach ($this->transactionRepository()->financialActivityForCompany($companyId, $fromDate, $toDateExclusive) as $row) {
             if ($this->hasUnsafePersistedSign($row)) {
@@ -162,22 +163,82 @@ class FinancialActivityReadService
             );
         }
 
+        $airportExpenses = [];
         foreach ($this->airportExpenseRepository()->recordedOperatingExpenseActivity($companyId, $fromDate, $toDateExclusive) as $row) {
-            $activities[] = $this->activity(
-                'airport_operations_expense',
-                (int) $row['id'],
+            $expenseId = (int) $row['id'];
+            if (! isset($airportExpenses[$expenseId])) {
+                $airportExpenses[$expenseId] = $this->activity(
+                    'airport_operations_expense',
+                    $expenseId,
+                    $companyId,
+                    null,
+                    null,
+                    (string) $row['expense_date'],
+                    (string) $row['amount'],
+                    (string) ($row['expense_category'] ?? 'other'),
+                    trim((string) ($row['business_purpose_note'] ?? '')) ?: 'Recorded airport operating expense',
+                    'recorded_incurred',
+                    'fleet_wide',
+                    'recorded_operating_costs',
+                    '/operations/airport/reimbursements',
+                );
+                $airportExpenses[$expenseId]['vehicle_allocations'] = [];
+                $airportExpenses[$expenseId]['allocation_total_cents'] = 0;
+            }
+
+            $allocationId = $this->nullableId($row['allocation_id'] ?? null);
+            if ($allocationId === null) {
+                continue;
+            }
+            $vehicleId = $this->nullableId($row['allocation_fleet_vehicle_id'] ?? null);
+            $allocatedCents = $this->decimalToCents((string) ($row['allocated_amount'] ?? '0'));
+            $airportExpenses[$expenseId]['allocation_total_cents'] += max(0, $allocatedCents);
+            if ($vehicleId === null) {
+                if ((string) ($row['allocation_method'] ?? '') !== 'unallocated') {
+                    $invalidAirportAllocations++;
+                }
+                continue;
+            }
+            if ((int) ($row['allocation_vehicle_company_id'] ?? 0) !== $companyId || $allocatedCents <= 0) {
+                $invalidAirportAllocations++;
+                continue;
+            }
+
+            $airportExpenses[$expenseId]['vehicle_allocations'][] = $this->activity(
+                'airport_operations_expense_allocation',
+                $allocationId,
                 $companyId,
-                null,
+                $vehicleId,
                 null,
                 (string) $row['expense_date'],
-                (string) $row['amount'],
+                $this->centsToDecimal($allocatedCents),
                 (string) ($row['expense_category'] ?? 'other'),
-                trim((string) ($row['business_purpose_note'] ?? '')) ?: 'Recorded airport operating expense',
+                trim((string) ($row['business_purpose_note'] ?? '')) ?: 'Recorded airport operating expense allocation',
                 'recorded_incurred',
-                'fleet_wide',
+                'explicit_vehicle_allocation',
                 'recorded_operating_costs',
                 '/operations/airport/reimbursements',
             );
+        }
+
+        foreach ($airportExpenses as $airportExpense) {
+            $sourceCents = $this->decimalToCents((string) $airportExpense['amount']);
+            $allocatedCents = array_sum(array_map(
+                fn (array $allocation): int => $this->decimalToCents((string) $allocation['amount']),
+                $airportExpense['vehicle_allocations'],
+            ));
+            if ($airportExpense['allocation_total_cents'] > $sourceCents) {
+                $invalidAirportAllocations += count($airportExpense['vehicle_allocations']);
+                $airportExpense['vehicle_allocations'] = [];
+                $allocatedCents = 0;
+            }
+            unset($airportExpense['allocation_total_cents']);
+            $airportExpense['allocation_state'] = match (true) {
+                $allocatedCents === 0 => 'fleet_wide',
+                $allocatedCents === $sourceCents => 'fully_allocated',
+                default => 'partially_allocated',
+            };
+            $activities[] = $airportExpense;
         }
 
         return [
@@ -187,6 +248,7 @@ class FinancialActivityReadService
                 'unsafe_turo_rows_excluded' => $unsafeTuroRows,
                 'unvalidated_recovery_rows_excluded' => $unvalidatedRecoveries,
                 'validated_recovery_transaction_types' => $this->validatedRecoveryTransactionTypes,
+                'invalid_airport_allocations_excluded' => $invalidAirportAllocations,
             ],
         ];
     }
@@ -249,6 +311,22 @@ class FinancialActivityReadService
     private function businessBoundary(string $date): string
     {
         return (new DateTimeImmutable($date, new DateTimeZone('Pacific/Honolulu')))->setTime(0, 0)->format('Y-m-d H:i:s');
+    }
+
+    private function decimalToCents(string $amount): int
+    {
+        $amount = trim($amount);
+        if (preg_match('/^(-?)(\d+)(?:\.(\d{1,2}))?$/', $amount, $matches) !== 1) {
+            throw new \UnexpectedValueException('Airport allocation contains an invalid decimal amount.');
+        }
+        $cents = ((int) $matches[2] * 100) + (int) str_pad($matches[3] ?? '', 2, '0');
+
+        return $matches[1] === '-' ? -$cents : $cents;
+    }
+
+    private function centsToDecimal(int $cents): string
+    {
+        return sprintf('%d.%02d', intdiv($cents, 100), $cents % 100);
     }
 
     private function transactionRepository(): TuroNormalizedTransactionRepository

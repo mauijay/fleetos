@@ -30,6 +30,20 @@ class FleetVehicleRepository
         return $row === null ? null : (int) $row['fleet_vehicle_id'];
     }
 
+    /** @return list<array<string, mixed>> */
+    public function financialReportRoster(int $companyId): array
+    {
+        return $this->db->table('fleet_vehicles')
+            ->select('id, fleet_number, fleet_code, display_name')
+            ->where('company_id', $companyId)
+            ->where('deleted_at', null)
+            ->orderBy('fleet_number IS NULL', 'ASC', false)
+            ->orderBy('fleet_number', 'ASC')
+            ->orderBy('fleet_code', 'ASC')
+            ->orderBy('id', 'ASC')
+            ->get()->getResultArray();
+    }
+
     public function findIdByFleetCode(?string $fleetCode): ?int
     {
         if ($fleetCode === null || trim($fleetCode) === '') {

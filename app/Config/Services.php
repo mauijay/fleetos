@@ -7,6 +7,7 @@ use App\Repositories\AuditLogRepository;
 use App\Repositories\ChargingCostRepository;
 use App\Repositories\FileRepository;
 use App\Repositories\FleetIntelligenceRepository;
+use App\Repositories\FleetVehicleRepository;
 use App\Repositories\LookupRepository;
 use App\Repositories\MaintenanceCostRepository;
 use App\Repositories\MovementChecklistRepository;
@@ -70,6 +71,7 @@ use App\Services\Fleet\TuroAccessReimbursementService;
 use App\Services\Fleet\UnknownVehicleOnboardingService;
 use App\Services\Fleet\VehicleAvailabilityService;
 use App\Services\Fleet\VehicleCapitalService;
+use App\Services\Fleet\VehicleFinancialSummaryService;
 use App\Services\Fleet\VehicleOperationalProfileService;
 use App\Services\Fleet\VehiclePositioningPlanService;
 use App\Services\Fleet\VehiclePositioningPlanWorkflowService;
@@ -157,6 +159,27 @@ class Services extends BaseService
         }
 
         return new FinancialSummaryService(static::financialActivityReadService());
+    }
+
+    public static function fleetVehicleRepository(bool $getShared = true): FleetVehicleRepository
+    {
+        if ($getShared) {
+            return static::getSharedInstance('fleetVehicleRepository');
+        }
+
+        return new FleetVehicleRepository();
+    }
+
+    public static function vehicleFinancialSummaryService(bool $getShared = true): VehicleFinancialSummaryService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('vehicleFinancialSummaryService');
+        }
+
+        return new VehicleFinancialSummaryService(
+            static::financialSummaryService(),
+            static::fleetVehicleRepository(),
+        );
     }
 
     public static function tripIncidentalReviewRepository(bool $getShared = true): TripIncidentalReviewRepository

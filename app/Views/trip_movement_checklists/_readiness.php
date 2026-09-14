@@ -73,14 +73,14 @@ $factDetail = static function (array $requirement) use ($activeFacts): ?string {
                         $actionType = (string) ($requirement['action']['type'] ?? '');
                         $isSpecialAction = in_array($actionType, ['photos_composite', 'charging_adapter'], true);
                         ?>
-                        <li class="is-pending<?= $isSpecialAction ? ' readiness-compound-action' : '' ?>"><span aria-hidden="true">○</span><div><strong><?= esc((string) ($pendingLabels[$requirement['code']] ?? $requirement['action']['label'] ?? $requirement['label'])) ?></strong></div>
+                        <li class="is-pending readiness-action-row<?= $isSpecialAction ? ' readiness-compound-action' : '' ?>"><span aria-hidden="true">○</span><div class="readiness-action-label"><strong><?= esc((string) ($pendingLabels[$requirement['code']] ?? $requirement['action']['label'] ?? $requirement['label'])) ?></strong></div>
                             <?php if (! $closed && $actionType === 'photos_composite'): ?>
                                 <div class="readiness-action-controls"><form action="/operations/checklists/<?= (int) $checklist['id'] ?>/photos-complete" method="post"><?= csrf_field() ?><button class="primary-action" type="submit">Confirm</button></form></div>
                             <?php elseif (! $closed && $actionType === 'charging_adapter'): ?>
                                 <div class="readiness-action-controls"><form action="/operations/checklists/<?= (int) $checklist['id'] ?>/charging-adapter-present" method="post"><?= csrf_field() ?><button class="primary-action" type="submit">Confirm</button></form></div>
                             <?php elseif (! $closed && $itemId > 0): ?>
                                 <div class="readiness-action-controls"><form action="/operations/checklist-items/<?= $itemId ?>/complete" method="post"><?= csrf_field() ?><button class="primary-action" type="submit">Confirm</button></form><?php if ($requirement['allows_na'] ?? false): ?><form action="/operations/checklist-items/<?= $itemId ?>/not-applicable" method="post"><?= csrf_field() ?><button class="action-link" type="submit">Not applicable</button></form><?php endif; ?></div>
-                            <?php elseif (! $closed): ?><a class="action-link" href="#handoff-entry">Record facts</a><?php endif; ?>
+                            <?php elseif (! $closed): ?><div class="readiness-action-controls"><a class="action-link" href="#handoff-entry">Record facts</a></div><?php endif; ?>
                         </li>
                     <?php endforeach; ?>
                 </ul>

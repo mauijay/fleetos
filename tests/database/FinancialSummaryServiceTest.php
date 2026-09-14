@@ -79,7 +79,7 @@ final class FinancialSummaryServiceTest extends CIUnitTestCase
 
     private function resetSchema(): void
     {
-        foreach (['insurance_policies', 'loans', 'airport_movement_workflows', 'airport_deliveries', 'airport_operations_expenses', 'airport_operations_runs', 'airport_turo_access_receipts', 'charging_sessions', 'maintenance_logs', 'operating_expenses', 'trip_month_allocations', 'turo_transactions_normalized', 'turo_transaction_raw', 'turo_trips_normalized', 'fleet_vehicles', 'lookup_values', 'lookup_types'] as $table) {
+        foreach (['insurance_policies', 'loans', 'airport_movement_workflows', 'airport_deliveries', 'airport_operations_expense_allocations', 'airport_operations_expenses', 'airport_operations_runs', 'airport_turo_access_receipts', 'charging_sessions', 'maintenance_logs', 'operating_expenses', 'trip_month_allocations', 'turo_transactions_normalized', 'turo_transaction_raw', 'turo_trips_normalized', 'fleet_vehicles', 'lookup_values', 'lookup_types'] as $table) {
             $this->connection->query('DROP TABLE IF EXISTS ' . $this->table($table));
         }
     }
@@ -99,6 +99,7 @@ final class FinancialSummaryServiceTest extends CIUnitTestCase
         $this->connection->query('CREATE TABLE ' . $this->table('airport_turo_access_receipts') . ' (id INTEGER PRIMARY KEY, company_id INTEGER)');
         $this->connection->query('CREATE TABLE ' . $this->table('airport_operations_runs') . ' (id INTEGER PRIMARY KEY, company_id INTEGER)');
         $this->connection->query('CREATE TABLE ' . $this->table('airport_operations_expenses') . ' (id INTEGER PRIMARY KEY, airport_operations_run_id INTEGER NULL, airport_turo_access_receipt_id INTEGER, expense_category VARCHAR(60), amount DECIMAL(10,2), expense_date DATE, business_purpose_note TEXT, accounting_status VARCHAR(60))');
+        $this->connection->query('CREATE TABLE ' . $this->table('airport_operations_expense_allocations') . ' (id INTEGER PRIMARY KEY, airport_operations_expense_id INTEGER, fleet_vehicle_id INTEGER NULL, allocation_method VARCHAR(40), allocated_amount DECIMAL(10,2), allocated_percentage DECIMAL(5,2) NULL)');
         $this->connection->query('CREATE TABLE ' . $this->table('airport_deliveries') . ' (id INTEGER PRIMARY KEY, fleet_vehicle_id INTEGER, parking_cost_amount DECIMAL(10,2), scheduled_at DATETIME)');
         $this->connection->query('CREATE TABLE ' . $this->table('airport_movement_workflows') . ' (id INTEGER PRIMARY KEY, fleet_vehicle_id INTEGER, actual_parking_cost_amount DECIMAL(10,2))');
         $this->connection->query('CREATE TABLE ' . $this->table('loans') . ' (id INTEGER PRIMARY KEY, fleet_vehicle_id INTEGER, monthly_payment DECIMAL(10,2))');
