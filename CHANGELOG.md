@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.12.0 — Extras Source Foundation
+
+Release date: 2026-09-13
+
+### Canonical Extras & Source Mapping
+
+- Add a company-owned canonical Extra catalog with explicit Turo source Extra ID mappings.
+- Allow many Turo source IDs to map to one canonical FleetOS Extra while allowing the same Turo label to map to different canonical Extras.
+- Keep Premium Beach Gear and Basic Beach Gear distinct, and allow Portable GPS to map explicitly to FSD Upgrade.
+- Require explicit mapping and reasoned, actor-attributed remapping with an audit trail.
+
+### Sanitized Import & Historical Activity
+
+- Add a sanitized authenticated-browser reservation Extra exporter and strict `fleetos-turo-extras-v1` JSON import.
+- Preserve reservation snapshots and historical Extra selection activity, including the originally selected price.
+- Keep imports duplicate-safe and idempotent, preserve omitted quantity as `NULL`, and use complete snapshots to record removal lifecycle state.
+- Prevent stale snapshots from resurrecting selections removed by newer observations.
+
+### Operator Workflow
+
+- Add an unmapped Turo Extra operator queue and Command Center signal.
+- Add a responsive Extras Import workspace for canonical catalog, import, mapping, and remapping workflows.
+
+### Financial Boundary
+
+- Keep Extra commercial attribution outside existing realized revenue, recoveries, operating costs, and vehicle financial results.
+- Do not add imported Extra prices to FleetOS financial statements in this release.
+
+### Migration & Deferred Reporting
+
+- Add migration `2026-09-13-000021_CreateFleetExtrasFoundation` for the Extras source foundation.
+- Defer the final fleetwide Extras Performance report to the next slice.
+
 ## v0.11.0 — Vehicle Financial Results
 
 Release date: 2026-09-13
