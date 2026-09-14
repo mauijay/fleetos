@@ -1,0 +1,82 @@
+{
+  "schema": "fleetos-turo-extras-v1",
+  "exported_at": "2026-09-13T08:00:00-10:00",
+  "reservations": [
+    {
+      "reservation_id": "70000001",
+      "trip_start": "2026-09-14T10:00:00-10:00",
+      "trip_end": "2026-09-16T10:00:00-10:00",
+      "status": "BOOKED",
+      "snapshot_complete": true,
+      "extras": [
+        {
+          "extra_id": "3154920",
+          "reservation_state_extra_id": "8020576",
+          "reservation_state_id": "9100001",
+          "type": "BEACH_GEAR",
+          "label": "Beach gear",
+          "description": "Sanitized premium beach equipment fixture.",
+          "price": "47.00",
+          "quantity": 1,
+          "currency": "USD",
+          "pricing_type": "PER_TRIP"
+        }
+      ]
+    },
+    {
+      "reservation_id": "70000002",
+      "trip_start": "2026-09-17T10:00:00-10:00",
+      "trip_end": "2026-09-20T10:00:00-10:00",
+      "status": "BOOKED",
+      "snapshot_complete": true,
+      "extras": [
+        {
+          "extra_id": "3199029",
+          "reservation_state_extra_id": "8020577",
+          "reservation_state_id": "9100002",
+          "type": "BEACH_GEAR",
+          "label": "Beach gear",
+          "description": "Sanitized basic beach equipment fixture.",
+          "price": "30.00",
+          "quantity": null,
+          "currency": "USD",
+          "pricing_type": "PER_TRIP"
+        }
+      ]
+    },
+    {
+      "reservation_id": "70000003",
+      "trip_start": null,
+      "trip_end": null,
+      "status": "COMPLETED",
+      "snapshot_complete": true,
+      "extras": [
+        {
+          "extra_id": "3199029",
+          "reservation_state_extra_id": "8020578",
+          "reservation_state_id": null,
+          "type": "BEACH_GEAR",
+          "label": "Beach gear",
+          "description": "Same basic Extra source ID with a later selected price.",
+          "price": "32.00",
+          "quantity": 1,
+          "currency": "USD",
+          "pricing_type": "PER_TRIP"
+        },
+        {
+          "extra_id": "4000000",
+          "reservation_state_extra_id": "8020579",
+          "reservation_state_id": null,
+          "type": "PORTABLE_GPS",
+          "label": "Portable GPS",
+          "description": "Sanitized alias fixture for an operator-mapped FSD Upgrade.",
+          "price": "79.00",
+          "quantity": 1,
+          "currency": "USD",
+          "pricing_type": "PER_TRIP"
+        }
+      ]
+    }
+  ],
+  "failures": []
+}

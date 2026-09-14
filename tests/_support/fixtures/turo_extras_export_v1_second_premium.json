@@ -1,0 +1,28 @@
+{
+  "schema": "fleetos-turo-extras-v1",
+  "exported_at": "2026-09-13T11:00:00-10:00",
+  "reservations": [
+    {
+      "reservation_id": "79990001",
+      "trip_start": "2026-09-22T10:00:00-10:00",
+      "trip_end": "2026-09-24T10:00:00-10:00",
+      "status": "BOOKED",
+      "snapshot_complete": true,
+      "extras": [
+        {
+          "extra_id": "4100001",
+          "reservation_state_extra_id": "8020580",
+          "reservation_state_id": "9100004",
+          "type": "BEACH_GEAR",
+          "label": "Beach gear",
+          "description": "Sanitized premium beach equipment fixture using an alternate Turo source identity.",
+          "price": "47.00",
+          "quantity": 1,
+          "currency": "USD",
+          "pricing_type": "PER_TRIP"
+        }
+      ]
+    }
+  ],
+  "failures": []
+}

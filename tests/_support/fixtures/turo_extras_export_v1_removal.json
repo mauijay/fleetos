@@ -1,0 +1,15 @@
+{
+  "schema": "fleetos-turo-extras-v1",
+  "exported_at": "2026-09-13T09:00:00-10:00",
+  "reservations": [
+    {
+      "reservation_id": "70000002",
+      "trip_start": "2026-09-17T10:00:00-10:00",
+      "trip_end": "2026-09-20T10:00:00-10:00",
+      "status": "BOOKED",
+      "snapshot_complete": true,
+      "extras": []
+    }
+  ],
+  "failures": []
+}

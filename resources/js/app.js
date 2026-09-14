@@ -3,6 +3,7 @@ import { initializeFleetTimelineDisclosure } from "./fleet-timeline-disclosure.j
 import { createPostSubmissionGuard } from "./form-submit-guard.js";
 import { resolveHnlParkingState } from "./hnl-parking-state.js";
 import { combineLocalDateTime } from "./local-datetime.js";
+import { initializeCopyField } from "./copy-field.js";
 
 const postSubmissionGuard = createPostSubmissionGuard(document.documentElement);
 document.addEventListener("submit", postSubmissionGuard.handleSubmit);
@@ -113,3 +114,7 @@ document.querySelectorAll("[data-repair-preview]").forEach((preview) => {
   select.addEventListener("change", sync);
   sync();
 });
+
+document.querySelectorAll("[data-copy-target]").forEach((button) =>
+  initializeCopyField(button),
+);

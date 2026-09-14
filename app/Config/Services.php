@@ -6,6 +6,7 @@ use App\Repositories\AirportMovementRepository;
 use App\Repositories\AuditLogRepository;
 use App\Repositories\ChargingCostRepository;
 use App\Repositories\FileRepository;
+use App\Repositories\FleetExtraRepository;
 use App\Repositories\FleetIntelligenceRepository;
 use App\Repositories\FleetVehicleRepository;
 use App\Repositories\LookupRepository;
@@ -40,6 +41,7 @@ use App\Services\Fleet\FinancialActivityReadService;
 use App\Services\Fleet\FinancialSummaryService;
 use App\Services\Fleet\FleetCommandCenterViewModelService;
 use App\Services\Fleet\FleetCommandService;
+use App\Services\Fleet\FleetExtraService;
 use App\Services\Fleet\FleetHealthService;
 use App\Services\Fleet\FleetSnapshotService;
 use App\Services\Fleet\FleetStatisticsService;
@@ -77,6 +79,7 @@ use App\Services\Fleet\VehiclePositioningPlanService;
 use App\Services\Fleet\VehiclePositioningPlanWorkflowService;
 use App\Services\Fleet\VehiclePositioningRecommendationService;
 use App\Services\Turo\TuroEarningsImportService;
+use App\Services\Turo\TuroExtrasImportService;
 use App\Services\Turo\TuroImportIssueService;
 use App\Services\Turo\TuroTransactionRelinkingService;
 use App\Services\Turo\TuroTripImportService;
@@ -100,6 +103,33 @@ use CodeIgniter\Config\BaseService;
  */
 class Services extends BaseService
 {
+    public static function fleetExtraRepository(bool $getShared = true): FleetExtraRepository
+    {
+        if ($getShared) {
+            return static::getSharedInstance('fleetExtraRepository');
+        }
+
+        return new FleetExtraRepository();
+    }
+
+    public static function fleetExtraService(bool $getShared = true): FleetExtraService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('fleetExtraService');
+        }
+
+        return new FleetExtraService(static::fleetExtraRepository());
+    }
+
+    public static function turoExtrasImportService(bool $getShared = true): TuroExtrasImportService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('turoExtrasImportService');
+        }
+
+        return new TuroExtrasImportService(static::fleetExtraRepository());
+    }
+
     public static function turoNormalizedTransactionRepository(bool $getShared = true): TuroNormalizedTransactionRepository
     {
         if ($getShared) {

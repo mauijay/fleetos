@@ -89,7 +89,7 @@
                     <span class="count-pill">trip_earnings_export</span>
                 </div>
 
-                <p><a class="text-link" href="/turo/import-issues">Open Import Issues</a> · <a class="text-link" href="/turo/vehicle-matches">Open Vehicle Matching</a></p>
+                <p><a class="text-link" href="/turo/extras">Open Extras Import</a> · <a class="text-link" href="/turo/import-issues">Open Import Issues</a> · <a class="text-link" href="/turo/vehicle-matches">Open Vehicle Matching</a></p>
 
                 <form class="upload-form" action="/turo/imports" method="post" enctype="multipart/form-data">
                     <?= csrf_field() ?>

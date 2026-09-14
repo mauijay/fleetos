@@ -96,6 +96,7 @@ class FleetCommandCenterViewModelService
             ['label' => 'Incidentals Review', 'href' => '/operations/incidentals', 'active' => 'false'],
             ['label' => 'Location Aliases', 'href' => '/operations/movement-locations', 'active' => 'false'],
             ['label' => 'Turo Import', 'href' => '/turo/imports', 'active' => 'false'],
+            ['label' => 'Extras Import', 'href' => '/turo/extras', 'active' => 'false'],
             ['label' => 'Import Issues', 'href' => '/turo/import-issues', 'active' => 'false'],
             ['label' => 'Vehicle Matching', 'href' => '/turo/vehicle-matches', 'active' => 'false'],
             ['label' => 'Decision Support', 'href' => '#decision-support', 'active' => 'false'],

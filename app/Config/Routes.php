@@ -13,6 +13,14 @@ $routes->group('', ['filter' => 'session'], static function (RouteCollection $ro
     $routes->get('turo/imports', 'TuroImports::index', ['filter' => 'permission:admin.access']);
     $routes->post('turo/imports', 'TuroImports::store', ['filter' => 'permission:admin.access']);
     $routes->post('turo/earnings-imports', 'TuroImports::storeEarnings', ['filter' => 'permission:admin.access']);
+    $routes->group('turo/extras', ['filter' => 'permission:admin.access'], static function (RouteCollection $routes): void {
+        $routes->get('', 'TuroExtras::index');
+        $routes->post('import', 'TuroExtras::import');
+        $routes->post('catalog', 'TuroExtras::createExtra');
+        $routes->post('catalog/(:num)', 'TuroExtras::updateExtra/$1');
+        $routes->post('mappings', 'TuroExtras::mapSource');
+        $routes->post('mappings/create-extra', 'TuroExtras::createAndMap');
+    });
     $routes->get('turo/import-issues', 'TuroImportIssues::index', ['filter' => 'permission:admin.access']);
     $routes->post('turo/import-issues/(:num)/resolve', 'TuroImportIssues::resolve/$1', ['filter' => 'permission:admin.access']);
     $routes->post('turo/import-issues/(:num)/reopen', 'TuroImportIssues::reopen/$1', ['filter' => 'permission:admin.access']);

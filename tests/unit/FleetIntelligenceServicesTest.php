@@ -555,8 +555,8 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
             'Incidentals Review',
             'Location Aliases',
             'Turo Import',
+            'Extras Import',
             'Import Issues',
-            'Vehicle Matching',
         ], array_slice(array_column($viewModel['navigation'], 'label'), 0, 8));
         $this->assertSame('true', $viewModel['navigation'][0]['active']);
         $this->assertNotContains('Fleet', array_column($viewModel['navigation'], 'label'));
