@@ -1,5 +1,59 @@
 # Changelog
 
+## v0.11.0 — Vehicle Financial Results
+
+Release date: 2026-09-13
+
+### Vehicle Financial Results
+
+- Add company-scoped per-vehicle attributable financial reporting.
+- Show Attributable Realized Operating Revenue, Attributable Realized Recoveries, Vehicle-attributable Costs, and Attributable Net Realized Operating Result.
+- Present attributable operating results without claiming complete accounting profitability.
+
+### Fleet-wide / Unallocated Costs
+
+- Keep fleet-wide expenses separate instead of artificially spreading them across vehicles.
+- Keep unallocated Airport expense residuals separately visible.
+- Reconcile vehicle-attributable costs plus fleet-wide/unallocated costs exactly to fleet Recorded Operating Costs.
+
+### Source Attribution
+
+- Use authoritative signed operating-revenue postings for Turo revenue.
+- Require explicit vehicle linkage for generic operating expenses.
+- Attribute completed maintenance and ended charging directly to their vehicles.
+- Use only explicit Airport expense allocations for Airport vehicle costs.
+- Do not infer attribution through fuzzy amount, date, or nearest-trip matching.
+
+### Reconciliation
+
+- Reconcile vehicle rows back to the fleet financial summary with cent-safe arithmetic.
+- Keep source records authoritative without duplicating them into a synthetic financial ledger.
+
+### Periods & Sorting
+
+- Support Current month, Previous month, and Custom date ranges using Honolulu business-date semantics.
+- Support safe allowlisted sorting and default to the highest attributable net realized result first.
+
+### Vehicle Drill-down
+
+- Add factual source-backed vehicle financial details for Turo revenue, generic expenses, maintenance, charging, and Airport allocations.
+
+### Reporting Boundaries
+
+- Keep fleet-wide/unallocated costs outside individual vehicle results.
+- Exclude loan, insurance, capital/startup, ambiguous Turo fees, and forecast amounts from vehicle realized results.
+- Continue deferring trip-level profitability and omit legacy ROI/profitability labels from the new report.
+
+### Command Center
+
+- Add a small View vehicle financial results link.
+- Keep the fleet-level Financial Snapshot and v0.10.1 Command Center planning unchanged.
+
+### Movement Checklist Polish
+
+- Align Confirm and Record facts controls consistently.
+- Preserve existing POST, CSRF, and duplicate-submit protections.
+
 ## v0.10.1 — Command Center Planning
 
 Release date: 2026-09-13
