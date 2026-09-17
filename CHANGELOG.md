@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.12.1 — Extras Export Compatibility & UI Containment
+
+Release date: 2026-09-16
+
+### Turo Extras Export Compatibility
+
+- Support real reservation Extra payloads using `extraType.label` and `extraType.value` for source identity, `extraPricingType` for pricing type, and `priceWithCurrency.amount` and `priceWithCurrency.currencyCode` for the selected historical price and currency.
+- Normalize safe numeric source IDs to exact strings, preserve explicit quantities including values greater than one, and leave omitted quantity `NULL`-compatible.
+- Read only explicit `booking.extras` or `cancelledRequest.extras` arrays: an empty array is a complete snapshot, while a missing or malformed array remains a failure rather than a zero-Extra snapshot.
+- Retain the strict sanitized output whitelist; guest, private, authentication, and unrelated reservation data are not exported.
+
+### Extras Import Workspace
+
+- Keep unmapped Extra mapping selects, buttons, and create-new disclosures inside their cards, including narrow cards in populated four-card layouts without horizontal overflow.
+- Make no schema, migration, financial-posting, or financial-reporting changes.
+
 ## v0.12.0 — Extras Source Foundation
 
 Release date: 2026-09-13
