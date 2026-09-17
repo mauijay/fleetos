@@ -2228,14 +2228,29 @@ h3 {
   padding: 16px;
 }
 
-.fleet-snapshot h2 {
-  margin-bottom: 4px;
+.activity-panel .panel-card {
+  min-width: 0;
 }
 
-.fleet-snapshot__context {
-  margin: 0 0 12px;
-  color: var(--subtle);
+.rail-heading h2 {
+  font-size: 18px;
+}
+
+.rail-heading__context {
+  margin: 4px 0 12px;
+  color: var(--muted);
   font-size: 12px;
+  line-height: 1.5;
+}
+
+.activity-panel .rail-dataset {
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--muted);
+  overflow-wrap: anywhere;
 }
 
 .fleet-snapshot__buckets {
@@ -2246,15 +2261,19 @@ h3 {
   list-style: none;
 }
 
-.fleet-snapshot__buckets li {
+.fleet-snapshot__buckets .rail-dataset {
   display: grid;
-  grid-template-columns: 62px minmax(0, 1fr);
+  grid-template-columns: max-content minmax(0, 1fr);
   align-items: start;
   gap: 8px;
+  padding: 10px 12px;
 }
 
 .fleet-snapshot__label {
+  color: var(--text);
   line-height: 1.5;
+  white-space: nowrap;
+  overflow-wrap: normal;
 }
 
 .fleet-snapshot__vehicles {
@@ -2289,7 +2308,7 @@ h3 {
   list-style: none;
 }
 
-.activity-list li {
+.activity-list .rail-dataset {
   padding: 0;
   overflow: hidden;
 }
@@ -2300,8 +2319,10 @@ h3 {
   grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 8px;
-  min-height: 40px;
-  padding: 8px;
+  min-width: 0;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
   color: var(--subtle);
   font-size: 12px;
   text-decoration: none;
@@ -2317,6 +2338,12 @@ h3 {
   color: var(--success);
 }
 
+.activity-list__link span,
+.activity-list__clear span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .activity-list__link:hover,
 .activity-list__link:focus-visible {
   background: rgba(56, 189, 248, 0.12);
@@ -2327,6 +2354,21 @@ h3 {
 .integration-chip strong {
   color: var(--muted);
   font-size: 12px;
+}
+
+.activity-panel .signal-list {
+  display: grid;
+  gap: 8px;
+}
+
+.signal-list .rail-dataset {
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+.signal-list .rail-dataset span {
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .text-link,
@@ -3628,18 +3670,14 @@ h3 {
     padding: 12px 16px 0;
   }
 
-  .activity-panel .future-signals {
-    display: none;
+  .activity-panel > .panel-card {
+    width: 100%;
+    max-width: 620px;
+    margin-inline: auto;
   }
 
-  .fleet-snapshot {
-    max-width: 620px;
-    margin: 0 auto;
-  }
-
-  .operations-queue-summary {
-    max-width: 620px;
-    margin: 12px auto 0;
+  .activity-panel > .panel-card + .panel-card {
+    margin-top: 12px;
   }
 
   h1 {

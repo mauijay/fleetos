@@ -97,15 +97,27 @@
 
             <section class="section" id="operations-status" aria-labelledby="operations-status-heading">
                 <div class="section-heading">
-                    <p class="eyebrow">Fleet Status</p>
+                    <p class="eyebrow">Daily Operations</p>
                     <h2 id="operations-status-heading">Daily Counts</h2>
                 </div>
+                <?php $dailyCounts = [
+                    'going_out_today' => ['label' => 'Going Out Today', 'period' => 'Today'],
+                    'returning_today' => ['label' => 'Returning Today', 'period' => 'Today'],
+                    'same_day_turnarounds' => ['label' => 'Same-Day Turnarounds', 'period' => 'Today'],
+                    'cleaning_needed' => ['label' => 'Cleaning Needed', 'period' => 'Current action'],
+                    'charging_needed' => ['label' => 'Charging Needed', 'period' => 'Current action'],
+                    'maintenance_attention' => ['label' => 'Maintenance Attention', 'period' => 'Current action'],
+                    'utilization_percent' => ['label' => 'Month-to-date utilization', 'period' => 'Current month'],
+                ]; ?>
                 <div class="metric-grid status-grid">
-                    <?php foreach ($commandCenter['daily_operations']['fleet_status'] as $label => $value): ?>
+                    <?php foreach ($dailyCounts as $code => $metric): ?>
+                        <?php if (! array_key_exists($code, $commandCenter['daily_operations']['fleet_status'])) {
+                            continue;
+                        } ?>
                         <a class="metric-card tone-neutral" href="#movement-board">
-                            <span><?= esc(ucwords(str_replace('_', ' ', $label))) ?></span>
-                            <strong><?= esc((string) $value) ?></strong>
-                            <small>Today</small>
+                            <span><?= esc($metric['label']) ?></span>
+                            <strong><?= esc((string) $commandCenter['daily_operations']['fleet_status'][$code]) ?><?= $code === 'utilization_percent' ? '%' : '' ?></strong>
+                            <small><?= esc($metric['period']) ?></small>
                         </a>
                     <?php endforeach; ?>
                 </div>

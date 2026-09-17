@@ -28,13 +28,51 @@ final class FleetSnapshotViewTest extends CIUnitTestCase
         $css = file_get_contents(dirname(__DIR__, 2) . '/resources/css/app.css');
 
         $this->assertIsString($css);
-        $this->assertStringContainsString('.fleet-snapshot__buckets li', $css);
-        $this->assertStringContainsString('grid-template-columns: 62px minmax(0, 1fr)', $css);
+        $this->assertStringContainsString('.fleet-snapshot__buckets .rail-dataset', $css);
+        $this->assertStringContainsString('grid-template-columns: max-content minmax(0, 1fr)', $css);
+        $this->assertMatchesRegularExpression('/\.fleet-snapshot__label\s*\{[^}]*white-space: nowrap;[^}]*overflow-wrap: normal;/s', $css);
+        $this->assertMatchesRegularExpression('/\.fleet-snapshot__vehicles\s*\{[^}]*min-width: 0;[^}]*overflow-wrap: anywhere;/s', $css);
         $this->assertStringContainsString('overflow-wrap: anywhere', $css);
         $this->assertStringContainsString('grid-template-areas:', $css);
         $this->assertStringContainsString('grid-area: snapshot', $css);
-        $this->assertStringContainsString('.activity-panel .future-signals', $css);
-        $this->assertStringContainsString('.operations-queue-summary', $css);
+        $this->assertStringContainsString('.activity-panel > .panel-card + .panel-card', $css);
+        $this->assertDoesNotMatchRegularExpression('/\.activity-panel \.future-signals\s*\{[^}]*display:\s*none;/s', $css);
+        $this->assertMatchesRegularExpression('/\.activity-panel \.rail-dataset\s*\{[^}]*border: 1px solid var\(--line\);[^}]*border-radius: var\(--radius\);[^}]*background: var\(--surface-2\);/s', $css);
+        $this->assertMatchesRegularExpression('/\.activity-list__link,\s*\.activity-list__clear\s*\{[^}]*min-height: 44px;/s', $css);
+    }
+
+    public function testDailyCountsShowOnlyOperationalMetricsAndRetainLiveFleetStatus(): void
+    {
+        $view = file_get_contents(dirname(__DIR__, 2) . '/app/Views/fleet_command_center/index.php');
+
+        $this->assertIsString($view);
+        $this->assertSame(1, preg_match('/<section class="section" id="operations-status".*?<\/section>/s', $view, $match));
+        $dailyCounts = $match[0];
+        foreach (['going_out_today', 'returning_today', 'same_day_turnarounds', 'cleaning_needed', 'charging_needed', 'maintenance_attention', 'utilization_percent'] as $code) {
+            $this->assertStringContainsString("'" . $code . "' =>", $dailyCounts);
+        }
+        foreach (['fleet_size', 'currently_rented', 'home', 'hnl', 'other_location', 'unknown_location', 'available_now', 'offline_or_unavailable'] as $code) {
+            $this->assertStringNotContainsString("'" . $code . "' =>", $dailyCounts);
+        }
+        $this->assertStringContainsString("'utilization_percent' => ['label' => 'Month-to-date utilization', 'period' => 'Current month']", $dailyCounts);
+        $this->assertStringContainsString("\$commandCenter['daily_operations']['fleet_status'][\$code]", $dailyCounts);
+        $this->assertStringContainsString('id="fleet-status"', $view);
+        $this->assertStringContainsString("foreach (\$commandCenter['fleet_status'] as \$card)", $view);
+    }
+
+    public function testRightRailUsesMatchingHeadingsAndSharedRowsWithoutChangingQueueSemantics(): void
+    {
+        $html = html_entity_decode(CoreServices::renderer()->setData(['activity' => $this->activity()])->render('fleet_command_center/components/activity_panel'), ENT_QUOTES | ENT_HTML5);
+
+        $this->assertSame(3, substr_count($html, 'class="rail-heading"'));
+        $this->assertSame(3, substr_count($html, 'class="eyebrow"'));
+        $this->assertSame(3, substr_count($html, 'class="rail-heading__context"'));
+        $this->assertSame(9, substr_count($html, 'class="rail-dataset"'));
+        $this->assertStringContainsString('<section class="panel-card future-signals" aria-labelledby="external-context-heading">', $html);
+        $this->assertStringContainsString('href="/?queue=today#operational-queue"', $html);
+        $this->assertStringContainsString('href="/?queue=tomorrow#operational-queue"', $html);
+        $this->assertStringNotContainsString('href="/?queue=urgent#operational-queue"', $html);
+        $this->assertStringContainsString('Weather alerts <span>Reserved</span>', $html);
     }
 
     public function testPositiveActivityScopesLinkToQueueAndZeroScopeIsClear(): void
