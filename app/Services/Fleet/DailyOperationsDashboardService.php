@@ -55,7 +55,7 @@ class DailyOperationsDashboardService
         $board = $this->stateService->movementBoard($vehicles, $today, $health, $asOf);
         $board = $this->attachCurrentPositions($board, $fleetSnapshot['vehicles']);
         $board = $this->attachChecklistSummaries($board, $checklists);
-        $board = $this->movementBoardIntelligence()->enrich($board, $asOf);
+        $board = $this->movementBoardIntelligence()->enrich($board, $asOf, $companyId);
 
         $externalAlerts = $this->externalAlerts($importIssues, $vehicleMappings, $reconciliation, $airport, $reimbursements, $health);
         $attention = $this->stateService->immediateAttention($board, $externalAlerts);
@@ -68,7 +68,7 @@ class DailyOperationsDashboardService
             'movement_filter' => $this->movementFilterView($movementFilter, count($board), count($filteredBoard)),
             'timeline' => $this->attachChecklistTimeline($this->stateService->timeline($today, $asOf), $checklists),
             'attention' => $attention,
-            'fleet_status' => $this->stateService->statusCounts($board, (float) $currentMonth['fleet_utilization'], $fleetSnapshot),
+            'fleet_status' => $this->stateService->statusCounts($board, (float) $currentMonth['fleet_utilization'], $fleetSnapshot, $today),
             'operational_queue' => $this->operationalQueue($today, $attention, $importIssues, $vehicleMappings, $reconciliation, $airport, $reimbursements, $incidentals, $expenses, $checklists),
             'financial' => [
                 'Realized Operating Revenue' => '$' . number_format((float) $financialSummary['realized_operating_revenue'], 2),
@@ -284,26 +284,46 @@ class DailyOperationsDashboardService
             $additional = array_sum(array_map(static fn (array $summary): int => (int) $summary['additional_actions_remaining_count'], $vehicleChecklists));
             $blockers = [];
             $turnaroundRemaining = 0;
+            $energyMissing = false;
+            $energyBelowTarget = false;
             foreach ($vehicleChecklists as $summary) {
                 $projection = $summary['readiness_projection'];
                 foreach ($projection['requirements'] as $requirement) {
+                    if (in_array($requirement['phase'] ?? null, [MovementReadinessProjectionService::PHASE_PICKUP_PREPARATION, MovementReadinessProjectionService::PHASE_NEXT_PICKUP_PREPARATION], true)
+                        && ($requirement['status'] ?? null) === MovementReadinessProjectionService::STATUS_UNSATISFIED
+                        && ($requirement['actionable'] ?? true)) {
+                        $energyMissing = $energyMissing || ($requirement['code'] ?? null) === 'energy_known';
+                        $energyBelowTarget = $energyBelowTarget || ($requirement['code'] ?? null) === 'energy_ready';
+                    }
                     if (($requirement['phase'] ?? null) === ($projection['readiness_phase'] ?? null)
                         && ($requirement['blocking'] ?? false)
-                        && ($requirement['status'] ?? null) === MovementReadinessProjectionService::STATUS_UNSATISFIED) {
+                        && ($requirement['status'] ?? null) === MovementReadinessProjectionService::STATUS_UNSATISFIED
+                        && ($requirement['actionable'] ?? true)) {
                         $blockers[] = array_merge($requirement, ['href' => $summary['href']]);
                     }
                     if (($projection['is_same_day_turnaround'] ?? false)
                         && ($requirement['phase'] ?? null) === MovementReadinessProjectionService::PHASE_NEXT_PICKUP_PREPARATION
                         && ($requirement['blocking'] ?? false)
-                        && ($requirement['status'] ?? null) === MovementReadinessProjectionService::STATUS_UNSATISFIED) {
+                        && ($requirement['status'] ?? null) === MovementReadinessProjectionService::STATUS_UNSATISFIED
+                        && ($requirement['actionable'] ?? true)) {
                         $turnaroundRemaining++;
                         $blockers[] = array_merge($requirement, ['href' => $summary['href']]);
                     }
                 }
             }
             $first = $vehicleChecklists[0] ?? null;
+            $flags = array_values(array_unique(array_merge($vehicle['flags'] ?? [], $energyMissing ? ['energy_check_required'] : ($energyBelowTarget ? ['charging_required'] : []))));
+            $chargeAction = $energyMissing ? 'Record Charge/Fuel percentage' : ($energyBelowTarget ? 'Charge/Fuel to pickup target' : null);
+            $actions = $vehicle['actions'] ?? [];
+            if ($chargeAction !== null) {
+                $actions = array_values(array_filter($actions, static fn (string $action): bool => $action !== 'No action due'));
+                $actions[] = $chargeAction;
+            }
 
             return array_merge($vehicle, [
+                'flags' => $flags,
+                'actions' => $actions,
+                'charging_status_label' => $energyMissing ? 'Charge/Fuel not captured' : ($energyBelowTarget ? 'Below pickup target' : 'No actionable Charge/Fuel preparation recorded'),
                 'checklists' => $vehicleChecklists,
                 'checklist_progress_label' => $vehicleChecklists === [] ? 'No movement workflow today' : ($remaining === 0 ? 'Ready' : $remaining . ' blocking action' . ($remaining === 1 ? '' : 's') . ' remaining'),
                 'checklist_ready' => $vehicleChecklists !== [] && $remaining === 0,
@@ -314,7 +334,7 @@ class DailyOperationsDashboardService
                 'readiness_blockers' => $blockers,
                 'readiness_primary_action' => $blockers[0]['action']['label'] ?? null,
                 'turnaround_readiness_remaining' => $turnaroundRemaining,
-                'checklist_href' => $first['href'] ?? null,
+                'checklist_href' => $blockers[0]['href'] ?? $first['href'] ?? null,
             ]);
         }, $board);
     }

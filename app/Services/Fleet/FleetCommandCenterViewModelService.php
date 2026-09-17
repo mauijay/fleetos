@@ -51,10 +51,10 @@ class FleetCommandCenterViewModelService
         $timelineStart = $asOf->setTimezone($this->businessTimezone())->setTime(0, 0);
         $timelineEnd = $timelineStart->modify('+7 days');
         $timelineItems = $this->availability()->timeline($timelineStart, $timelineEnd, $companyId);
-        $timelineCompletions = $this->operationalFacts()->authoritativeMovementCompletionsForCompany(
+        $timelineCompletions = (new OperationalMovementWorkService($this->operationalFacts()))->completionsForCompany(
             $companyId,
             $this->timelineTripIds($timelineItems),
-            $asOf->setTimezone($this->businessTimezone())->format('Y-m-d H:i:s'),
+            $asOf->setTimezone($this->businessTimezone()),
         );
         $tripAnalytics = $this->tripAnalytics()->summary(new DateTimeImmutable($asOf->format('Y-01-01 00:00:00')), $timelineEnd);
         $decisionSupport = $this->decisionSupport()->recommendations($asOf);
@@ -144,14 +144,14 @@ class FleetCommandCenterViewModelService
             $this->taskCard('Charging Required', $today['charging_tasks'], 'charging', 'neutral'),
             $this->taskCard('Registration Due', $today['registration_renewals'], 'registration', 'danger'),
             $this->taskCard('Insurance Due', $today['insurance_renewals'], 'insurance', 'danger'),
-            $this->taskCard('Loan Payments Due', $today['loan_payments'], 'loan', 'warning'),
+            $this->taskCard('Loan Payments Due', $today['loan_payments'], 'loan', 'neutral'),
             $this->taskCard('Claims Requiring Follow-up', $today['claims'], 'claim', 'danger'),
         ];
     }
 
     private function missionClear(array $today): bool
     {
-        foreach ($today as $tasks) {
+        foreach (array_diff_key($today, ['loan_payments' => true]) as $tasks) {
             if (is_array($tasks) && count($tasks) > 0) {
                 return false;
             }
@@ -184,11 +184,10 @@ class FleetCommandCenterViewModelService
     }
 
     /** @return array{today_date:string,groups:list<array{date:string,label:string,events:list<array<string,mixed>>}>,count:int,completed_today:list<array<string,mixed>>,completed_count:int} */
-    private function fleetTimeline(array $items, array $vehicles, array $todayReadiness, DateTimeImmutable $startsAt, DateTimeImmutable $endsAt, array $completionFacts = []): array
+    private function fleetTimeline(array $items, array $vehicles, array $todayReadiness, DateTimeImmutable $startsAt, DateTimeImmutable $endsAt, array $completionsByMovement = []): array
     {
         $vehiclesById = array_column($vehicles, null, 'fleet_vehicle_id');
         $readinessByMovement = $this->readinessByMovement($todayReadiness);
-        $completionsByMovement = $this->completionByMovement($completionFacts);
         $events = [];
         $pickupIndexes = [];
 
@@ -351,32 +350,6 @@ class FleetCommandCenterViewModelService
         return array_values(array_unique($tripIds));
     }
 
-    /** @return array<string, array<string, mixed>> */
-    private function completionByMovement(array $facts): array
-    {
-        $completions = [];
-        foreach ($facts as $fact) {
-            $tripId = (int) ($fact['turo_trip_normalized_id'] ?? 0);
-            $eventCode = (string) ($fact['event_code'] ?? '');
-            $movementType = match ($eventCode) {
-                'actual_handoff' => 'pickup',
-                'actual_return', 'vehicle_recovered' => 'return',
-                default => null,
-            };
-            $recordedAt = trim((string) ($fact['created_at'] ?? $fact['occurred_at'] ?? ''));
-            if ($tripId < 1 || $movementType === null || $recordedAt === '') {
-                continue;
-            }
-
-            $key = $tripId . ':' . $movementType;
-            if (! isset($completions[$key]) || $recordedAt > $completions[$key]['recorded_at']) {
-                $completions[$key] = array_merge($fact, ['recorded_at' => $recordedAt]);
-            }
-        }
-
-        return $completions;
-    }
-
     /** @return array<string, array<string, string>> */
     private function readinessByMovement(array $events): array
     {
@@ -517,9 +490,9 @@ class FleetCommandCenterViewModelService
     {
         return [
             'fleet_snapshot' => $fleetSnapshot,
-            'today_count' => $this->taskCount($today),
-            'tomorrow_count' => $this->taskCount($tomorrow),
-            'urgent_count' => $this->taskCount($command['urgent_items']),
+            'today_count' => (int) $queueView['scopes'][1]['count'],
+            'tomorrow_count' => (int) $queueView['scopes'][2]['count'],
+            'urgent_count' => (int) $queueView['scopes'][3]['count'],
             'queue_scopes' => $queueView['scopes'],
             'weather_alerts' => $command['weather_alerts'],
             'traffic_alerts' => $command['traffic_alerts'],
@@ -534,20 +507,24 @@ class FleetCommandCenterViewModelService
     private function queueView(?string $activeScope, array $today, array $tomorrow, array $urgent, array $defaultActions): array
     {
         $activeScope = in_array($activeScope, ['today', 'tomorrow', 'urgent'], true) ? $activeScope : null;
+        $todayActions = $this->timeScopedActions($today, 'today');
+        $tomorrowActions = $this->timeScopedActions($tomorrow, 'tomorrow');
+        $urgentActions = $this->urgentActions($urgent);
+        $countActions = static fn (array $actions): int => array_sum(array_map(static fn (array $action): int => (int) $action['count'], $actions));
         $scopes = [
             ['code' => 'all', 'label' => 'All', 'count' => null, 'href' => '/#operational-queue', 'active' => $activeScope === null, 'actionable' => true],
-            ['code' => 'today', 'label' => 'Today', 'count' => $this->taskCount($today), 'href' => '/?queue=today#operational-queue', 'active' => $activeScope === 'today'],
-            ['code' => 'tomorrow', 'label' => 'Tomorrow', 'count' => $this->taskCount($tomorrow), 'href' => '/?queue=tomorrow#operational-queue', 'active' => $activeScope === 'tomorrow'],
-            ['code' => 'urgent', 'label' => 'Urgent', 'count' => $this->taskCount($urgent), 'href' => '/?queue=urgent#operational-queue', 'active' => $activeScope === 'urgent'],
+            ['code' => 'today', 'label' => 'Today', 'count' => $countActions($todayActions), 'href' => '/?queue=today#operational-queue', 'active' => $activeScope === 'today'],
+            ['code' => 'tomorrow', 'label' => 'Tomorrow', 'count' => $countActions($tomorrowActions), 'href' => '/?queue=tomorrow#operational-queue', 'active' => $activeScope === 'tomorrow'],
+            ['code' => 'urgent', 'label' => 'Urgent', 'count' => $countActions($urgentActions), 'href' => '/?queue=urgent#operational-queue', 'active' => $activeScope === 'urgent'],
         ];
         $scopes = array_map(static fn (array $scope): array => array_merge($scope, [
             'actionable' => ($scope['count'] ?? null) === null || (int) $scope['count'] > 0,
         ]), $scopes);
 
         $items = match ($activeScope) {
-            'today' => $this->timeScopedActions($today, 'today'),
-            'tomorrow' => $this->timeScopedActions($tomorrow, 'tomorrow'),
-            'urgent' => $this->urgentActions($urgent),
+            'today' => $todayActions,
+            'tomorrow' => $tomorrowActions,
+            'urgent' => $urgentActions,
             default => $defaultActions,
         };
 
@@ -572,7 +549,6 @@ class FleetCommandCenterViewModelService
             'maintenance_tasks' => ['Maintenance Tasks', '/#fleet-health'],
             'registration_renewals' => ['Registration Renewals', '/#fleet-health'],
             'insurance_renewals' => ['Insurance Renewals', '/#fleet-health'],
-            'loan_payments' => ['Loan Payments', '/#financial-snapshot'],
             'claims' => ['Claims Follow-up', '/#fleet-health'],
         ];
 
@@ -604,11 +580,6 @@ class FleetCommandCenterViewModelService
         }
 
         return $actions;
-    }
-
-    private function taskCount(array $tasks): int
-    {
-        return array_sum(array_map(static fn (mixed $items): int => is_array($items) ? count($items) : 0, $tasks));
     }
 
     /** @return array<int, array<string, string>> */

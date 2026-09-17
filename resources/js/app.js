@@ -4,6 +4,7 @@ import { createPostSubmissionGuard } from "./form-submit-guard.js";
 import { resolveHnlParkingState } from "./hnl-parking-state.js";
 import { combineLocalDateTime } from "./local-datetime.js";
 import { initializeCopyField } from "./copy-field.js";
+import { focusChecklistAnchor } from "./checklist-focus.js";
 
 const postSubmissionGuard = createPostSubmissionGuard(document.documentElement);
 document.addEventListener("submit", postSubmissionGuard.handleSubmit);
@@ -118,3 +119,5 @@ document.querySelectorAll("[data-repair-preview]").forEach((preview) => {
 document.querySelectorAll("[data-copy-target]").forEach((button) =>
   initializeCopyField(button),
 );
+
+focusChecklistAnchor(document, window.location.hash);

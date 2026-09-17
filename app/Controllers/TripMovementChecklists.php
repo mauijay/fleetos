@@ -3,6 +3,7 @@
 namespace App\Controllers;
 
 use App\Exceptions\EarlyHandoffConfirmationRequired;
+use App\Services\Fleet\ChecklistActionFocusService;
 use CodeIgniter\Config\Services as CoreServices;
 use CodeIgniter\HTTP\RedirectResponse;
 use CodeIgniter\Shield\Config\Services as ShieldServices;
@@ -89,42 +90,54 @@ class TripMovementChecklists extends BaseController
 
     public function completeItem(int $id): RedirectResponse
     {
-        return $this->back(Services::tripMovementChecklistService()->completeItem($id, $this->request->getPost('note'), $this->actorUserId()), 'Item completed.', 'That checklist item could not be completed.');
+        $item = Services::movementChecklistRepository()->itemForCompany($this->activeCompanyId(), $id);
+        if ($item === null) {
+            return CoreServices::redirectresponse()->to('/')->with('movement_checklist_error', 'Checklist item not found.');
+        }
+        return $this->back((int) $item['trip_movement_checklist_id'], Services::tripMovementChecklistService()->completeItemForCompany($this->activeCompanyId(), $id, $this->request->getPost('note'), $this->actorUserId()), 'Item completed.', 'That checklist item could not be completed.', (new ChecklistActionFocusService())->actionAnchor((string) $item['item_code']));
     }
 
     public function undoItem(int $id): RedirectResponse
     {
-        return $this->back(Services::tripMovementChecklistService()->undoItem($id, $this->actorUserId()), 'Item reopened.', 'That checklist item could not be reopened.');
+        $item = Services::movementChecklistRepository()->itemForCompany($this->activeCompanyId(), $id);
+        if ($item === null) {
+            return CoreServices::redirectresponse()->to('/')->with('movement_checklist_error', 'Checklist item not found.');
+        }
+        return $this->back((int) $item['trip_movement_checklist_id'], Services::tripMovementChecklistService()->undoItem($id, $this->actorUserId()), 'Item reopened.', 'That checklist item could not be reopened.', (new ChecklistActionFocusService())->actionAnchor((string) $item['item_code']));
     }
 
     public function markNotApplicable(int $id): RedirectResponse
     {
-        return $this->back(Services::tripMovementChecklistService()->markNotApplicable($id, $this->request->getPost('note'), $this->actorUserId()), 'Item marked not applicable.', 'That checklist item could not be changed.');
+        $item = Services::movementChecklistRepository()->itemForCompany($this->activeCompanyId(), $id);
+        if ($item === null) {
+            return CoreServices::redirectresponse()->to('/')->with('movement_checklist_error', 'Checklist item not found.');
+        }
+        return $this->back((int) $item['trip_movement_checklist_id'], Services::tripMovementChecklistService()->markNotApplicable($id, $this->request->getPost('note'), $this->actorUserId()), 'Item marked not applicable.', 'That checklist item could not be changed.', (new ChecklistActionFocusService())->actionAnchor((string) $item['item_code']));
     }
 
     public function completePhotos(int $id): RedirectResponse
     {
-        return $this->back(Services::tripMovementChecklistService()->completePickupPhotos($id, $this->activeCompanyId(), $this->actorUserId()), 'Photos marked complete.', 'Pickup photos could not be completed.');
+        return $this->back($id, Services::tripMovementChecklistService()->completePickupPhotos($id, $this->activeCompanyId(), $this->actorUserId()), 'Photos marked complete.', 'Pickup photos could not be completed.', 'checklist-action-photos_complete');
     }
 
     public function undoPhotos(int $id): RedirectResponse
     {
-        return $this->back(Services::tripMovementChecklistService()->undoPickupPhotos($id, $this->activeCompanyId(), $this->actorUserId()), 'Photos reopened.', 'Pickup photos could not be reopened.');
+        return $this->back($id, Services::tripMovementChecklistService()->undoPickupPhotos($id, $this->activeCompanyId(), $this->actorUserId()), 'Photos reopened.', 'Pickup photos could not be reopened.', 'checklist-action-photos_complete');
     }
 
     public function confirmChargingAdapter(int $id): RedirectResponse
     {
-        return $this->back(Services::tripMovementChecklistService()->confirmChargingAdapter($id, $this->activeCompanyId(), $this->actorUserId()), 'Charging adapter confirmed.', 'Charging adapter could not be confirmed.');
+        return $this->back($id, Services::tripMovementChecklistService()->confirmChargingAdapter($id, $this->activeCompanyId(), $this->actorUserId()), 'Charging adapter confirmed.', 'Charging adapter could not be confirmed.', 'checklist-action-charging_adapter_confirmed');
     }
 
     public function undoChargingAdapter(int $id): RedirectResponse
     {
-        return $this->back(Services::tripMovementChecklistService()->undoChargingAdapter($id, $this->activeCompanyId(), $this->actorUserId()), 'Charging adapter reopened.', 'Charging adapter could not be reopened.');
+        return $this->back($id, Services::tripMovementChecklistService()->undoChargingAdapter($id, $this->activeCompanyId(), $this->actorUserId()), 'Charging adapter reopened.', 'Charging adapter could not be reopened.', 'checklist-action-charging_adapter_confirmed');
     }
 
     public function setDisposition(int $id): RedirectResponse
     {
-        return $this->back(Services::tripMovementChecklistService()->setDisposition($id, (string) $this->request->getPost('vehicle_disposition'), $this->actorUserId()), 'Exceptional hold saved.', 'Choose a valid exceptional hold.');
+        return $this->back($id, Services::tripMovementChecklistService()->setDisposition($id, (string) $this->request->getPost('vehicle_disposition'), $this->actorUserId()), 'Exceptional hold saved.', 'Choose a valid exceptional hold.', 'exceptional-disposition');
     }
 
     public function complete(int $id): RedirectResponse
@@ -135,13 +148,13 @@ class TripMovementChecklists extends BaseController
             ? (Services::movementReadinessReadService()->forCompany($companyId, [$id])[$id] ?? null)
             : null;
 
-        return $this->back(Services::tripMovementChecklistService()->completeChecklist($id, $this->request->getPost('completion_note'), $this->actorUserId(), ($readiness['ready'] ?? false) === true), 'Movement workflow completed.', 'Complete current readiness actions before closing this workflow.');
+        return $this->back($id, Services::tripMovementChecklistService()->completeChecklist($id, $this->request->getPost('completion_note'), $this->actorUserId(), ($readiness['ready'] ?? false) === true), 'Movement workflow completed.', 'Complete current readiness actions before closing this workflow.');
     }
 
     public function reopen(int $id): RedirectResponse
     {
         $confirmed = $this->request->getPost('confirm_reopen') === '1';
-        return $this->back($confirmed && Services::tripMovementChecklistService()->reopenChecklist($id, $this->actorUserId()), 'Movement workflow reopened.', 'Confirm before reopening a completed workflow.');
+        return $this->back($id, $confirmed && Services::tripMovementChecklistService()->reopenChecklist($id, $this->actorUserId()), 'Movement workflow reopened.', 'Confirm before reopening a completed workflow.');
     }
 
     public function recordFacts(int $id): RedirectResponse
@@ -149,14 +162,14 @@ class TripMovementChecklists extends BaseController
         $data = $this->movementFactData();
         try {
             $ok = Services::movementOperationalFactService()->recordForChecklist(Services::tripMovementChecklistService()->checklist($id), $data, $this->actorUserId());
-            return $this->back($ok, 'Operational facts recorded.', 'That movement could not be recorded.');
+            return $this->back($id, $ok, 'Operational facts recorded.', 'That movement could not be recorded.', 'handoff-entry');
         } catch (EarlyHandoffConfirmationRequired $exception) {
-            return CoreServices::redirectresponse()->to('/operations/checklists/' . $id . '?action=handoff')
+            return CoreServices::redirectresponse()->to('/operations/checklists/' . $id . '?action=handoff#handoff-entry')
                 ->with('movement_checklist_error', $exception->getMessage())
                 ->with('movement_fact_data', $data)
                 ->with('movement_early_handoff_warning', '1');
         } catch (\InvalidArgumentException $exception) {
-            return $this->back(false, '', $exception->getMessage())->with('movement_fact_data', $data);
+            return $this->back($id, false, '', $exception->getMessage(), 'handoff-entry')->with('movement_fact_data', $data);
         }
     }
 
@@ -165,9 +178,9 @@ class TripMovementChecklists extends BaseController
         $data = $this->movementFactData();
         try {
             $ok = Services::movementOperationalFactService()->stageForChecklist(Services::tripMovementChecklistService()->checklist($id), $data, $this->actorUserId());
-            return $this->back($ok, 'Vehicle staged at HNL. Guest pickup is not yet confirmed.', 'That vehicle could not be staged.');
+            return $this->back($id, $ok, 'Vehicle staged at HNL. Guest pickup is not yet confirmed.', 'That vehicle could not be staged.', 'handoff-entry');
         } catch (\InvalidArgumentException $exception) {
-            return $this->back(false, '', $exception->getMessage())->with('movement_fact_data', $data);
+            return $this->back($id, false, '', $exception->getMessage(), 'handoff-entry')->with('movement_fact_data', $data);
         }
     }
 
@@ -176,14 +189,14 @@ class TripMovementChecklists extends BaseController
         $data = $this->movementFactData();
         try {
             $ok = Services::movementOperationalFactService()->confirmGuestPickup(Services::tripMovementChecklistService()->checklist($id), $data, $this->actorUserId());
-            return $this->back($ok, 'Guest pickup confirmed.', 'Guest pickup could not be confirmed.');
+            return $this->back($id, $ok, 'Guest pickup confirmed.', 'Guest pickup could not be confirmed.', 'handoff-entry');
         } catch (EarlyHandoffConfirmationRequired $exception) {
-            return CoreServices::redirectresponse()->to('/operations/checklists/' . $id . '?action=confirm-pickup')
+            return CoreServices::redirectresponse()->to('/operations/checklists/' . $id . '?action=confirm-pickup#handoff-entry')
                 ->with('movement_checklist_error', $exception->getMessage())
                 ->with('movement_fact_data', $data)
                 ->with('movement_early_handoff_warning', '1');
         } catch (\InvalidArgumentException $exception) {
-            return $this->back(false, '', $exception->getMessage())->with('movement_fact_data', $data);
+            return $this->back($id, false, '', $exception->getMessage(), 'handoff-entry')->with('movement_fact_data', $data);
         }
     }
 
@@ -193,15 +206,14 @@ class TripMovementChecklists extends BaseController
         try {
             $ok = Services::movementOperationalFactService()->recordVehiclePosition(Services::tripMovementChecklistService()->checklist($id), $data, $this->actorUserId());
             if ($ok) {
-                return CoreServices::redirectresponse()->to('/operations/checklists/' . $id)
-                    ->with('movement_checklist_notice', 'Current vehicle position recorded.');
+                return $this->back($id, true, 'Current vehicle position recorded.', '', 'vehicle-position');
             }
 
-            return CoreServices::redirectresponse()->to('/operations/checklists/' . $id . '?action=position')
+            return CoreServices::redirectresponse()->to('/operations/checklists/' . $id . '?action=position#position-entry')
                 ->with('movement_checklist_error', 'That vehicle position could not be recorded.')
                 ->with('vehicle_position_data', $data);
         } catch (\InvalidArgumentException $exception) {
-            return CoreServices::redirectresponse()->to('/operations/checklists/' . $id . '?action=position')
+            return CoreServices::redirectresponse()->to('/operations/checklists/' . $id . '?action=position#position-entry')
                 ->with('movement_checklist_error', $exception->getMessage())
                 ->with('vehicle_position_data', $data);
         }
@@ -215,12 +227,12 @@ class TripMovementChecklists extends BaseController
         try {
             $ok = Services::movementOperationalFactService()->correctForChecklist(Services::tripMovementChecklistService()->checklist($id), $data, $this->actorUserId());
             if ($ok) {
-                return CoreServices::redirectresponse()->to('/operations/checklists/' . $id)->with('movement_checklist_notice', 'Recorded facts corrected.');
+                return $this->back($id, true, 'Recorded facts corrected.', '');
             }
 
-            return CoreServices::redirectresponse()->to($correctionHref)->with('movement_checklist_error', 'Those recorded facts could not be corrected.')->with('movement_fact_data', $data);
+            return CoreServices::redirectresponse()->to($correctionHref . '#handoff-entry')->with('movement_checklist_error', 'Those recorded facts could not be corrected.')->with('movement_fact_data', $data);
         } catch (\InvalidArgumentException $exception) {
-            return CoreServices::redirectresponse()->to($correctionHref)->with('movement_checklist_error', $exception->getMessage())->with('movement_fact_data', $data);
+            return CoreServices::redirectresponse()->to($correctionHref . '#handoff-entry')->with('movement_checklist_error', $exception->getMessage())->with('movement_fact_data', $data);
         }
     }
 
@@ -232,18 +244,29 @@ class TripMovementChecklists extends BaseController
         try {
             $ok = Services::movementOperationalFactService()->repairWrongTrip(Services::tripMovementChecklistService()->checklist($id), $data, $this->actorUserId());
             if ($ok) {
-                return CoreServices::redirectresponse()->to('/operations/checklists/' . $id)->with('movement_checklist_notice', 'Recorded facts moved to the correct trip.');
+                return $this->back($id, true, 'Recorded facts moved to the correct trip.', '');
             }
 
-            return CoreServices::redirectresponse()->to($repairHref)->with('movement_checklist_error', 'Those facts could not be repaired.');
+            return CoreServices::redirectresponse()->to($repairHref . '#handoff-entry')->with('movement_checklist_error', 'Those facts could not be repaired.');
         } catch (\InvalidArgumentException $exception) {
-            return CoreServices::redirectresponse()->to($repairHref)->with('movement_checklist_error', $exception->getMessage());
+            return CoreServices::redirectresponse()->to($repairHref . '#handoff-entry')->with('movement_checklist_error', $exception->getMessage());
         }
     }
 
-    private function back(bool $ok, string $notice, string $error): RedirectResponse
+    private function back(int $checklistId, bool $ok, string $notice, string $error, string $attemptedAnchor = 'readiness-heading'): RedirectResponse
     {
-        return redirect()->back()->with($ok ? 'movement_checklist_notice' : 'movement_checklist_error', $ok ? $notice : $error);
+        $anchor = $attemptedAnchor;
+        if ($ok) {
+            $checklist = Services::tripMovementChecklistService()->checklist($checklistId);
+            $companyId = (int) ($checklist['company_id'] ?? 0);
+            $readiness = $companyId > 0
+                ? (Services::movementReadinessReadService()->forCompany($companyId, [$checklistId])[$checklistId] ?? null)
+                : null;
+            $anchor = $readiness === null ? 'readiness-heading' : (new ChecklistActionFocusService())->nextAnchor($readiness);
+        }
+
+        return CoreServices::redirectresponse()->to('/operations/checklists/' . $checklistId . '#' . $anchor)
+            ->with($ok ? 'movement_checklist_notice' : 'movement_checklist_error', $ok ? $notice : $error);
     }
 
     private function actorUserId(): int

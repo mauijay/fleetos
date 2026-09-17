@@ -18,15 +18,19 @@ class MovementBoardIntelligenceService
     }
 
     /** @return array<int, array<string, mixed>> */
-    public function enrich(array $cards, ?\DateTimeImmutable $asOf = null): array
+    public function enrich(array $cards, ?\DateTimeImmutable $asOf = null, ?int $companyId = null): array
     {
         $asOf ??= new \DateTimeImmutable();
+        $vehicleIds = array_values(array_unique(array_map(static fn (array $card): int => (int) ($card['fleet_vehicle_id'] ?? 0), $cards)));
+        $cleanliness = $companyId !== null && $companyId > 0
+            ? $this->repo()->latestCleanlinessForCompany($companyId, $vehicleIds, $asOf->format('Y-m-d H:i:s'))
+            : [];
 
-        return array_map(fn (array $card): array => $this->enrichCard($card, $asOf), $cards);
+        return array_map(fn (array $card): array => $this->enrichCard($card, $asOf, $cleanliness[(int) ($card['fleet_vehicle_id'] ?? 0)] ?? null), $cards);
     }
 
     /** @return array<string, mixed> */
-    private function enrichCard(array $card, \DateTimeImmutable $asOf): array
+    private function enrichCard(array $card, \DateTimeImmutable $asOf, ?array $latestCleanliness): array
     {
         $vehicleId = (int) ($card['fleet_vehicle_id'] ?? 0);
         $event = $this->repo()->latestActiveMovementEvent($vehicleId, $asOf->format('Y-m-d H:i:s'));
@@ -34,6 +38,12 @@ class MovementBoardIntelligenceService
         $tripId = $this->relevantTripId($lifecycleEvent, $card);
         $schedule = $tripId === null ? null : $this->repo()->tripSchedule($tripId);
         $assessment = $this->repo()->assessmentForEventOrTrip(isset($lifecycleEvent['id']) ? (int) $lifecycleEvent['id'] : null, $tripId);
+        if (in_array($lifecycleEvent['event_code'] ?? null, ['actual_return', 'vehicle_recovered'], true)
+            && $latestCleanliness !== null
+            && (string) ($latestCleanliness['captured_at'] ?? '') >= (string) ($lifecycleEvent['occurred_at'] ?? '')
+            && (string) ($latestCleanliness['captured_at'] ?? '') >= (string) ($assessment['captured_at'] ?? '')) {
+            $assessment = array_merge($assessment ?? [], ['cleanliness' => $latestCleanliness['cleanliness']]);
+        }
         $profile = $this->repo()->profile($vehicleId) ?? ['energy_kind' => 'unknown', 'ready_energy_target_percent' => null, 'capabilities' => []];
         $nextTrip = $this->nextTrips()->forVehicle($vehicleId, $asOf);
         $freshness = $this->freshness()->assess($nextTrip['import_completed_at'] ?? $schedule['import_completed_at'] ?? null, $asOf);
@@ -55,6 +65,7 @@ class MovementBoardIntelligenceService
         $activePlan = $this->plans()->active($vehicleId, $event, $nextTrip, $asOf);
         $usablePlan = $activePlan !== null && ! (bool) ($activePlan['is_basis_stale'] ?? true) ? $activePlan : null;
         $recommendation = $this->positioning()->recommend([
+            'guest_possession' => ($lifecycleEvent['event_code'] ?? null) === 'actual_handoff',
             'basis_location_class' => $location['class'],
             'basis_type' => $location['basis'],
             'basis_airport_garage_code' => $location['airport_garage_code'],
@@ -307,6 +318,7 @@ class MovementBoardIntelligenceService
     private function presentRecommendation(array $recommendation, ?array $assessment, array $profile): array
     {
         $actionLabels = [
+            'await_return' => 'Await return before physical preparation',
             'leave_at_airport' => 'Leave at HNL',
             'retrieve_home' => 'Retrieve to home',
             'move_to_airport' => 'Move to HNL',

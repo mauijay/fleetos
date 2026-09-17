@@ -42,8 +42,8 @@ class VehicleDailyStateService
                 'guest_name' => (string) ($pickup['guest_name'] ?? $return['guest_name'] ?? 'Guest not captured'),
                 'location_label' => $this->locationLabel($vehicle),
                 'delivery_type' => (bool) ($vehicle['airport_delivery_scheduled'] ?? false) ? 'Airport' : 'Not captured',
-                'cleaning_status_label' => isset($cleaning[$vehicleId]) || $turnaround !== null ? 'Cleaning status not confirmed' : 'No cleaning task known',
-                'charging_status_label' => $pickup !== null || $turnaround !== null ? 'Charge level not captured; confirm charge' : 'Battery telemetry not connected',
+                'cleaning_status_label' => isset($cleaning[$vehicleId]) ? 'Cleaning needed from Dirty return' : 'No cleaning task known',
+                'charging_status_label' => 'No actionable Charge/Fuel preparation recorded',
                 'battery_label' => $vehicle['current_battery'] === null ? 'Battery not captured' : (string) $vehicle['current_battery'],
                 'actions' => $this->actions($flags, $turnaround),
                 'sort_priority' => $this->sortPriority($vehicle, $pickup, $return),
@@ -77,7 +77,7 @@ class VehicleDailyStateService
                 'guest_name' => 'Guest not captured',
                 'location_label' => (string) ($delivery['airport_name'] ?? $delivery['airport_code'] ?? 'Airport'),
                 'status_label' => 'Scheduled',
-                'action_label' => 'Prepare delivery details and confirm charge',
+                'action_label' => 'Review delivery details and readiness',
                 'href' => '#fleet-timeline',
             ];
         }
@@ -88,7 +88,7 @@ class VehicleDailyStateService
     }
 
     /** @return array<string, int> */
-    public function statusCounts(array $board, float $utilization, ?array $fleetSnapshot = null): array
+    public function statusCounts(array $board, float $utilization, ?array $fleetSnapshot = null, ?array $today = null): array
     {
         $snapshotCounts = [];
         foreach ($fleetSnapshot['buckets'] ?? [] as $bucket) {
@@ -103,8 +103,8 @@ class VehicleDailyStateService
             'other_location' => $snapshotCounts['other'] ?? 0,
             'unknown_location' => $snapshotCounts['unknown'] ?? 0,
             'available_now' => count(array_filter($board, static fn (array $item): bool => $item['primary_status'] === 'available')),
-            'going_out_today' => count(array_filter($board, static fn (array $item): bool => in_array('departing_today', $item['flags'], true))),
-            'returning_today' => count(array_filter($board, static fn (array $item): bool => in_array('returning_today', $item['flags'], true))),
+            'going_out_today' => $today === null ? count(array_filter($board, static fn (array $item): bool => in_array('departing_today', $item['flags'], true))) : count($today['todays_pickups'] ?? []),
+            'returning_today' => $today === null ? count(array_filter($board, static fn (array $item): bool => in_array('returning_today', $item['flags'], true))) : count($today['todays_returns'] ?? []),
             'same_day_turnarounds' => count(array_filter($board, static fn (array $item): bool => in_array('same_day_turnaround', $item['flags'], true))),
             'offline_or_unavailable' => count(array_filter($board, static fn (array $item): bool => in_array('offline', $item['flags'], true))),
             'cleaning_needed' => count(array_filter($board, static fn (array $item): bool => in_array('cleaning_required', $item['flags'], true))),
@@ -161,15 +161,12 @@ class VehicleDailyStateService
         }
         if ($pickup !== null) {
             $flags[] = 'departing_today';
-            $flags[] = 'charging_required';
         }
         if ($return !== null) {
             $flags[] = 'returning_today';
         }
         if ($turnaround !== null) {
             $flags[] = 'same_day_turnaround';
-            $flags[] = 'cleaning_required';
-            $flags[] = 'charging_required';
         }
         if (in_array($status, ['reserved', 'in_progress'], true)) {
             $flags[] = 'currently_rented';
@@ -285,10 +282,10 @@ class VehicleDailyStateService
     {
         $actions = [];
         if (in_array('same_day_turnaround', $flags, true)) {
-            $actions[] = 'Clean and confirm charge' . ($turnaround === null ? '' : ' within ' . $turnaround['label']);
+            $actions[] = 'Review turnaround readiness' . ($turnaround === null ? '' : ' within ' . $turnaround['label']);
         }
         if (in_array('departing_today', $flags, true) && ! in_array('same_day_turnaround', $flags, true)) {
-            $actions[] = 'Confirm pickup readiness and charge';
+            $actions[] = 'Confirm pickup readiness';
         }
         if (in_array('returning_today', $flags, true)) {
             $actions[] = 'Inspect on return and update cleaning status';
@@ -310,7 +307,7 @@ class VehicleDailyStateService
             'guest_name' => (string) ($reservation['guest_name'] ?? 'Guest not captured'),
             'location_label' => 'Location not captured',
             'status_label' => (string) ($reservation['status_code'] ?? 'scheduled'),
-            'action_label' => $type === 'return' ? 'Inspect, clean, and verify charge' : 'Confirm ready before pickup',
+            'action_label' => $type === 'return' ? 'Confirm return; inspect after vehicle is received' : 'Confirm ready before pickup',
             'href' => '#fleet-timeline',
             'reservation' => $reservation,
             'is_past' => $time !== '' && $time < $asOf->format('Y-m-d H:i:s'),

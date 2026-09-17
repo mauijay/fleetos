@@ -82,6 +82,18 @@ class MovementChecklistRepository
             ->getResultArray();
     }
 
+    /** @return array<string, mixed>|null */
+    public function itemForCompany(int $companyId, int $itemId): ?array
+    {
+        return $this->db->table('trip_movement_checklist_items items')
+            ->select('items.id, items.item_code, items.trip_movement_checklist_id')
+            ->join('trip_movement_checklists checklists', 'checklists.id = items.trip_movement_checklist_id')
+            ->join('fleet_vehicles vehicles', 'vehicles.id = checklists.fleet_vehicle_id')
+            ->where('items.id', $itemId)
+            ->where('vehicles.company_id', $companyId)
+            ->get()->getRowArray();
+    }
+
     /** @return array<int, array<string, mixed>> */
     public function summariesForDate(string $start, string $end): array
     {

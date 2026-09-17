@@ -124,9 +124,9 @@ final class MovementBoardIntelligenceServiceTest extends CIUnitTestCase
         $this->assertSame('Airport HNL', $card['location_class_label']);
         $this->assertSame('scheduled', $card['location_basis']);
         $this->assertSame(['id' => 900, 'guest_name' => 'Current Guest', 'timing_label' => 'Due Sep 5, 5:00 PM'], $card['current_trip']);
-        $this->assertSame('leave_at_airport', $card['recommendation']['code']);
-        $this->assertSame('Recommended: Leave at HNL', $card['recommendation']['display_label']);
-        $this->assertContains('Clean and charge on site.', $card['recommendation']['reason_labels']);
+        $this->assertSame('await_return', $card['recommendation']['code']);
+        $this->assertSame('Informational: Await return before physical preparation', $card['recommendation']['display_label']);
+        $this->assertNotContains('Clean and charge on site.', $card['recommendation']['reason_labels']);
         $this->assertSame('Airport HNL', $card['next_trip']['pickup_location_label']);
         $this->assertSame('Charge', $card['energy_label']);
         $this->assertSame('Spaceship-09', $card['fleet_code']);
@@ -155,6 +155,25 @@ final class MovementBoardIntelligenceServiceTest extends CIUnitTestCase
         $this->assertSame('Fuel', $card['energy_label']);
         $this->assertSame('complete_return_assessment', $card['action']['code']);
         $this->assertSame([], $card['blockers']);
+    }
+
+    public function testLaterCleanObservationClearsStaleReturnConditionOnMovementCard(): void
+    {
+        $service = $this->service(
+            ['id' => 91, 'turo_trip_normalized_id' => 900, 'event_code' => 'actual_return', 'occurred_at' => '2026-09-03 10:00:00'],
+            ['id' => 900, 'starts_at' => '2026-09-01 08:00:00', 'ends_at' => '2026-09-03 10:00:00'],
+            ['cleanliness' => 'dirty', 'energy_percent' => 90, 'captured_at' => '2026-09-03 10:01:00'],
+            ['energy_kind' => 'electric', 'ready_energy_target_percent' => 80, 'capabilities' => []],
+            null,
+            null,
+            [9 => ['cleanliness' => 'clean', 'captured_at' => '2026-09-03 11:00:00']],
+        );
+
+        $card = $service->enrich([['fleet_vehicle_id' => 9, 'status' => 'available', 'flags' => []]], new DateTimeImmutable('2026-09-03 12:00:00'), 1)[0];
+
+        $this->assertSame('Clean', $card['condition_label']);
+        $this->assertSame('ready', $card['state']['code']);
+        $this->assertNotContains('cleaning_required', array_column($card['blockers'], 'code'));
     }
 
     public function testStagedHnlPickupIsNotRentedAndLinksToGuestPickupConfirmation(): void
@@ -351,7 +370,7 @@ final class MovementBoardIntelligenceServiceTest extends CIUnitTestCase
         $this->assertSame('International Garage L7 RF', $card['location_detail']);
     }
 
-    private function service(?array $event, ?array $schedule, ?array $assessment, array $profile, ?array $nextTrip, ?array $plan = null): MovementBoardIntelligenceService
+    private function service(?array $event, ?array $schedule, ?array $assessment, array $profile, ?array $nextTrip, ?array $plan = null, ?array $latestCleanliness = null): MovementBoardIntelligenceService
     {
         $repository = $this->createStub(OperationalFactsRepository::class);
         $repository->method('latestActiveMovementEvent')->willReturn($event);
@@ -359,6 +378,7 @@ final class MovementBoardIntelligenceServiceTest extends CIUnitTestCase
         $repository->method('tripSchedule')->willReturn($schedule);
         $repository->method('assessmentForEventOrTrip')->willReturn($assessment);
         $repository->method('profile')->willReturn($profile);
+        $repository->method('latestCleanlinessForCompany')->willReturn($latestCleanliness ?? []);
 
         $nextTrips = $this->createStub(NextConfirmedTripService::class);
         $nextTrips->method('forVehicle')->willReturn($nextTrip);

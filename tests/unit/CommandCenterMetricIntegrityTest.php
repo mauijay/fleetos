@@ -76,7 +76,10 @@ final class CommandCenterMetricIntegrityTest extends CIUnitTestCase
         $health->method('loanPaymentDue')->willReturn([]);
         $health->method('claimsRequiringFollowUp')->willReturn([]);
 
-        $tasks = new TaskService($repository, $health);
+        $movementWork = $this->getMockBuilder(\App\Services\Fleet\OperationalMovementWorkService::class)->disableOriginalConstructor()->onlyMethods(['singleActiveCompanyId', 'completionsForCompany'])->getMock();
+        $movementWork->method('singleActiveCompanyId')->willReturn(1);
+        $movementWork->method('completionsForCompany')->willReturn([]);
+        $tasks = new TaskService($repository, $health, $movementWork);
         $today = $tasks->today(new DateTimeImmutable('2026-07-01 08:00:00'));
 
         $this->assertCount(1, $today['todays_pickups']);

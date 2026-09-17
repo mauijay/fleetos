@@ -33,7 +33,7 @@ class MovementStateResolver
             return $this->state('on_trip', 'Currently Rented', 'info', $primary, $event, $schedule, $missing, $blockers, 'monitor_return', 'Monitor return');
         }
 
-        if (($event['event_code'] ?? null) === 'actual_return') {
+        if (in_array($event['event_code'] ?? null, ['actual_return', 'vehicle_recovered'], true)) {
             $target = isset($profile['ready_energy_target_percent']) ? (int) $profile['ready_energy_target_percent'] : null;
             if (($assessment['cleanliness'] ?? null) === null) {
                 $missing[] = 'return_cleanliness';

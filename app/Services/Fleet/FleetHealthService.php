@@ -7,8 +7,10 @@ use DateTimeImmutable;
 
 class FleetHealthService
 {
-    public function __construct(private readonly ?FleetIntelligenceRepository $repository = null)
-    {
+    public function __construct(
+        private readonly ?FleetIntelligenceRepository $repository = null,
+        private readonly ?OperationalMovementWorkService $movementWorkService = null,
+    ) {
     }
 
     /** Returns all operational alert categories for the fleet. */
@@ -31,17 +33,13 @@ class FleetHealthService
         ];
     }
 
-    /** Returns vehicles with completed returns today that need cleaning workflow review. */
+    /** Returns operator-held vehicles with an uncleared Dirty observation after return. */
     public function vehiclesNeedingCleaning(?DateTimeImmutable $asOf = null): array
     {
         $asOf ??= new DateTimeImmutable();
-        $start = $asOf->setTime(0, 0)->format('Y-m-d H:i:s');
-        $end = $asOf->setTime(23, 59, 59)->format('Y-m-d H:i:s');
+        $work = $this->movementWorkService ?? new OperationalMovementWorkService();
 
-        return array_values(array_filter($this->repo()->reservationsBetween($start, $end), static function (array $reservation) use ($asOf): bool {
-            return ($reservation['ends_at'] ?? '') <= $asOf->format('Y-m-d H:i:s')
-                && ! in_array($reservation['status_code'] ?? '', ['canceled_zero_payout', 'canceled_host_payout'], true);
-        }));
+        return $work->cleaningNeedsForCompany($work->singleActiveCompanyId($asOf), $asOf);
     }
 
     /** Returns scheduled maintenance due within the alert horizon. */

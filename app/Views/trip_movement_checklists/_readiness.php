@@ -10,13 +10,17 @@ $known = array_values(array_filter($requirements, static fn (array $requirement)
 $completedHuman = array_values(array_filter($requirements, static fn (array $requirement): bool => $requirement['phase'] === $readinessPhase
     && in_array($requirement['kind'], ['human', 'hybrid'], true)
     && $requirement['status'] === 'satisfied'));
-$pending = array_values(array_filter($requirements, static fn (array $requirement): bool => $requirement['phase'] === $readinessPhase && $requirement['status'] === 'unsatisfied'));
+$pending = array_values(array_filter($requirements, static fn (array $requirement): bool => $requirement['phase'] === $readinessPhase && $requirement['status'] === 'unsatisfied' && ($requirement['actionable'] ?? true)));
+$historicalDeficits = array_values(array_filter($requirements, static fn (array $requirement): bool => $requirement['phase'] === $readinessPhase && $requirement['status'] === 'unsatisfied' && ! ($requirement['actionable'] ?? true)));
 $blockingPending = array_values(array_filter($pending, static fn (array $requirement): bool => $requirement['blocking']));
-$additionalPending = array_values(array_filter($pending, static fn (array $requirement): bool => ! $requirement['blocking']));
+$requiredPending = array_values(array_filter($pending, static fn (array $requirement): bool => ! $requirement['blocking'] && ($itemsByCode[$requirement['code']]['is_required'] ?? false)));
+$additionalPending = array_values(array_filter($pending, static fn (array $requirement): bool => ! $requirement['blocking'] && ! ($itemsByCode[$requirement['code']]['is_required'] ?? false)));
 $blockingRemaining = count($blockingPending);
-$additionalRemaining = count($additionalPending);
+$additionalRemaining = count($requiredPending) + count($additionalPending);
 $lifecycle = array_values(array_filter($requirements, static fn (array $requirement): bool => $requirement['phase'] === 'pickup_lifecycle'));
 $nextPickupPreparation = array_values(array_filter($requirements, static fn (array $requirement): bool => $requirement['phase'] === 'next_pickup_preparation'));
+$nextPickupPending = array_values(array_filter($nextPickupPreparation, static fn (array $requirement): bool => $requirement['status'] === 'unsatisfied' && ($requirement['actionable'] ?? true)));
+$nextPickupFacts = array_values(array_filter($nextPickupPreparation, static fn (array $requirement): bool => $requirement['status'] !== 'unsatisfied' || ! ($requirement['actionable'] ?? true)));
 $exceptionalDispositions = $readiness['exceptional_dispositions'] ?? [];
 $currentDisposition = trim((string) ($checklist['vehicle_disposition'] ?? ''));
 $pendingLabels = [
@@ -43,7 +47,7 @@ $factDetail = static function (array $requirement) use ($activeFacts): ?string {
     <div class="section-heading">
         <div>
             <p class="eyebrow"><?= ($checklist['movement_type'] ?? '') === 'return' ? 'Return readiness' : 'Pickup preparation' ?></p>
-            <h2 id="readiness-heading"><?= ($readiness['ready'] ?? false) ? 'Ready' : $blockingRemaining . ' blocking actions remaining' ?></h2>
+            <h2 id="readiness-heading" tabindex="-1"><?= ($readiness['ready'] ?? false) ? 'Ready' : $blockingRemaining . ' blocking actions remaining' ?></h2>
             <?php if ($additionalRemaining > 0): ?><p class="muted"><?= $blockingRemaining ?> blocking · <?= $additionalRemaining ?> additional action<?= $additionalRemaining === 1 ? '' : 's' ?></p><?php endif; ?>
         </div>
         <?php if ($closed): ?><span class="status-badge tone-info">Workflow closed</span><?php endif; ?>
@@ -51,19 +55,9 @@ $factDetail = static function (array $requirement) use ($activeFacts): ?string {
 
     <div class="readiness-groups">
         <div class="readiness-group">
-            <h3>Known</h3>
-            <?php if ($known === []): ?><p class="muted">No authoritative facts recorded yet.</p><?php endif; ?>
-            <ul class="readiness-list">
-                <?php foreach ($known as $requirement): ?>
-                    <li class="is-complete"><span aria-hidden="true">✓</span><div><strong><?= esc((string) $requirement['label']) ?></strong><?php if (($detail = $factDetail($requirement)) !== null && $detail !== ''): ?><small><?= esc($detail) ?></small><?php endif; ?></div></li>
-                <?php endforeach; ?>
-            </ul>
-        </div>
-
-        <div class="readiness-group">
             <h3>Action required</h3>
             <?php if ($pending === []): ?><p class="muted">No current readiness actions.</p><?php endif; ?>
-            <?php foreach ([['label' => 'Blocking', 'requirements' => $blockingPending], ['label' => 'Additional actions', 'requirements' => $additionalPending]] as $actionGroup): ?>
+            <?php foreach ([['label' => 'Blocking', 'requirements' => $blockingPending], ['label' => 'Required', 'requirements' => $requiredPending], ['label' => 'Additional actions', 'requirements' => $additionalPending]] as $actionGroup): ?>
                 <?php if ($actionGroup['requirements'] !== []): ?><p class="eyebrow readiness-action-kind"><?= esc($actionGroup['label']) ?></p><?php endif; ?>
                 <ul class="readiness-list readiness-actions">
                     <?php foreach ($actionGroup['requirements'] as $requirement): ?>
@@ -73,7 +67,7 @@ $factDetail = static function (array $requirement) use ($activeFacts): ?string {
                         $actionType = (string) ($requirement['action']['type'] ?? '');
                         $isSpecialAction = in_array($actionType, ['photos_composite', 'charging_adapter'], true);
                         ?>
-                        <li class="is-pending readiness-action-row<?= $isSpecialAction ? ' readiness-compound-action' : '' ?>"><span aria-hidden="true">○</span><div class="readiness-action-label"><strong><?= esc((string) ($pendingLabels[$requirement['code']] ?? $requirement['action']['label'] ?? $requirement['label'])) ?></strong></div>
+                        <li id="checklist-action-<?= esc((string) $requirement['code'], 'attr') ?>" tabindex="-1" class="is-pending readiness-action-row<?= $isSpecialAction ? ' readiness-compound-action' : '' ?>"><span aria-hidden="true">○</span><div class="readiness-action-label"><strong><?= esc((string) ($pendingLabels[$requirement['code']] ?? $requirement['action']['label'] ?? $requirement['label'])) ?></strong></div>
                             <?php if (! $closed && $actionType === 'photos_composite'): ?>
                                 <div class="readiness-action-controls"><form action="/operations/checklists/<?= (int) $checklist['id'] ?>/photos-complete" method="post"><?= csrf_field() ?><button class="primary-action" type="submit">Confirm</button></form></div>
                             <?php elseif (! $closed && $actionType === 'charging_adapter'): ?>
@@ -85,7 +79,26 @@ $factDetail = static function (array $requirement) use ($activeFacts): ?string {
                     <?php endforeach; ?>
                 </ul>
             <?php endforeach; ?>
-            <?php if ($completedHuman !== []): ?><p class="eyebrow readiness-action-kind">Completed checks</p><?php endif; ?>
+            <?php if ($nextPickupPending !== []): ?>
+                <div class="readiness-subgroup"><p class="eyebrow"><?= ($readiness['is_same_day_turnaround'] ?? false) ? 'Same-day turnaround' : 'Preparation for next pickup' ?></p>
+                    <ul class="readiness-list"><?php foreach ($nextPickupPending as $requirement): ?><li id="checklist-action-<?= esc((string) $requirement['code'], 'attr') ?>" tabindex="-1" class="is-pending"><span aria-hidden="true">○</span><div><strong><?= esc((string) $requirement['label']) ?></strong><small><?= esc((string) ($requirement['action']['label'] ?? 'Attention required')) ?></small></div></li><?php endforeach; ?></ul>
+                </div>
+            <?php endif; ?>
+        </div>
+        <div class="readiness-group">
+            <h3>Known</h3>
+            <?php if ($known === []): ?><p class="muted">No authoritative facts recorded yet.</p><?php endif; ?>
+            <ul class="readiness-list">
+                <?php foreach ($known as $requirement): ?>
+                    <li id="checklist-action-<?= esc((string) $requirement['code'], 'attr') ?>" tabindex="-1" class="is-complete"><span aria-hidden="true">✓</span><div><strong><?= esc((string) $requirement['label']) ?></strong><?php if (($detail = $factDetail($requirement)) !== null && $detail !== ''): ?><small><?= esc($detail) ?></small><?php endif; ?></div></li>
+                <?php endforeach; ?>
+            </ul>
+        </div>
+
+        <?php if ($completedHuman !== [] || $historicalDeficits !== []): ?>
+        <div class="readiness-group">
+            <?php if ($historicalDeficits !== []): ?><h3>Recorded at handoff</h3><p class="muted">These facts remain below target, but preparation is no longer actionable while the guest has the vehicle.</p><ul class="readiness-list"><?php foreach ($historicalDeficits as $requirement): ?><li><div><strong><?= esc((string) $requirement['label']) ?></strong></div></li><?php endforeach; ?></ul><?php endif; ?>
+            <?php if ($completedHuman !== []): ?><h3>Completed checks</h3><?php endif; ?>
             <ul class="readiness-list readiness-actions">
                 <?php foreach ($completedHuman as $requirement): ?>
                     <?php
@@ -93,14 +106,15 @@ $factDetail = static function (array $requirement) use ($activeFacts): ?string {
                     $itemId = (int) ($item['id'] ?? 0);
                     $actionType = (string) ($requirement['action']['type'] ?? '');
                     ?>
-                    <li class="is-complete"><span aria-hidden="true">✓</span><div><strong><?= esc((string) $requirement['label']) ?></strong><?php if ($requirement['basis_at'] !== null): ?><small><?= esc(ucfirst((string) ($item['completion_source'] ?? 'manual'))) ?> · <?= esc(date('M j, g:i A', strtotime((string) $requirement['basis_at']))) ?></small><?php endif; ?></div><?php if (! $closed && $actionType === 'photos_composite'): ?><div class="readiness-action-controls"><form action="/operations/checklists/<?= (int) $checklist['id'] ?>/photos-undo" method="post"><?= csrf_field() ?><button class="action-link" type="submit">Undo</button></form></div><?php elseif (! $closed && $actionType === 'charging_adapter'): ?><div class="readiness-action-controls"><form action="/operations/checklists/<?= (int) $checklist['id'] ?>/charging-adapter-undo" method="post"><?= csrf_field() ?><button class="action-link" type="submit">Undo</button></form></div><?php elseif (! $closed && $itemId > 0): ?><div class="readiness-action-controls"><form action="/operations/checklist-items/<?= $itemId ?>/undo" method="post"><?= csrf_field() ?><button class="action-link" type="submit">Undo</button></form></div><?php endif; ?></li>
+                    <li id="checklist-action-<?= esc((string) $requirement['code'], 'attr') ?>" tabindex="-1" class="is-complete"><span aria-hidden="true">✓</span><div><strong><?= esc((string) $requirement['label']) ?></strong><?php if ($requirement['basis_at'] !== null): ?><small><?= esc(ucfirst((string) ($item['completion_source'] ?? 'manual'))) ?> · <?= esc(date('M j, g:i A', strtotime((string) $requirement['basis_at']))) ?></small><?php endif; ?></div><?php if (! $closed && $actionType === 'photos_composite'): ?><div class="readiness-action-controls"><form action="/operations/checklists/<?= (int) $checklist['id'] ?>/photos-undo" method="post"><?= csrf_field() ?><button class="action-link" type="submit">Undo</button></form></div><?php elseif (! $closed && $actionType === 'charging_adapter'): ?><div class="readiness-action-controls"><form action="/operations/checklists/<?= (int) $checklist['id'] ?>/charging-adapter-undo" method="post"><?= csrf_field() ?><button class="action-link" type="submit">Undo</button></form></div><?php elseif (! $closed && $itemId > 0): ?><div class="readiness-action-controls"><form action="/operations/checklist-items/<?= $itemId ?>/undo" method="post"><?= csrf_field() ?><button class="action-link" type="submit">Undo</button></form></div><?php endif; ?></li>
                 <?php endforeach; ?>
             </ul>
         </div>
+        <?php endif; ?>
     </div>
 
     <?php if (($checklist['movement_type'] ?? '') === 'return'): ?>
-        <div class="readiness-subgroup exceptional-disposition">
+        <div id="exceptional-disposition" tabindex="-1" class="readiness-subgroup exceptional-disposition">
             <p class="eyebrow">Exceptional hold</p>
             <p class="muted">Optional. Normal turnaround is driven by recorded condition and energy.</p>
             <?php if ($currentDisposition !== ''): ?><p>Recorded: <strong><?= esc((string) ($exceptionalDispositions[$currentDisposition] ?? ucwords(str_replace('_', ' ', $currentDisposition)))) ?></strong></p><?php endif; ?>
@@ -109,10 +123,10 @@ $factDetail = static function (array $requirement) use ($activeFacts): ?string {
     <?php endif; ?>
 
     <?php if ($lifecycle !== []): ?>
-        <div class="readiness-subgroup"><p class="eyebrow">Lifecycle</p><ul class="readiness-list"><?php foreach ($lifecycle as $requirement): ?><li class="<?= $requirement['status'] === 'satisfied' ? 'is-complete' : 'is-pending' ?>"><span aria-hidden="true"><?= $requirement['status'] === 'satisfied' ? '✓' : '○' ?></span><div><strong><?= esc((string) $requirement['label']) ?></strong><small>Does not gate pickup preparation</small></div></li><?php endforeach; ?></ul></div>
+        <div class="readiness-subgroup"><p class="eyebrow">Lifecycle</p><ul class="readiness-list"><?php foreach ($lifecycle as $requirement): ?><li id="checklist-action-<?= esc((string) $requirement['code'], 'attr') ?>" tabindex="-1" class="<?= $requirement['status'] === 'satisfied' ? 'is-complete' : 'is-pending' ?>"><span aria-hidden="true"><?= $requirement['status'] === 'satisfied' ? '✓' : '○' ?></span><div><strong><?= esc((string) $requirement['label']) ?></strong><small>Does not gate pickup preparation</small></div></li><?php endforeach; ?></ul></div>
     <?php endif; ?>
-    <?php if ($nextPickupPreparation !== []): ?>
-        <div class="readiness-subgroup"><p class="eyebrow"><?= ($readiness['is_same_day_turnaround'] ?? false) ? 'Same-day turnaround' : 'Preparation for next pickup' ?></p><ul class="readiness-list"><?php foreach ($nextPickupPreparation as $requirement): ?><li class="<?= $requirement['status'] === 'satisfied' ? 'is-complete' : ($requirement['status'] === 'not_applicable' ? 'is-muted' : 'is-pending') ?>"><span aria-hidden="true"><?= $requirement['status'] === 'satisfied' ? '✓' : ($requirement['status'] === 'not_applicable' ? '—' : '○') ?></span><div><strong><?= esc((string) $requirement['label']) ?></strong><?php if ($requirement['status'] === 'unsatisfied'): ?><small><?= esc((string) ($requirement['action']['label'] ?? 'Attention required')) ?></small><?php endif; ?></div></li><?php endforeach; ?></ul></div>
+    <?php if ($nextPickupFacts !== []): ?>
+        <div class="readiness-subgroup"><p class="eyebrow">Next pickup facts</p><ul class="readiness-list"><?php foreach ($nextPickupFacts as $requirement): ?><li class="<?= $requirement['status'] === 'satisfied' ? 'is-complete' : 'is-muted' ?>"><span aria-hidden="true"><?= $requirement['status'] === 'satisfied' ? '✓' : '—' ?></span><div><strong><?= esc((string) $requirement['label']) ?></strong></div></li><?php endforeach; ?></ul></div>
     <?php endif; ?>
 
     <?php if (! $closed && ($readiness['ready'] ?? false)): ?>

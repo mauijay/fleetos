@@ -191,7 +191,10 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
         $repository->method('vehiclesMissingDocuments')->willReturn([['id' => 6, 'fleet_code' => 'Spaceship-006']]);
         $repository->method('vehiclesMissingTuroListings')->willReturn([['id' => 7, 'fleet_code' => 'Spaceship-007']]);
 
-        $summary = (new FleetHealthService($repository))->summary(new DateTimeImmutable('2026-06-15 12:00:00'));
+        $movementWork = $this->getMockBuilder(\App\Services\Fleet\OperationalMovementWorkService::class)->disableOriginalConstructor()->onlyMethods(['singleActiveCompanyId', 'cleaningNeedsForCompany'])->getMock();
+        $movementWork->method('singleActiveCompanyId')->willReturn(1);
+        $movementWork->method('cleaningNeedsForCompany')->willReturn([['fleet_vehicle_id' => 1]]);
+        $summary = (new FleetHealthService($repository, $movementWork))->summary(new DateTimeImmutable('2026-06-15 12:00:00'));
 
         $this->assertCount(1, $summary['vehicles_needing_cleaning']);
         $this->assertCount(1, $summary['vehicles_due_for_maintenance']);
@@ -367,7 +370,10 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
             'vehicles_below_battery_threshold' => [],
         ]);
 
-        $service = new TaskService($repository, $health);
+        $movementWork = $this->getMockBuilder(\App\Services\Fleet\OperationalMovementWorkService::class)->disableOriginalConstructor()->onlyMethods(['singleActiveCompanyId', 'completionsForCompany'])->getMock();
+        $movementWork->method('singleActiveCompanyId')->willReturn(1);
+        $movementWork->method('completionsForCompany')->willReturn([]);
+        $service = new TaskService($repository, $health, $movementWork);
         $today = $service->today(new DateTimeImmutable('2026-06-15 12:00:00'));
 
         $this->assertCount(1, $today['todays_pickups']);
@@ -560,7 +566,7 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
         ], array_slice(array_column($viewModel['navigation'], 'label'), 0, 8));
         $this->assertSame('true', $viewModel['navigation'][0]['active']);
         $this->assertNotContains('Fleet', array_column($viewModel['navigation'], 'label'));
-        $this->assertFalse($viewModel['mission_clear']);
+        $this->assertTrue($viewModel['mission_clear']);
         $this->assertCount(8, $viewModel['fleet_status']);
         $this->assertSame('Premium', $viewModel['vehicles'][0]['segment']);
         $this->assertSame('info', $viewModel['vehicles'][0]['segment_tone']);
@@ -570,6 +576,10 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
         $this->assertSame('Reserved', $viewModel['activity']['traffic_status']);
         $this->assertSame('Reserved', $viewModel['activity']['battery_status']);
         $this->assertSame(1, $viewModel['activity']['tomorrow_count']);
+        $this->assertSame(0, $viewModel['activity']['today_count']);
+        $this->assertSame(0, $viewModel['daily_operations']['queue_view']['scopes'][1]['count']);
+        $this->assertSame(1, array_sum(array_column($tomorrowViewModel['daily_operations']['queue_view']['items'], 'count')));
+        $this->assertSame(1, $tomorrowViewModel['daily_operations']['queue_view']['scopes'][2]['count']);
         $this->assertSame('/?queue=tomorrow#operational-queue', $viewModel['activity']['queue_scopes'][2]['href']);
         $this->assertTrue($tomorrowViewModel['daily_operations']['queue_view']['scopes'][2]['active']);
         $this->assertSame('Tomorrow work', $tomorrowViewModel['daily_operations']['queue_view']['label']);

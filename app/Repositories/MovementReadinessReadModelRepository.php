@@ -66,7 +66,7 @@ class MovementReadinessReadModelRepository
             ->getResultArray();
         $events = $this->db->table('trip_movement_events')
             ->where('company_id', $companyId)
-            ->whereIn('turo_trip_normalized_id', $tripIds)
+            ->whereIn('turo_trip_normalized_id', $readinessTripIds)
             ->where('voided_at', null)
             ->where('occurred_at <=', $asOfTimestamp)
             ->orderBy('occurred_at', 'DESC')
@@ -206,6 +206,7 @@ class MovementReadinessReadModelRepository
                 'airport_workflow' => $airportByTrip[$tripId][$movementType] ?? null,
                 'positioning_plan' => $plansByVehicle[$vehicleId] ?? null,
                 'next_trip' => $nextTrip,
+                'next_pickup_handoff' => $nextTrip === null ? null : ($eventsByTrip[(int) $nextTrip['id']]['pickup']['actual_handoff'] ?? null),
             ]);
         }
 

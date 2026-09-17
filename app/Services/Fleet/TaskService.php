@@ -10,6 +10,7 @@ class TaskService
     public function __construct(
         private readonly ?FleetIntelligenceRepository $repository = null,
         private readonly ?FleetHealthService $healthService = null,
+        private readonly ?OperationalMovementWorkService $movementWorkService = null,
     ) {
     }
 
@@ -18,7 +19,7 @@ class TaskService
     {
         $asOf ??= new DateTimeImmutable();
 
-        return $this->tasksForDay($asOf);
+        return $this->tasksForDay($asOf, $asOf);
     }
 
     /** Returns all operational tasks for tomorrow. */
@@ -26,7 +27,7 @@ class TaskService
     {
         $asOf ??= new DateTimeImmutable();
 
-        return $this->tasksForDay($asOf->modify('+1 day'));
+        return $this->tasksForDay($asOf->modify('+1 day'), $asOf);
     }
 
     /** Returns tasks whose due date or scheduled time is before now. */
@@ -53,18 +54,20 @@ class TaskService
         ];
     }
 
-    private function tasksForDay(DateTimeImmutable $day): array
+    private function tasksForDay(DateTimeImmutable $day, DateTimeImmutable $asOf): array
     {
         $start = $day->setTime(0, 0)->format('Y-m-d H:i:s');
         $end = $day->modify('+1 day')->setTime(0, 0)->format('Y-m-d H:i:s');
-        $reservations = $this->repo()->operationalReservationsBetween($start, $end);
+        $companyId = $this->movementWork()->singleActiveCompanyId($asOf);
+        $reservations = $this->repo()->operationalReservationsBetween($start, $end, $companyId);
+        $completions = $this->movementWork()->completionsForCompany($companyId, array_map('intval', array_column($reservations, 'id')), $asOf);
 
         return [
-            'todays_pickups' => $this->startingReservations($reservations, $start, $end),
-            'todays_returns' => $this->endingReservations($reservations, $start, $end),
-            'cleaning_tasks' => $this->health()->vehiclesNeedingCleaning($day),
+            'todays_pickups' => $this->startingReservations($reservations, $start, $end, $completions),
+            'todays_returns' => $this->endingReservations($reservations, $start, $end, $completions),
+            'cleaning_tasks' => $this->health()->vehiclesNeedingCleaning($asOf),
             'charging_tasks' => [],
-            'airport_deliveries' => $this->repo()->airportDeliveriesBetween($start, $end),
+            'airport_deliveries' => $this->repo()->airportDeliveriesBetween($start, $end, $companyId),
             'maintenance_tasks' => $this->health()->vehiclesDueForMaintenance($day, 0),
             'registration_renewals' => $this->health()->registrationExpiring($day, 0),
             'insurance_renewals' => $this->health()->insuranceExpiring($day, 0),
@@ -74,17 +77,19 @@ class TaskService
     }
 
     /** @param array<int, array<string, mixed>> $reservations */
-    private function startingReservations(array $reservations, string $start, string $end): array
+    private function startingReservations(array $reservations, string $start, string $end, array $completions): array
     {
-        return array_values(array_filter($reservations, static fn (array $reservation): bool => ($reservation['starts_at'] ?? '') >= $start
+        return array_values(array_filter($reservations, static fn (array $reservation): bool => ! isset($completions[(int) ($reservation['id'] ?? 0) . ':pickup'])
+            && ($reservation['starts_at'] ?? '') >= $start
             && ($reservation['starts_at'] ?? '') < $end
             && ! str_starts_with((string) ($reservation['status_code'] ?? ''), 'canceled')));
     }
 
     /** @param array<int, array<string, mixed>> $reservations */
-    private function endingReservations(array $reservations, string $start, string $end): array
+    private function endingReservations(array $reservations, string $start, string $end, array $completions): array
     {
-        return array_values(array_filter($reservations, static fn (array $reservation): bool => ($reservation['ends_at'] ?? '') >= $start
+        return array_values(array_filter($reservations, static fn (array $reservation): bool => ! isset($completions[(int) ($reservation['id'] ?? 0) . ':return'])
+            && ($reservation['ends_at'] ?? '') >= $start
             && ($reservation['ends_at'] ?? '') < $end
             && ! str_starts_with((string) ($reservation['status_code'] ?? ''), 'canceled')));
     }
@@ -97,5 +102,10 @@ class TaskService
     private function health(): FleetHealthService
     {
         return $this->healthService ?? service('fleetHealthService');
+    }
+
+    private function movementWork(): OperationalMovementWorkService
+    {
+        return $this->movementWorkService ?? new OperationalMovementWorkService();
     }
 }

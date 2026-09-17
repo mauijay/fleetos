@@ -35,16 +35,17 @@ class MovementReadinessProjectionService
         ));
         $blockingRemaining = count(array_filter(
             $readinessRequirements,
-            static fn (array $requirement): bool => $requirement['blocking'] && $requirement['status'] === self::STATUS_UNSATISFIED,
+            static fn (array $requirement): bool => $requirement['blocking'] && $requirement['status'] === self::STATUS_UNSATISFIED && ($requirement['actionable'] ?? true),
         ));
         $additionalActionsRemaining = count(array_filter(
             $readinessRequirements,
-            static fn (array $requirement): bool => ! $requirement['blocking'] && $requirement['status'] === self::STATUS_UNSATISFIED,
+            static fn (array $requirement): bool => ! $requirement['blocking'] && $requirement['status'] === self::STATUS_UNSATISFIED && ($requirement['actionable'] ?? true),
         ));
         $humanRemaining = count(array_filter(
             $readinessRequirements,
             static fn (array $requirement): bool => $requirement['blocking']
                 && $requirement['status'] === self::STATUS_UNSATISFIED
+                && ($requirement['actionable'] ?? true)
                 && in_array($requirement['kind'], [self::KIND_HUMAN, self::KIND_HYBRID], true),
         ));
         $knownFacts = count(array_filter(
@@ -115,6 +116,10 @@ class MovementReadinessProjectionService
             $this->derivedRequirement('guest_handoff', 'Guest handoff', self::PHASE_PICKUP_LIFECYCLE, $handoff !== null, false, $handoff !== null ? 'movement_event' : null, $handoff['occurred_at'] ?? null, 'Record actual guest handoff'),
         ];
 
+        if ($handoff !== null) {
+            $requirements = $this->suppressCompletedMovementPreparation($requirements, self::PHASE_PICKUP_PREPARATION);
+        }
+
         return $requirements;
     }
 
@@ -160,7 +165,24 @@ class MovementReadinessProjectionService
             );
         }
 
+        if (($context['next_pickup_handoff'] ?? null) !== null) {
+            $requirements = $this->suppressCompletedMovementPreparation($requirements, self::PHASE_NEXT_PICKUP_PREPARATION);
+        }
+
         return $requirements;
+    }
+
+    /** Keep the recorded deficit visible while removing impossible physical actions. */
+    private function suppressCompletedMovementPreparation(array $requirements, string $phase): array
+    {
+        return array_map(static function (array $requirement) use ($phase): array {
+            if ($requirement['phase'] === $phase && $requirement['status'] === self::STATUS_UNSATISFIED) {
+                $requirement['actionable'] = false;
+                $requirement['action'] = null;
+            }
+
+            return $requirement;
+        }, $requirements);
     }
 
     /** @param array<string, mixed> $context @return array<string, mixed>|null */

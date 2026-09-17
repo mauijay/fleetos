@@ -430,6 +430,39 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
         $this->assertStringContainsString('Normal turnaround is driven by recorded condition and energy.', $html);
     }
 
+    public function testReturnReadinessPutsActionableRowsBeforeKnownAndCompletedFacts(): void
+    {
+        $data = $this->readinessViewData();
+        $data['readiness']['requirements'][] = [
+            'code' => 'energy_ready', 'label' => 'Energy ready for next pickup', 'phase' => 'next_pickup_preparation',
+            'kind' => 'derived', 'status' => 'unsatisfied', 'blocking' => true, 'satisfied_by' => null,
+            'basis_at' => null, 'action' => ['type' => 'record_fact', 'label' => 'Charge/Fuel to 80%'], 'allows_na' => false,
+        ];
+        $html = $this->render('return', $this->facts(), false, [], $data);
+
+        $this->assertLessThan(strpos($html, '<h3>Known</h3>'), strpos($html, '<h3>Action required</h3>'));
+        $this->assertLessThan(strpos($html, '<h3>Completed checks</h3>'), strpos($html, '<h3>Known</h3>'));
+        $this->assertLessThan(strpos($html, '<h3>Known</h3>'), strpos($html, 'Energy ready for next pickup'));
+        $this->assertStringContainsString('id="checklist-action-exterior_inspected"', $html);
+        $this->assertStringContainsString('id="checklist-action-exterior_inspected" tabindex="-1" class="is-pending readiness-action-row', $html);
+        $this->assertStringContainsString('id="checklist-action-energy_ready"', $html);
+    }
+
+    public function testChecklistFocusTargetsClearStickyMobileNavigation(): void
+    {
+        $css = file_get_contents(dirname(__DIR__, 2) . '/resources/css/app.css');
+
+        $this->assertStringContainsString('.movement-main [id^="checklist-action-"],', $css);
+        $this->assertStringContainsString('.movement-main #readiness-heading,', $css);
+        $this->assertStringContainsString('.movement-main #handoff-entry,', $css);
+        $this->assertStringContainsString('.movement-main #position-entry,', $css);
+        $this->assertStringContainsString('scroll-margin-top: var(--checklist-focus-offset);', $css);
+        $this->assertMatchesRegularExpression('/@media \(max-width: 900px\) \{\s*\.app-frame \{\s*--mobile-nav-height: 64px;/s', $css);
+        $this->assertStringContainsString('min-height: var(--mobile-nav-height);', $css);
+        $this->assertStringContainsString('max-height: calc(100vh - var(--mobile-nav-height));', $css);
+        $this->assertStringContainsString('--checklist-focus-offset: calc(var(--mobile-nav-height) + 20px);', $css);
+    }
+
     public function testActionRequiredRowsUseSharedAlignedActionColumnWithoutChangingPostSecurity(): void
     {
         $view = file_get_contents(dirname(__DIR__, 2) . '/app/Views/trip_movement_checklists/_readiness.php');

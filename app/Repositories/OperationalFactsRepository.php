@@ -137,6 +137,74 @@ class OperationalFactsRepository
             ->getResultArray();
     }
 
+    /** @return array<int, array<string, mixed>> Latest custody event per vehicle. */
+    public function latestCustodyEventsForCompany(int $companyId, array $vehicleIds, string $asOf): array
+    {
+        $vehicleIds = array_values(array_unique(array_filter(array_map('intval', $vehicleIds), static fn (int $id): bool => $id > 0)));
+        if ($companyId < 1 || $vehicleIds === []) {
+            return [];
+        }
+
+        $rows = $this->db->table('trip_movement_events events')
+            ->select('events.*')
+            ->join('fleet_vehicles vehicles', 'vehicles.id = events.fleet_vehicle_id AND vehicles.company_id = events.company_id')
+            ->join('turo_trips_normalized trips', 'trips.id = events.turo_trip_normalized_id AND trips.fleet_vehicle_id = events.fleet_vehicle_id')
+            ->where('events.company_id', $companyId)
+            ->where('trips.deleted_at', null)
+            ->whereIn('events.fleet_vehicle_id', $vehicleIds)
+            ->whereIn('events.event_code', ['actual_handoff', 'actual_return', 'vehicle_recovered'])
+            ->where('events.voided_at', null)
+            ->where('events.occurred_at <=', $asOf)
+            ->groupStart()
+                ->where('events.created_at', null)
+                ->orWhere('events.created_at <=', $asOf)
+            ->groupEnd()
+            ->orderBy('events.occurred_at', 'DESC')
+            ->orderBy('events.id', 'DESC')
+            ->get()->getResultArray();
+
+        $latest = [];
+        foreach ($rows as $row) {
+            $latest[(int) $row['fleet_vehicle_id']] ??= $row;
+        }
+
+        return $latest;
+    }
+
+    /** @return array<int, array<string, mixed>> Latest non-voided cleanliness observation per vehicle. */
+    public function latestCleanlinessForCompany(int $companyId, array $vehicleIds, string $asOf): array
+    {
+        $vehicleIds = array_values(array_unique(array_filter(array_map('intval', $vehicleIds), static fn (int $id): bool => $id > 0)));
+        if ($companyId < 1 || $vehicleIds === []) {
+            return [];
+        }
+
+        $rows = $this->db->table('movement_assessments assessments')
+            ->select('assessments.id, assessments.fleet_vehicle_id, assessments.cleanliness, assessments.captured_at')
+            ->join('trip_movement_events events', 'events.id = assessments.trip_movement_event_id AND events.company_id = assessments.company_id AND events.fleet_vehicle_id = assessments.fleet_vehicle_id AND events.voided_at IS NULL')
+            ->join('fleet_vehicles vehicles', 'vehicles.id = assessments.fleet_vehicle_id AND vehicles.company_id = assessments.company_id')
+            ->where('assessments.company_id', $companyId)
+            ->whereIn('assessments.fleet_vehicle_id', $vehicleIds)
+            ->where('assessments.voided_at', null)
+            ->where('assessments.cleanliness IS NOT NULL', null, false)
+            ->where('assessments.captured_at <=', $asOf)
+            ->where('events.occurred_at <=', $asOf)
+            ->groupStart()
+                ->where('assessments.created_at', null)
+                ->orWhere('assessments.created_at <=', $asOf)
+            ->groupEnd()
+            ->orderBy('assessments.captured_at', 'DESC')
+            ->orderBy('assessments.id', 'DESC')
+            ->get()->getResultArray();
+
+        $latest = [];
+        foreach ($rows as $row) {
+            $latest[(int) $row['fleet_vehicle_id']] ??= $row;
+        }
+
+        return $latest;
+    }
+
     public function upsertScheduledLocation(int $tripId, ?int $vehicleId, string $movementType, array $classification): int
     {
         $now = date('Y-m-d H:i:s');

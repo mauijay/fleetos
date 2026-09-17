@@ -2,6 +2,7 @@
 
 use App\Repositories\FleetIntelligenceRepository;
 use App\Services\Fleet\FleetCommandCenterViewModelService;
+use App\Services\Fleet\OperationalMovementWorkService;
 use App\Services\Fleet\VehicleAvailabilityService;
 use CodeIgniter\Config\Services as CoreServices;
 use CodeIgniter\Test\CIUnitTestCase;
@@ -295,7 +296,7 @@ final class CommandCenterPlanningConsolidationTest extends CIUnitTestCase
     {
         $method = new ReflectionMethod(FleetCommandCenterViewModelService::class, 'fleetTimeline');
 
-        return $method->invoke(new FleetCommandCenterViewModelService(), $items, $vehicles, $readiness, $start, $start->modify('+7 days'), $facts);
+        return $method->invoke(new FleetCommandCenterViewModelService(), $items, $vehicles, $readiness, $start, $start->modify('+7 days'), (new OperationalMovementWorkService())->completionByMovement($facts));
     }
 
     /** @param array<string, mixed> $extra */

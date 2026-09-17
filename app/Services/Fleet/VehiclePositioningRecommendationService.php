@@ -13,6 +13,20 @@ class VehiclePositioningRecommendationService
     /** @return array<string, mixed> */
     public function recommend(array $context): array
     {
+        if (($context['guest_possession'] ?? false) === true) {
+            return [
+                'code' => 'await_return',
+                'label' => 'Await return',
+                'strength' => 'Informational',
+                'reason_codes' => [],
+                'explanation' => 'Vehicle is with the guest; physical preparation resumes after return or recovery.',
+                'basis_type' => (string) ($context['basis_type'] ?? 'unknown'),
+                'missing_facts' => [],
+                'freshness_warning' => $context['freshness']['warning'] ?? null,
+                'transportation_dependency' => null,
+                'active_override' => $context['active_override'] ?? null,
+            ];
+        }
         $location = (string) ($context['basis_location_class'] ?? 'unknown');
         $basisType = (string) ($context['basis_type'] ?? 'unknown');
         $garageCode = (string) ($context['basis_airport_garage_code'] ?? '');

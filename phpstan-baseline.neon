@@ -217,12 +217,6 @@ parameters:
 			path: app/Controllers/Home.php
 
 		-
-			message: '#^Function redirect not found\.$#'
-			identifier: function.notFound
-			count: 1
-			path: app/Controllers/TripMovementChecklists.php
-
-		-
 			message: '#^Function session not found\.$#'
 			identifier: function.notFound
 			count: 2
