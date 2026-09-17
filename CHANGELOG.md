@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.13.0 — Operational Truth & Command Center Refinement
+
+Release date: 2026-09-17
+
+### Authoritative Operational Work
+
+- Complete pickups only on non-voided `actual_handoff`, and returns only on `actual_return` or `vehicle_recovered`; scheduled time passage, `vehicle_positioned`, and staging do not complete a movement.
+- Exclude completed movements from active Today and Tomorrow work. Keep Today, Tomorrow, and Urgent queue badges aligned with visible actionable items; loan obligations remain informational and do not inflate those counts.
+- Derive cleaning actions per operator-held vehicle from an authoritative return/recovery and the latest Dirty or Clean assessment. An early actual return can create a cleaning action before scheduled return time; a later Clean assessment clears only that vehicle's current need.
+- Suppress impossible charging and other physical preparation actions after guest handoff while preserving below-target readiness facts as history. After return/recovery, a later pickup can again require preparation without reactivating the completed trip.
+
+### Checklist & Command Center Presentation
+
+- Advance successful checklist POSTs to the next actionable requirement. Keep mobile focus below the sticky header and show actionable Return Readiness before Known/Recorded Facts and Completed Checks.
+- Remove duplicate current-state cards from Daily Counts while retaining authoritative current Fleet Status in Live Operations. Label utilization as month-to-date.
+- Give Fleet Snapshot, Operations Queue, and External Context consistent bordered dark-card styling; keep mobile rail labels intact while value lists wrap safely.
+
+### Release Boundaries
+
+- No migration or schema change, financial formula change, or Extras Performance implementation in this release.
+
 ## v0.12.1 — Extras Export Compatibility & UI Containment
 
 Release date: 2026-09-16
