@@ -76,6 +76,11 @@
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
 }
 
+.extras-unmapped-grid {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .extras-catalog-grid:not(.is-empty) {
   margin-block-start: 1rem;
 }
@@ -141,6 +146,27 @@
   align-content: start;
   display: grid;
   gap: 0.9rem;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.extra-source-card .mapping-card-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.extra-source-card .mapping-card-main > :first-child {
+  flex: 1 1 10rem;
+  min-width: 0;
+}
+
+.extra-source-card .count-pill {
+  flex: 0 1 auto;
+  max-width: 100%;
+  white-space: normal;
 }
 
 .extra-source-facts {
@@ -149,6 +175,12 @@
   list-style: none;
   grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
   margin: 0;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.extra-source-facts > div {
+  min-width: 0;
 }
 
 .secondary-disclosure > summary::-webkit-details-marker {
@@ -168,25 +200,56 @@
 }
 
 .extra-map-form {
-  align-items: end;
-  display: flex;
-  flex-wrap: wrap;
+  grid-template-columns: minmax(0, 1fr);
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .extra-map-form > label {
-  flex: 1 1 12rem;
+  width: 100%;
+  max-width: 100%;
   min-width: 0;
 }
 
 .extra-map-form select {
-  min-width: 0;
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .extra-map-form > button {
-  flex: 0 1 auto;
+  width: 100%;
   max-width: 100%;
+  min-width: 0;
   white-space: normal;
+}
+
+.extra-source-card > .secondary-disclosure {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.extra-source-card > .secondary-disclosure > summary {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.extra-source-card .extra-catalog-form {
+  grid-template-columns: minmax(0, 1fr);
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.extra-source-card .extra-catalog-form > label,
+.extra-source-card .extra-catalog-form input,
+.extra-source-card .extra-catalog-form textarea,
+.extra-source-card .extra-catalog-form button {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .extra-catalog-form {

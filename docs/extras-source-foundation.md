@@ -6,6 +6,12 @@ Slice A establishes source-backed Extra activity without adding a performance re
 
 The operator runs `tools/turo-extras-exporter.js` in browser developer tools while already authenticated on `https://turo.com`. The helper calls Turo's same-origin reservation-detail endpoint sequentially and downloads a local `fleetos-turo-extras-v1` JSON file. It never reads or emits cookies, authorization headers, session tokens, guest contact data, licenses, messages, or unrelated reservation data. FleetOS does not log into Turo and has no scraping proxy.
 
+Turo may encode stable `extraId`, `reservationStateExtraId`, and `reservationStateId` values as JSON numbers. The browser exporter accepts only safe integer identifiers or digit strings and normalizes them to the existing sanitized string representation without deriving identity from labels, descriptions, or prices. It maps only explicitly supported commercial fields into the strict FleetOS schema.
+
+In the current selected-Extra response, `extraType.label` supplies the source label and `extraType.value` supplies the source type code; `extraValue` may be absent. The selected historical price and currency come from `priceWithCurrency.amount` and `priceWithCurrency.currencyCode`. Explicit `quantity` is preserved, including values greater than one, while omitted quantity remains `NULL`-compatible. `extraType.priceRecommendationSummary` is not a selected price and is never used. Older explicit aliases remain supported only for their established legacy shape.
+
+Authoritative selected Extras are read only from an explicitly present `booking.extras` or `cancelledRequest.extras` array. An empty array is a valid complete snapshot; a missing or non-array field is not evidence that a reservation has zero Extras and is exported as a safe failure instead. The runtime exporter does not recursively discover or accept arbitrary `extras` containers.
+
 Paste the helper into a Turo tab, then run:
 
 ```js
