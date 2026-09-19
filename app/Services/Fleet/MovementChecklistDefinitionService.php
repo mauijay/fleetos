@@ -38,18 +38,9 @@ class MovementChecklistDefinitionService
     /** @return array<int, array<string, mixed>> */
     private function returnItems(): array
     {
-        return [
-            $this->item('vehicle_received', 'Return received or vehicle located', true, true, 10),
-            $this->item('return_time_confirmed', 'Return time confirmed', true, false, 20),
-            $this->item('exterior_inspected', 'Exterior inspected', true, true, 30),
-            $this->item('interior_inspected', 'Interior inspected', true, true, 40),
-            $this->item('damage_check_completed', 'Damage check completed', true, true, 50),
-            $this->item('charge_confirmed', 'Charge confirmed', true, true, 60),
-            $this->item('return_photos_completed', 'Return photos completed', true, false, 70),
-            $this->item('cleaning_status_assigned', 'Cleaning status assigned', true, false, 80),
-            $this->item('vehicle_disposition_selected', 'Vehicle disposition assigned', true, true, 90),
-            $this->item('return_workflow_completed', 'Return workflow completed', true, false, 100),
-        ];
+        // Recovery captures custody, time and energy. Turo owns routine return inspection;
+        // FleetOS derives turnaround work from authoritative recovery/readiness facts.
+        return [];
     }
 
     /** @return array<string, mixed> */

@@ -135,6 +135,43 @@ final class MovementBoardIntelligenceServiceTest extends CIUnitTestCase
         $this->assertSame('/operations/checklists/41', $card['current_movement_href']);
     }
 
+    public function testAuthoritativeCustodyOverridesStaleImportedStatusOnMovementBoard(): void
+    {
+        $asOf = new DateTimeImmutable('2026-09-03 12:00:00');
+        $schedule = ['id' => 900, 'starts_at' => '2026-09-02 08:00:00', 'ends_at' => '2026-09-05 17:00:00'];
+        $events = [
+            ['actual_handoff', 'reserved', 'available', 'currently_rented', 'Currently Rented', true],
+            ['guest_return_staged', 'in_progress', 'currently_rented', 'awaiting_recovery', 'Awaiting Recovery', false],
+            ['vehicle_recovered', 'in_progress', 'currently_rented', 'turnaround_attention', 'Recovered — turnaround needed', false],
+            ['vehicle_recovered', 'reserved', 'currently_rented', 'turnaround_attention', 'Recovered — turnaround needed', false],
+            ['vehicle_recovered', 'booked', 'currently_rented', 'turnaround_attention', 'Recovered — turnaround needed', false],
+            ['actual_return', 'in_progress', 'currently_rented', 'turnaround_attention', 'Returned — turnaround needed', false],
+        ];
+
+        foreach ($events as [$eventCode, $sourceStatus, $baseStatus, $expectedStatus, $expectedLabel, $expectedRented]) {
+            $service = $this->service(
+                ['id' => 90, 'turo_trip_normalized_id' => 900, 'event_code' => $eventCode, 'occurred_at' => '2026-09-03 11:00:00'],
+                $schedule,
+                null,
+                ['energy_kind' => 'unknown', 'capabilities' => []],
+                null,
+            );
+            $card = $service->enrich([[
+                'fleet_vehicle_id' => 9,
+                'status' => $sourceStatus,
+                'primary_status' => $baseStatus,
+                'primary_status_label' => 'Imported status',
+                'flags' => $baseStatus === 'currently_rented' ? ['currently_rented', 'returning_today'] : [],
+            ]], $asOf)[0];
+
+            $this->assertSame($sourceStatus, $card['status'], $eventCode . ' must not rewrite the imported status');
+            $this->assertSame($expectedStatus, $card['primary_status'], $eventCode . ' must control operational status');
+            $this->assertSame($expectedLabel, $card['primary_status_label']);
+            $this->assertSame($expectedRented, in_array('currently_rented', $card['flags'], true));
+            $this->assertNotContains('returning_today', $card['flags']);
+        }
+    }
+
     public function testActualReturnUsesActualLocationAndIncompleteAssessmentRequiresAction(): void
     {
         $service = $this->service(
@@ -147,14 +184,15 @@ final class MovementBoardIntelligenceServiceTest extends CIUnitTestCase
 
         $card = $service->enrich([['fleet_vehicle_id' => 9, 'status' => 'in_progress', 'checklist_required_remaining' => 4, 'checklist_critical_open' => 0]], new DateTimeImmutable('2026-09-03 12:00:00'))[0];
 
-        $this->assertSame('returned_assessment_required', $card['state']['code']);
-        $this->assertSame('Return assessment needed', $card['state']['label']);
+        $this->assertSame('turnaround_attention', $card['state']['code']);
+        $this->assertSame('Returned — turnaround needed', $card['state']['label']);
         $this->assertSame('Current location', $card['location_heading']);
         $this->assertSame('home', $card['location_class']);
         $this->assertSame('actual', $card['location_basis']);
         $this->assertSame('Fuel', $card['energy_label']);
-        $this->assertSame('complete_return_assessment', $card['action']['code']);
-        $this->assertSame([], $card['blockers']);
+        $this->assertSame('complete_turnaround', $card['action']['code']);
+        $this->assertContains('cleaning_required', array_column($card['blockers'], 'code'));
+        $this->assertContains('energy_measurement_needed', array_column($card['blockers'], 'code'));
     }
 
     public function testLaterCleanObservationClearsStaleReturnConditionOnMovementCard(): void
@@ -195,6 +233,7 @@ final class MovementBoardIntelligenceServiceTest extends CIUnitTestCase
         $this->assertSame('/operations/checklists/40?action=confirm-pickup', $card['action']['href']);
         $this->assertSame('/operations/checklists/40', $card['current_movement_href']);
         $this->assertSame('International Garage · Blue', $card['airport_garage_line']);
+        $this->assertSame('Level 7 · Row F · International Garage', $card['airport_location_label']);
     }
 
     public function testRecordHandoffNavigatesToPickupEntryWithoutAWriteEndpoint(): void
@@ -347,6 +386,7 @@ final class MovementBoardIntelligenceServiceTest extends CIUnitTestCase
 
         $this->assertSame('Terminal 2 Garage · Red', $card['airport_garage_line']);
         $this->assertSame('Level 4 · Row M', $card['airport_position_line']);
+        $this->assertSame('Level 4 · Row M · Terminal 2 Garage', $card['airport_location_label']);
         $this->assertFalse($card['approved_turo_garage']);
         $this->assertSame('wrong_airport_garage', $card['blockers'][0]['code']);
         $this->assertSame('relocate_to_international', $card['recommendation']['code']);

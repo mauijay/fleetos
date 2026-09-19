@@ -44,9 +44,9 @@ class MovementAssessmentService
         return $this->repo()->assessment($assessmentId);
     }
 
-    public function hasExactActiveCurrent(int $companyId, int $vehicleId, string $cleanliness, mixed $energyPercent, string $capturedAt): bool
+    public function hasExactActiveCurrent(int $companyId, int $vehicleId, ?string $cleanliness, mixed $energyPercent, string $capturedAt): bool
     {
-        $energy = filter_var($energyPercent, FILTER_VALIDATE_INT);
+        $energy = $energyPercent === null ? null : filter_var($energyPercent, FILTER_VALIDATE_INT);
         if ($energy === false) {
             return false;
         }

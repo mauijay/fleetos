@@ -370,9 +370,11 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
             'vehicles_below_battery_threshold' => [],
         ]);
 
-        $movementWork = $this->getMockBuilder(\App\Services\Fleet\OperationalMovementWorkService::class)->disableOriginalConstructor()->onlyMethods(['singleActiveCompanyId', 'completionsForCompany'])->getMock();
+        $movementWork = $this->getMockBuilder(\App\Services\Fleet\OperationalMovementWorkService::class)->disableOriginalConstructor()->onlyMethods(['singleActiveCompanyId', 'completionsForCompany', 'awaitingRecoveryForCompany', 'energyNeedsForCompany'])->getMock();
         $movementWork->method('singleActiveCompanyId')->willReturn(1);
         $movementWork->method('completionsForCompany')->willReturn([]);
+        $movementWork->method('awaitingRecoveryForCompany')->willReturn([]);
+        $movementWork->method('energyNeedsForCompany')->willReturn([]);
         $service = new TaskService($repository, $health, $movementWork);
         $today = $service->today(new DateTimeImmutable('2026-06-15 12:00:00'));
 
@@ -567,7 +569,7 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
         $this->assertSame('true', $viewModel['navigation'][0]['active']);
         $this->assertNotContains('Fleet', array_column($viewModel['navigation'], 'label'));
         $this->assertTrue($viewModel['mission_clear']);
-        $this->assertCount(8, $viewModel['fleet_status']);
+        $this->assertCount(9, $viewModel['fleet_status']);
         $this->assertSame('Premium', $viewModel['vehicles'][0]['segment']);
         $this->assertSame('info', $viewModel['vehicles'][0]['segment_tone']);
         $this->assertSame('2026 Tesla Model Y', $viewModel['vehicles'][0]['model_label']);

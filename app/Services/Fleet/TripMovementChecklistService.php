@@ -87,10 +87,10 @@ class TripMovementChecklistService
         }
 
         $items = $this->repo()->items($id);
-        $progress = $this->readiness->progress($items);
+        $progress = $this->readiness->progress($items, (string) $checklist['movement_type']);
         $status = $this->readiness->status((string) $checklist['movement_type'], $items, $checklist['vehicle_disposition'] ?? null, $checklist['completed_at'] !== null);
 
-        return array_merge($checklist, ['exists' => true, 'items' => $items, 'progress' => $progress, 'readiness_status' => $status]);
+        return array_merge($checklist, ['exists' => true, 'items' => $items, 'audits' => $this->repo()->audits($id), 'progress' => $progress, 'readiness_status' => $status]);
     }
 
     /** @return array<string, mixed>|null */
@@ -102,10 +102,10 @@ class TripMovementChecklistService
         }
 
         $items = $this->repo()->items($id);
-        $progress = $this->readiness->progress($items);
+        $progress = $this->readiness->progress($items, (string) $checklist['movement_type']);
         $status = $this->readiness->status((string) $checklist['movement_type'], $items, $checklist['vehicle_disposition'] ?? null, $checklist['completed_at'] !== null);
 
-        return array_merge($checklist, ['exists' => true, 'items' => $items, 'progress' => $progress, 'readiness_status' => $status]);
+        return array_merge($checklist, ['exists' => true, 'items' => $items, 'audits' => $this->repo()->audits($id), 'progress' => $progress, 'readiness_status' => $status]);
     }
 
     public function completeItem(int $itemId, ?string $note = null, ?int $actorUserId = null): bool

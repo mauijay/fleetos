@@ -42,7 +42,7 @@ class VehicleDailyStateService
                 'guest_name' => (string) ($pickup['guest_name'] ?? $return['guest_name'] ?? 'Guest not captured'),
                 'location_label' => $this->locationLabel($vehicle),
                 'delivery_type' => (bool) ($vehicle['airport_delivery_scheduled'] ?? false) ? 'Airport' : 'Not captured',
-                'cleaning_status_label' => isset($cleaning[$vehicleId]) ? 'Cleaning needed from Dirty return' : 'No cleaning task known',
+                'cleaning_status_label' => isset($cleaning[$vehicleId]) ? 'Cleaning required after return' : 'No cleaning task known',
                 'charging_status_label' => 'No actionable Charge/Fuel preparation recorded',
                 'battery_label' => $vehicle['current_battery'] === null ? 'Battery not captured' : (string) $vehicle['current_battery'],
                 'actions' => $this->actions($flags, $turnaround),

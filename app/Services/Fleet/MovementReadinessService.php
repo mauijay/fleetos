@@ -11,6 +11,11 @@ class MovementReadinessService
             return 'completed';
         }
 
+        if ($movementType === 'return') {
+            // The current return state comes from the movement projection, not legacy items.
+            return 'in_progress';
+        }
+
         $applicable = array_values(array_filter($items, static fn (array $item): bool => ($item['applicability'] ?? 'applicable') === 'applicable'
             && ($movementType !== 'return' || ($item['item_code'] ?? null) !== 'vehicle_disposition_selected')));
         $criticalOpen = array_values(array_filter($applicable, static fn (array $item): bool => (bool) ($item['is_critical'] ?? false) && ($item['completion_state'] ?? 'open') !== 'complete'));
@@ -23,8 +28,11 @@ class MovementReadinessService
     }
 
     /** @param array<int, array<string, mixed>> $items @return array<string, mixed> */
-    public function progress(array $items): array
+    public function progress(array $items, string $movementType = 'pickup'): array
     {
+        if ($movementType === 'return') {
+            return ['required_count' => 0, 'required_complete_count' => 0, 'required_remaining_count' => 0, 'percent' => 100, 'remaining_critical_labels' => []];
+        }
         $required = array_values(array_filter($items, static fn (array $item): bool => (bool) ($item['is_required'] ?? false) && ($item['applicability'] ?? 'applicable') === 'applicable'));
         $complete = array_values(array_filter($required, static fn (array $item): bool => ($item['completion_state'] ?? 'open') === 'complete'));
         $remainingCritical = array_values(array_filter($required, static fn (array $item): bool => (bool) ($item['is_critical'] ?? false) && ($item['completion_state'] ?? 'open') !== 'complete'));

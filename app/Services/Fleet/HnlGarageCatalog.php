@@ -95,7 +95,7 @@ class HnlGarageCatalog
         }
     }
 
-    /** @return array{garage_line:string,position_line:string,approved_turo_garage:bool}|null */
+    /** @return array{garage_line:string,position_line:string,location_label:string,approved_turo_garage:bool}|null */
     public function presentation(?string $garageCode, mixed $level, ?string $row): ?array
     {
         try {
@@ -108,8 +108,37 @@ class HnlGarageCatalog
         return [
             'garage_line' => $definition['name'] . ' · ' . $definition['color'],
             'position_line' => 'Level ' . $parking['level'] . ' · Row ' . $parking['row'],
+            'location_label' => $this->locationLabel($parking['garage_code'], $parking['level'], $parking['row']),
             'approved_turo_garage' => $definition['approved_turo_garage'],
         ];
+    }
+
+    public function locationLabel(?string $garageCode, mixed $level, ?string $row, ?string $detail = null): ?string
+    {
+        $parts = [];
+        $definition = $this->definition($garageCode);
+        $normalizedLevel = filter_var($level, FILTER_VALIDATE_INT);
+        if ($normalizedLevel !== false && $normalizedLevel >= 1
+            && ($definition === null || $normalizedLevel <= (int) $definition['levels'])) {
+            $parts[] = 'Level ' . $normalizedLevel;
+        }
+
+        $normalizedRow = strtoupper(trim((string) $row));
+        $rowGarage = $this->garageForRow($normalizedRow);
+        if ($rowGarage !== null && ($definition === null || $rowGarage === $definition['code'])) {
+            $parts[] = 'Row ' . $normalizedRow;
+            $definition ??= self::DEFINITIONS[$rowGarage];
+        }
+        if ($definition !== null) {
+            $parts[] = $definition['name'];
+        }
+
+        $normalizedDetail = trim((string) $detail);
+        if ($normalizedDetail !== '') {
+            $parts[] = $normalizedDetail;
+        }
+
+        return $parts === [] ? null : implode(' · ', $parts);
     }
 
     /** @param array{garage_code:string,level:int,row:string} $parking */

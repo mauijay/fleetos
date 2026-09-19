@@ -3,6 +3,7 @@
 namespace App\Services\Fleet;
 
 use App\Repositories\OperationalFactsRepository;
+use App\Repositories\VehicleRecoveryExceptionRepository;
 
 class MovementBoardIntelligenceService
 {
@@ -25,25 +26,65 @@ class MovementBoardIntelligenceService
         $cleanliness = $companyId !== null && $companyId > 0
             ? $this->repo()->latestCleanlinessForCompany($companyId, $vehicleIds, $asOf->format('Y-m-d H:i:s'))
             : [];
+        $energy = $companyId !== null && $companyId > 0
+            ? $this->repo()->latestEnergyForCompany($companyId, $vehicleIds, $asOf->format('Y-m-d H:i:s'))
+            : [];
+        $work = new OperationalMovementWorkService($this->repo());
+        $cleaningNeeds = $companyId !== null && $companyId > 0
+            ? array_column($work->cleaningNeedsForCompany($companyId, $asOf), null, 'fleet_vehicle_id')
+            : [];
+        $energyNeeds = $companyId !== null && $companyId > 0
+            ? array_column($work->energyNeedsForCompany($companyId, $asOf), null, 'fleet_vehicle_id')
+            : [];
+        $exceptionsByVehicle = [];
+        if ($companyId !== null && $companyId > 0) {
+            foreach ((new VehicleRecoveryExceptionRepository())->openForCompany($companyId) as $exception) {
+                $exceptionsByVehicle[(int) $exception['fleet_vehicle_id']][] = $exception;
+            }
+        }
 
-        return array_map(fn (array $card): array => $this->enrichCard($card, $asOf, $cleanliness[(int) ($card['fleet_vehicle_id'] ?? 0)] ?? null), $cards);
+        return array_map(fn (array $card): array => $this->enrichCard(
+            $card,
+            $asOf,
+            $cleanliness[(int) ($card['fleet_vehicle_id'] ?? 0)] ?? null,
+            $energy[(int) ($card['fleet_vehicle_id'] ?? 0)] ?? null,
+            $cleaningNeeds[(int) ($card['fleet_vehicle_id'] ?? 0)] ?? null,
+            $energyNeeds[(int) ($card['fleet_vehicle_id'] ?? 0)] ?? null,
+            $companyId,
+            $exceptionsByVehicle[(int) ($card['fleet_vehicle_id'] ?? 0)] ?? [],
+        ), $cards);
     }
 
     /** @return array<string, mixed> */
-    private function enrichCard(array $card, \DateTimeImmutable $asOf, ?array $latestCleanliness): array
+    private function enrichCard(array $card, \DateTimeImmutable $asOf, ?array $latestCleanliness, ?array $latestEnergy, ?array $cleaningNeed, ?array $energyNeed, ?int $companyId, array $recoveryExceptions = []): array
     {
         $vehicleId = (int) ($card['fleet_vehicle_id'] ?? 0);
         $event = $this->repo()->latestActiveMovementEvent($vehicleId, $asOf->format('Y-m-d H:i:s'));
         $lifecycleEvent = $this->repo()->latestActiveLifecycleEvent($vehicleId, $asOf->format('Y-m-d H:i:s'));
+        $awaitingRecovery = ($lifecycleEvent['event_code'] ?? null) === 'guest_return_staged';
         $tripId = $this->relevantTripId($lifecycleEvent, $card);
         $schedule = $tripId === null ? null : $this->repo()->tripSchedule($tripId);
         $assessment = $this->repo()->assessmentForEventOrTrip(isset($lifecycleEvent['id']) ? (int) $lifecycleEvent['id'] : null, $tripId);
+        if ($awaitingRecovery) {
+            $assessment = null;
+        }
         if (in_array($lifecycleEvent['event_code'] ?? null, ['actual_return', 'vehicle_recovered'], true)
             && $latestCleanliness !== null
-            && (string) ($latestCleanliness['captured_at'] ?? '') >= (string) ($lifecycleEvent['occurred_at'] ?? '')
+            && (string) ($latestCleanliness['captured_at'] ?? '') > (string) ($lifecycleEvent['occurred_at'] ?? '')
             && (string) ($latestCleanliness['captured_at'] ?? '') >= (string) ($assessment['captured_at'] ?? '')) {
             $assessment = array_merge($assessment ?? [], ['cleanliness' => $latestCleanliness['cleanliness']]);
         }
+        if (in_array($lifecycleEvent['event_code'] ?? null, ['actual_return', 'vehicle_recovered'], true)
+            && $latestEnergy !== null
+            && ((int) ($latestEnergy['trip_movement_event_id'] ?? 0) === (int) ($lifecycleEvent['id'] ?? 0)
+                || (string) $latestEnergy['captured_at'] > (string) $lifecycleEvent['occurred_at'])
+            && (string) $latestEnergy['captured_at'] >= (string) ($assessment['captured_at'] ?? '')) {
+            $assessment = array_merge($assessment ?? [], ['energy_percent' => $latestEnergy['energy_percent']]);
+        }
+        $cleaningRequired = $cleaningNeed !== null || ($companyId === null
+            && in_array($lifecycleEvent['event_code'] ?? null, ['actual_return', 'vehicle_recovered'], true)
+            && (($assessment['cleanliness'] ?? null) !== 'clean'
+                || (string) ($assessment['captured_at'] ?? '') <= (string) $lifecycleEvent['occurred_at']));
         $profile = $this->repo()->profile($vehicleId) ?? ['energy_kind' => 'unknown', 'ready_energy_target_percent' => null, 'capabilities' => []];
         $nextTrip = $this->nextTrips()->forVehicle($vehicleId, $asOf);
         $freshness = $this->freshness()->assess($nextTrip['import_completed_at'] ?? $schedule['import_completed_at'] ?? null, $asOf);
@@ -57,6 +98,8 @@ class MovementBoardIntelligenceService
             'latest_event' => $lifecycleEvent,
             'trip_schedule' => $schedule,
             'assessment' => $assessment,
+            'cleaning_required' => $cleaningRequired,
+            ...($companyId !== null ? ['energy_condition' => $energyNeed['condition_code'] ?? null] : []),
             'profile' => $profile,
             'next_trip' => $nextTrip,
             'blockers' => $blockers,
@@ -65,6 +108,7 @@ class MovementBoardIntelligenceService
         $activePlan = $this->plans()->active($vehicleId, $event, $nextTrip, $asOf);
         $usablePlan = $activePlan !== null && ! (bool) ($activePlan['is_basis_stale'] ?? true) ? $activePlan : null;
         $recommendation = $this->positioning()->recommend([
+            'awaiting_recovery' => $awaitingRecovery,
             'guest_possession' => ($lifecycleEvent['event_code'] ?? null) === 'actual_handoff',
             'basis_location_class' => $location['class'],
             'basis_type' => $location['basis'],
@@ -72,6 +116,7 @@ class MovementBoardIntelligenceService
             'next_trip' => $nextTrip,
             'freshness' => $freshness,
             'assessment' => $assessment,
+            'cleaning_required' => $cleaningRequired,
             'profile' => $profile,
             'capabilities' => $profile['capabilities'] ?? [],
             'blockers' => $state['blockers'],
@@ -79,7 +124,7 @@ class MovementBoardIntelligenceService
             'active_override' => $activePlan,
         ]);
         $energyKind = (string) ($profile['energy_kind'] ?? 'unknown');
-        $recommendation = $this->presentRecommendation($recommendation, $assessment, $profile);
+        $recommendation = $this->presentRecommendation($recommendation, $assessment, $profile, $cleaningRequired);
         $currentTrip = $this->presentCurrentTrip($schedule, (string) $state['code']);
         $currentMovementHref = $currentTrip === null ? null : $this->movementHref($state, $card, $schedule);
         $readinessRemaining = (int) ($card['readiness_blocking_remaining'] ?? 0);
@@ -87,8 +132,41 @@ class MovementBoardIntelligenceService
             $readinessRemaining += (int) ($card['turnaround_readiness_remaining'] ?? 0);
         }
         $compactReadiness = $this->compactReadiness($card, $readinessRemaining);
+        if ($awaitingRecovery) {
+            $compactReadiness = ['blocking_count' => 0, 'additional_count' => 0, 'summary' => 'Physical preparation resumes after recovery', 'next_actions' => []];
+            $readinessRemaining = 0;
+        }
+        $lifecycleCode = (string) ($lifecycleEvent['event_code'] ?? '');
+        $hasCustodyFact = in_array($lifecycleCode, ['actual_handoff', 'guest_return_staged', 'actual_return', 'vehicle_recovered'], true);
+        $primaryStatus = $hasCustodyFact ? match ($state['code']) {
+            'on_trip' => 'currently_rented',
+            'return_confirmation_overdue' => 'late_return',
+            'ready' => 'available',
+            default => (string) $state['code'],
+        } : ($card['primary_status'] ?? null);
+        $flags = $card['flags'] ?? [];
+        if ($lifecycleCode === 'actual_handoff') {
+            $flags = array_values(array_unique([...$flags, 'currently_rented']));
+        } elseif ($awaitingRecovery) {
+            $flags = array_values(array_diff($flags, ['currently_rented', 'cleaning_required', 'charging_required', 'energy_check_required', 'late_return', 'returning_today']));
+        } elseif (in_array($lifecycleCode, ['actual_return', 'vehicle_recovered'], true)) {
+            $flags = array_values(array_diff($flags, ['currently_rented', 'late_return', 'returning_today']));
+            $flags = array_values(array_diff($flags, ['cleaning_required', 'charging_required', 'energy_check_required']));
+            if ($cleaningRequired) {
+                $flags[] = 'cleaning_required';
+            }
+            if (($energyNeed['condition_code'] ?? null) === 'charge_required') {
+                $flags[] = 'charging_required';
+            } elseif (($energyNeed['condition_code'] ?? null) === 'measurement_needed') {
+                $flags[] = 'energy_check_required';
+            }
+        }
 
         return array_merge($card, [
+            'recovery_exceptions' => $recoveryExceptions,
+            'primary_status' => $primaryStatus,
+            'primary_status_label' => $hasCustodyFact ? $state['label'] : ($card['primary_status_label'] ?? null),
+            'status_tone' => $hasCustodyFact ? $state['tone'] : ($card['status_tone'] ?? null),
             'state' => $state,
             'primary_line' => $state['primary_line'],
             'location' => $location,
@@ -98,8 +176,11 @@ class MovementBoardIntelligenceService
             'location_detail' => $location['detail'],
             'airport_garage_line' => $location['garage_line'],
             'airport_position_line' => $location['position_line'],
+            'airport_location_label' => $location['location_label'],
             'approved_turo_garage' => $location['approved_turo_garage'],
             'location_basis' => $location['basis'],
+            'guest_reported_at_label' => $awaitingRecovery ? (new \DateTimeImmutable((string) $lifecycleEvent['occurred_at']))->format('M j, g:i A') : null,
+            'guest_report_time_basis' => $awaitingRecovery ? ($lifecycleEvent['source'] ?? null) : null,
             'current_trip' => $currentTrip,
             'current_movement_href' => $currentMovementHref,
             'next_trip' => $this->presentNextTrip($nextTrip),
@@ -110,6 +191,13 @@ class MovementBoardIntelligenceService
             'readiness_compact' => $compactReadiness,
             'readiness_summary' => $compactReadiness['summary'],
             'readiness_display_remaining' => $readinessRemaining,
+            'readiness_blocking_remaining' => $readinessRemaining,
+            'readiness_additional_remaining' => $awaitingRecovery ? 0 : ($card['readiness_additional_remaining'] ?? 0),
+            'readiness_blockers' => $awaitingRecovery ? [] : ($card['readiness_blockers'] ?? []),
+            'flags' => $flags,
+            'actions' => $awaitingRecovery ? ['Recover Vehicle'] : array_values(array_unique(array_merge($card['actions'] ?? [], $cleaningRequired ? ['Cleaning Required'] : [], $energyNeed === null ? [] : [(string) $energyNeed['label']]))),
+            'cleaning_status_label' => $awaitingRecovery ? 'Not actionable until recovery' : ($cleaningRequired ? 'Cleaning required after return' : 'No cleaning task known'),
+            'charging_status_label' => $awaitingRecovery ? 'Not actionable until recovery' : ($energyNeed['label'] ?? 'No Charge/Fuel action needed'),
             'recommendation' => $recommendation,
             'operator_plan' => $this->presentOperatorPlan($activePlan, (string) ($recommendation['code'] ?? '')),
             'positioning_plan_href' => '/fleet/vehicles/' . $vehicleId . '/positioning-plan',
@@ -131,9 +219,17 @@ class MovementBoardIntelligenceService
         return null;
     }
 
-    /** @return array{heading:string,class:string,detail:?string,basis:string,airport_garage_code:?string,garage_line:?string,position_line:?string,approved_turo_garage:?bool} */
+    /** @return array{heading:string,class:string,detail:?string,basis:string,airport_garage_code:?string,garage_line:?string,position_line:?string,location_label:?string,approved_turo_garage:?bool} */
     private function positionBasis(?array $event, ?array $schedule, ?array $currentPosition): array
     {
+        if (($event['event_code'] ?? null) === 'guest_return_staged') {
+            return array_merge($this->eventAirportParking($event), [
+                'heading' => 'Guest-reported location — unverified',
+                'class' => (string) ($event['location_class'] ?? 'unknown'),
+                'detail' => $this->nullableText($event['location_detail'] ?? null),
+                'basis' => 'guest_reported',
+            ]);
+        }
         if (($event['event_code'] ?? null) === 'actual_handoff') {
             return array_merge($this->emptyAirportParking(), [
                 'heading' => 'Planned return',
@@ -174,7 +270,7 @@ class MovementBoardIntelligenceService
         ]);
     }
 
-    /** @return array{airport_garage_code:?string,garage_line:?string,position_line:?string,approved_turo_garage:?bool} */
+    /** @return array{airport_garage_code:?string,garage_line:?string,position_line:?string,location_label:?string,approved_turo_garage:?bool} */
     private function eventAirportParking(array $event): array
     {
         $parking = null;
@@ -195,14 +291,15 @@ class MovementBoardIntelligenceService
             'airport_garage_code' => $parking['garage_code'],
             'garage_line' => $presentation['garage_line'] ?? null,
             'position_line' => $presentation['position_line'] ?? null,
+            'location_label' => $presentation['location_label'] ?? null,
             'approved_turo_garage' => $presentation['approved_turo_garage'] ?? null,
         ];
     }
 
-    /** @return array{airport_garage_code:null,garage_line:null,position_line:null,approved_turo_garage:null} */
+    /** @return array{airport_garage_code:null,garage_line:null,position_line:null,location_label:null,approved_turo_garage:null} */
     private function emptyAirportParking(): array
     {
-        return ['airport_garage_code' => null, 'garage_line' => null, 'position_line' => null, 'approved_turo_garage' => null];
+        return ['airport_garage_code' => null, 'garage_line' => null, 'position_line' => null, 'location_label' => null, 'approved_turo_garage' => null];
     }
 
     /** @return array<int, array<string, string>> */
@@ -270,6 +367,7 @@ class MovementBoardIntelligenceService
 
         $timing = match ($stateCode) {
             'on_trip', 'return_confirmation_overdue' => ['Due', $schedule['ends_at'] ?? null],
+            'awaiting_recovery' => ['Scheduled return', $schedule['ends_at'] ?? null],
             'staged_for_pickup' => ['Pickup', $schedule['starts_at'] ?? null],
             'staged_pickup_confirmation_needed', 'pickup_confirmation_overdue' => ['Scheduled', $schedule['starts_at'] ?? null],
             default => null,
@@ -315,9 +413,10 @@ class MovementBoardIntelligenceService
     }
 
     /** @return array<string, mixed> */
-    private function presentRecommendation(array $recommendation, ?array $assessment, array $profile): array
+    private function presentRecommendation(array $recommendation, ?array $assessment, array $profile, bool $cleaningRequired = false): array
     {
         $actionLabels = [
+            'await_recovery' => 'Recover Vehicle before preparation',
             'await_return' => 'Await return before physical preparation',
             'leave_at_airport' => 'Leave at HNL',
             'retrieve_home' => 'Retrieve to home',
@@ -352,14 +451,14 @@ class MovementBoardIntelligenceService
         $reasonCodes = $recommendation['reason_codes'] ?? [];
         $target = isset($profile['ready_energy_target_percent']) ? (int) $profile['ready_energy_target_percent'] : null;
         $isElectric = ($profile['energy_kind'] ?? null) === 'electric';
-        $isDirty = ($assessment['cleanliness'] ?? null) === 'dirty';
+        $isDirty = $cleaningRequired || ($assessment['cleanliness'] ?? null) === 'dirty';
         $isBelowTarget = $target !== null && isset($assessment['energy_percent']) && (int) $assessment['energy_percent'] < $target;
         $needsTurnaround = $isElectric && ($isDirty || $isBelowTarget);
         $reasons = [];
         foreach ($reasonCodes as $code) {
             if ($code === 'hnl_turnaround_supported') {
                 if ($needsTurnaround) {
-                    $reasons[] = 'Clean and charge on site.';
+                    $reasons[] = $isBelowTarget ? 'Clean and charge on site.' : 'Clean on site.';
                 }
                 continue;
             }
@@ -412,6 +511,7 @@ class MovementBoardIntelligenceService
         $checklistHref = $this->movementHref($state, $card, $schedule);
         $checklistHref ??= $card['checklist_href'] ?? null;
         $checklistLabels = [
+            'recover_vehicle' => 'Recover Vehicle',
             'confirm_handoff' => in_array($state['code'] ?? null, ['staged_for_pickup', 'staged_pickup_confirmation_needed'], true) ? 'Confirm Guest Pickup' : 'Record handoff',
             'monitor_pickup' => 'Record handoff',
             'confirm_return' => 'Record return',
@@ -423,6 +523,9 @@ class MovementBoardIntelligenceService
         if ($checklistHref !== null && isset($checklistLabels[$code])) {
             $action = in_array($state['code'] ?? null, ['staged_for_pickup', 'staged_pickup_confirmation_needed'], true) ? 'confirm-pickup' : 'handoff';
             $href = in_array($code, ['confirm_handoff', 'monitor_pickup'], true) ? (string) $checklistHref . '?action=' . $action : (string) $checklistHref;
+            if ($code === 'recover_vehicle') {
+                $href .= '#recover-vehicle-entry';
+            }
 
             return ['code' => $code, 'label' => $checklistLabels[$code], 'href' => $href];
         }
@@ -439,7 +542,7 @@ class MovementBoardIntelligenceService
     {
         $code = (string) ($state['primary_action']['code'] ?? 'none');
         $movementType = in_array($code, ['confirm_handoff', 'monitor_pickup'], true) ? 'pickup'
-            : (in_array($code, ['confirm_return', 'monitor_return', 'complete_return_assessment', 'complete_turnaround'], true) ? 'return' : null);
+            : (in_array($code, ['confirm_return', 'monitor_return', 'recover_vehicle', 'complete_return_assessment', 'complete_turnaround'], true) ? 'return' : null);
         $tripId = (int) ($schedule['id'] ?? 0);
         foreach ($card['checklists'] ?? [] as $checklist) {
             if (($movementType === null || ($checklist['movement_type'] ?? null) === $movementType)

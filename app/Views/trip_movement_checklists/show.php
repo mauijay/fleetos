@@ -19,7 +19,23 @@
 /** @var array<string, array<string, mixed>|null>|null $tripContext */
 /** @var array<string, mixed> $positionFormData */
 /** @var bool $showPositionForm */
+/** @var array<string, mixed>|null $guestReturn */
+/** @var bool $guestReturnActive */
+/** @var array<string, mixed> $guestReturnFormData */
+/** @var bool $returnCompleted */
+/** @var bool $correctGuestReturn */
+/** @var bool $canRecover */
+/** @var array<string, mixed> $recoveryFormData */
 $hnlGarages ??= (new \App\Services\Fleet\HnlGarageCatalog())->definitions();
+$guestReturn ??= null;
+$guestReturnActive ??= false;
+$guestReturnFormData ??= [];
+$returnCompleted ??= false;
+$correctGuestReturn ??= false;
+$canRecover ??= false;
+$recoveryFormData ??= [];
+$recoveryExceptions ??= [];
+$turnaroundWork ??= ['cleaning' => null, 'energy' => null];
 $navigation ??= [];
 $isStagedPickup ??= false;
 $isPickupConfirmed ??= false;
@@ -44,7 +60,7 @@ $tripFacts ??= [
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Movement Checklist | FleetOS</title>
+    <title><?= ($checklist['movement_type'] ?? null) === 'return' ? 'Return Workflow' : 'Movement Checklist' ?> | FleetOS</title>
     <?php if ($assets['css'] !== null): ?>
         <link rel="stylesheet" href="/build/<?= esc($assets['css'], 'attr') ?>">
     <?php endif; ?>
@@ -56,7 +72,7 @@ $tripFacts ??= [
     <main id="main-content" class="command-main import-main movement-main" tabindex="-1">
         <header class="top-status">
             <div>
-                <p class="eyebrow">Movement Checklist</p>
+                <p class="eyebrow"><?= ($checklist['movement_type'] ?? null) === 'return' ? 'Return Workflow' : 'Movement Checklist' ?></p>
                 <h1><?= esc((string) ($checklist['fleet_code'] ?? 'Movement')) ?></h1>
                 <p class="status-copy"><?= esc(ucfirst((string) ($checklist['movement_type'] ?? 'movement'))) ?> · <?= esc((string) ($checklist['scheduled_at'] ?? 'Time pending')) ?> · <?= esc((string) ($checklist['guest_name'] ?? 'Guest not captured')) ?></p>
             </div>
@@ -69,7 +85,116 @@ $tripFacts ??= [
         <?php if (! ($checklist['exists'] ?? false)): ?>
             <section class="section"><div class="empty-state">Checklist not found.</div></section>
         <?php else: ?>
-            <?= view('trip_movement_checklists/_readiness', ['checklist' => $checklist, 'readiness' => $readiness, 'tripFacts' => $tripFacts]) ?>
+            <?php if (($checklist['movement_type'] ?? null) === 'return'): ?>
+                <?= view('trip_movement_checklists/_return_workflow', ['checklist' => $checklist, 'readiness' => $readiness, 'guestReturn' => $guestReturn, 'guestReturnActive' => $guestReturnActive, 'returnCompleted' => $returnCompleted, 'canRecover' => $canRecover, 'turnaroundWork' => $turnaroundWork, 'recoveryExceptions' => $recoveryExceptions]) ?>
+            <?php else: ?>
+                <?= view('trip_movement_checklists/_readiness', ['checklist' => $checklist, 'readiness' => $readiness, 'tripFacts' => $tripFacts]) ?>
+            <?php endif; ?>
+
+            <?php if (($checklist['movement_type'] ?? null) === 'return'): ?>
+                <?php if ($canRecover): ?>
+                    <?php
+                    $recoveryReport = $guestReturnActive ? $guestReturn : null;
+                    $recoveryLocation = (string) ($recoveryFormData['location_class'] ?? 'airport_hnl');
+                    $recoveryGarage = (string) ($recoveryFormData['airport_garage_code'] ?? ($recoveryReport['airport_garage_code'] ?? ''));
+                    $recoveryLevel = (string) ($recoveryFormData['airport_parking_level'] ?? ($recoveryReport['airport_parking_level'] ?? ''));
+                    $recoveryRow = (string) ($recoveryFormData['airport_parking_row'] ?? ($recoveryReport['airport_parking_row'] ?? ''));
+                    $guestLocationNote = '';
+                    if ($recoveryReport !== null && preg_match('/(?:^|\n)Location note: ([^\r\n]*)/', (string) ($recoveryReport['note'] ?? ''), $locationNoteMatch) === 1) {
+                        $guestLocationNote = trim($locationNoteMatch[1]);
+                    }
+                    $priorLocationDetail = trim((string) ($recoveryReport['location_detail'] ?? ''));
+                    if ($guestLocationNote === '' && $priorLocationDetail !== ''
+                        && (($recoveryReport['location_class'] ?? null) !== 'airport_hnl'
+                            || (new \App\Services\Fleet\HnlGarageCatalog())->parseLegacyDetail($priorLocationDetail) === null)) {
+                        $guestLocationNote = $priorLocationDetail;
+                    }
+                    ?>
+                    <section class="section operational-facts" id="recover-vehicle-entry">
+                        <div class="section-heading"><div><p class="eyebrow">Operator recovery</p><h2>Recover Vehicle</h2></div></div>
+                        <p class="muted">Confirm where and when you physically recovered the vehicle. Turo's return-photo and inspection workflow remains separate.</p>
+                        <?php if ($recoveryReport !== null): ?><p class="import-message tone-warning">Guest reported — unverified. The location below is a prefill only; verify or correct it before recording recovery.</p><?php endif; ?>
+                        <form class="issue-filters" action="/operations/checklists/<?= (int) $checklist['id'] ?>/recover-vehicle" method="post">
+                            <?= csrf_field() ?>
+                            <label>Recovery time (Honolulu)<input type="datetime-local" name="occurred_at" required value="<?= esc((string) ($recoveryFormData['occurred_at'] ?? date('Y-m-d\TH:i')), 'attr') ?>"></label>
+                            <label>Actual recovery location<select id="recovery-location-class" name="location_class" required><?php foreach (['airport_hnl' => 'Airport HNL', 'home' => 'Home', 'other_delivery' => 'Other'] as $code => $label): ?><option value="<?= esc($code, 'attr') ?>" <?= $recoveryLocation === $code ? 'selected' : '' ?>><?= esc($label) ?></option><?php endforeach; ?></select></label>
+                            <label data-location-detail <?= $recoveryLocation === 'airport_hnl' ? 'hidden' : '' ?>>Location detail<input name="location_detail" maxlength="500" value="<?= esc((string) ($recoveryFormData['location_detail'] ?? ''), 'attr') ?>" <?= $recoveryLocation === 'airport_hnl' ? 'disabled' : '' ?>></label>
+                            <fieldset class="hnl-parking-fields" data-hnl-parking data-location-select="recovery-location-class"><legend>Verified HNL parking</legend>
+                                <label>Level<select name="airport_parking_level" data-hnl-level><option value="">Choose level</option><?php for ($level = 1; $level <= 8; $level++): ?><option value="<?= $level ?>" <?= $recoveryLevel === (string) $level ? 'selected' : '' ?>><?= $level ?></option><?php endfor; ?></select></label>
+                                <label>Row<select name="airport_parking_row" data-hnl-row><option value="">Choose row</option><?php foreach ($hnlGarages as $code => $garage): ?><?php foreach ($garage['rows'] as $row): ?><option value="<?= esc($row, 'attr') ?>" data-garage="<?= esc($code, 'attr') ?>" <?= $recoveryRow === $row ? 'selected' : '' ?>><?= esc($row) ?></option><?php endforeach; ?><?php endforeach; ?></select></label>
+                                <label>Garage<select name="airport_garage_code" data-hnl-garage><option value="">Derived from row</option><?php foreach ($hnlGarages as $code => $garage): ?><option value="<?= esc($code, 'attr') ?>" data-max-level="<?= (int) $garage['levels'] ?>" <?= $recoveryGarage === $code ? 'selected' : '' ?>><?= esc($garage['name']) ?></option><?php endforeach; ?></select></label>
+                            </fieldset>
+                            <label>Recovery location detail (optional)<input name="recovery_location_note" maxlength="500" value="<?= esc((string) ($recoveryFormData['recovery_location_note'] ?? $guestLocationNote), 'attr') ?>"></label>
+                            <label>Measured battery/fuel percent<input name="energy_percent" type="number" min="0" max="100" value="<?= esc((string) ($recoveryFormData['energy_percent'] ?? ''), 'attr') ?>"></label>
+                            <label class="checkbox-row"><input type="checkbox" name="energy_unknown" value="1" <?= ($recoveryFormData['energy_unknown'] ?? null) === '1' ? 'checked' : '' ?>><span>Energy unknown — I could not get a measurement</span></label>
+                            <label>Reason if energy unknown<input name="energy_unknown_reason" maxlength="500" value="<?= esc((string) ($recoveryFormData['energy_unknown_reason'] ?? ''), 'attr') ?>"></label>
+                            <details class="secondary-disclosure"><summary>Exceptions? None unless selected</summary>
+                                <p class="muted">Select only issues found during recovery. Turo's photos and inspection remain in Turo.</p>
+                                <?php foreach (['damage' => 'Damage found', 'missing_key' => 'Missing key', 'missing_charge_adapter' => 'Missing charge adapter', 'not_drivable' => 'Vehicle not drivable', 'other' => 'Other'] as $exceptionCode => $exceptionLabel): ?>
+                                    <label class="checkbox-row"><input type="checkbox" name="exception_codes[]" value="<?= esc($exceptionCode, 'attr') ?>" <?= in_array($exceptionCode, (array) ($recoveryFormData['exception_codes'] ?? []), true) ? 'checked' : '' ?>><span><?= esc($exceptionLabel) ?></span></label>
+                                    <label><?= esc($exceptionLabel) ?> note<?= $exceptionCode === 'other' ? ' (required if selected)' : ' (optional)' ?><input name="exception_notes[<?= esc($exceptionCode, 'attr') ?>]" maxlength="2000" value="<?= esc((string) ($recoveryFormData['exception_notes'][$exceptionCode] ?? ''), 'attr') ?>"></label>
+                                <?php endforeach; ?>
+                            </details>
+                            <label>Operational note (optional)<textarea name="note" rows="2"><?= esc((string) ($recoveryFormData['note'] ?? '')) ?></textarea></label>
+                            <label class="checkbox-row"><input type="checkbox" name="confirm_recovery_location" value="1" required><span>I verified the actual recovery location; guest-reported details alone are not proof.</span></label>
+                            <button class="primary-action" type="submit">Vehicle Recovered</button>
+                        </form>
+                    </section>
+                <?php endif; ?>
+                <?php
+                $correctGuestReturn = ! $returnCompleted && $guestReturn !== null && $correctGuestReturn;
+                $showGuestReturnSection = ! $returnCompleted || $guestReturn !== null;
+                $reportGarage = (string) ($guestReturnFormData['airport_garage_code'] ?? ($correctGuestReturn ? $guestReturn['airport_garage_code'] : ''));
+                $reportLevel = (string) ($guestReturnFormData['airport_parking_level'] ?? ($correctGuestReturn ? $guestReturn['airport_parking_level'] : ''));
+                $reportRow = (string) ($guestReturnFormData['airport_parking_row'] ?? ($correctGuestReturn ? $guestReturn['airport_parking_row'] : ''));
+                ?>
+                <?php if ($showGuestReturnSection): ?>
+                <section class="section operational-facts" id="guest-return-entry">
+                    <div class="section-heading"><div><p class="eyebrow">Guest report</p><h2>Return staged at HNL</h2></div></div>
+                    <?php if ($guestReturn !== null): ?>
+                        <div class="import-message tone-warning">
+                            <strong><?= $guestReturnActive ? 'Awaiting Recovery' : 'Historical guest report' ?></strong>
+                            <span>Guest-reported location — unverified. This report does not confirm operator possession or complete the return.</span>
+                            <span><?= ($guestReturn['source'] ?? null) === 'guest_report_received' ? 'Report received' : 'Guest-reported parked time' ?>: <?= esc(date('M j, Y g:i A', strtotime((string) $guestReturn['occurred_at']))) ?></span>
+                            <?php $reportedParking = (new \App\Services\Fleet\HnlGarageCatalog())->presentation($guestReturn['airport_garage_code'] ?? null, $guestReturn['airport_parking_level'] ?? null, $guestReturn['airport_parking_row'] ?? null); ?>
+                            <span><?= $reportedParking === null ? 'Exact HNL level/row/garage not reported' : esc($reportedParking['location_label']) ?></span>
+                            <?php if (trim((string) ($guestReturn['note'] ?? '')) !== ''): ?><span><?= nl2br(esc((string) $guestReturn['note'])) ?></span><?php endif; ?>
+                        </div>
+                        <?php if ($returnCompleted): ?><p class="muted">Recovery is authoritative. Any older return checklist checks remain available only in legacy history.</p><?php endif; ?>
+                        <?php if (! $returnCompleted && ! $correctGuestReturn): ?>
+                            <a class="action-link" href="?correct_guest_return=1#guest-return-entry">Correct guest report</a>
+                            <form class="issue-filters" action="/operations/checklists/<?= (int) $checklist['id'] ?>/guest-return-staged/void" method="post"><?= csrf_field() ?><input type="hidden" name="event_id" value="<?= (int) $guestReturn['id'] ?>"><label>Void reason<textarea name="void_reason" rows="2" required></textarea></label><button class="secondary-action" type="submit">Void guest report</button></form>
+                        <?php endif; ?>
+                    <?php else: ?>
+                        <p class="muted">When the guest reports the vehicle parked, record the unverified location here. Recovery is a separate operator action.</p>
+                    <?php endif; ?>
+                    <?php if (($guestReturn === null && ! $returnCompleted) || $correctGuestReturn): ?>
+                        <form class="issue-filters" action="/operations/checklists/<?= (int) $checklist['id'] ?>/guest-return-staged<?= $correctGuestReturn ? '/correct' : '' ?>" method="post">
+                            <?= csrf_field() ?>
+                            <?php if ($correctGuestReturn): ?><input type="hidden" name="event_id" value="<?= (int) $guestReturn['id'] ?>"><?php endif; ?>
+                            <label>Guest-reported parked time (optional)<input type="datetime-local" name="reported_parked_at" value="<?= esc((string) ($guestReturnFormData['reported_parked_at'] ?? ($correctGuestReturn && ($guestReturn['source'] ?? '') !== 'guest_report_received' ? date('Y-m-d\TH:i', strtotime((string) $guestReturn['occurred_at'])) : '')), 'attr') ?>"></label>
+                            <p class="muted">If unknown, FleetOS records the report-received time instead. Honolulu local time.</p>
+                            <fieldset class="hnl-parking-fields" data-hnl-parking><legend>Guest-reported HNL location — unverified</legend>
+                                <p class="muted">Leave all three blank if the exact parking location is unknown. If reported, choose a level and row; FleetOS derives the matching garage.</p>
+                                <label>Level<select name="airport_parking_level" data-hnl-level><option value="">Choose level</option><?php for ($level = 1; $level <= 8; $level++): ?><option value="<?= $level ?>" <?= $reportLevel === (string) $level ? 'selected' : '' ?>><?= $level ?></option><?php endfor; ?></select></label>
+                                <label>Row<select name="airport_parking_row" data-hnl-row><option value="">Choose row</option><?php foreach ($hnlGarages as $code => $garage): ?><?php foreach ($garage['rows'] as $row): ?><option value="<?= esc($row, 'attr') ?>" data-garage="<?= esc($code, 'attr') ?>" <?= $reportRow === $row ? 'selected' : '' ?>><?= esc($row) ?></option><?php endforeach; ?><?php endforeach; ?></select></label>
+                                <label>Garage<select name="airport_garage_code" data-hnl-garage><option value="">Derived from row</option><?php foreach ($hnlGarages as $code => $garage): ?><option value="<?= esc($code, 'attr') ?>" data-max-level="<?= (int) $garage['levels'] ?>" <?= $reportGarage === $code ? 'selected' : '' ?>><?= esc($garage['name']) ?></option><?php endforeach; ?></select></label>
+                            </fieldset>
+                            <?php if ($correctGuestReturn): ?>
+                                <label>Report/location note<textarea name="note" rows="2"><?= esc((string) ($guestReturnFormData['note'] ?? $guestReturn['note'])) ?></textarea></label>
+                                <label>Correction reason<textarea name="correction_reason" rows="2" required></textarea></label>
+                                <button class="primary-action" type="submit">Save Correction</button>
+                                <a class="action-link" href="/operations/checklists/<?= (int) $checklist['id'] ?>#guest-return-entry">Cancel</a>
+                            <?php else: ?>
+                                <label>Location note<input name="location_note" maxlength="500" value="<?= esc((string) ($guestReturnFormData['location_note'] ?? ''), 'attr') ?>"></label>
+                                <label>Guest report note<textarea name="guest_report_note" rows="2"><?= esc((string) ($guestReturnFormData['guest_report_note'] ?? '')) ?></textarea></label>
+                                <button class="primary-action" type="submit">Mark Awaiting Recovery</button>
+                            <?php endif; ?>
+                        </form>
+                    <?php endif; ?>
+                </section>
+                <?php endif; ?>
+            <?php endif; ?>
 
             <?php if ($tripContext !== null): ?>
                 <section class="section trip-context">
@@ -123,11 +248,21 @@ $tripFacts ??= [
                             <?php if ($fact !== null): ?>
                                 <p class="trip-fact__time"><?= esc((string) $fact['occurred_at_label']) ?></p>
                                 <dl class="movement-fact-summary">
-                                    <div><dt><?= esc((string) $fact['location_label']) ?></dt><dd><?= esc((string) $fact['location_class_label']) ?><?php if (($fact['airport_garage_line'] ?? null) !== null): ?><span class="movement-fact-detail movement-fact-garage"><?= esc((string) $fact['airport_garage_line']) ?></span><span class="movement-fact-detail"><?= esc((string) $fact['airport_position_line']) ?></span><?php elseif ($fact['location_detail_value'] !== null): ?><span class="movement-fact-detail"><?= esc((string) $fact['location_detail_value']) ?></span><?php endif; ?></dd></div>
+                                    <div><dt><?= esc((string) $fact['location_label']) ?></dt><dd><?= esc((string) $fact['location_class_label']) ?><?php if (($fact['airport_location_label'] ?? null) !== null): ?><span class="movement-fact-detail movement-fact-garage"><?= esc((string) $fact['airport_location_label']) ?></span><?php elseif ($fact['location_detail_value'] !== null): ?><span class="movement-fact-detail"><?= esc((string) $fact['location_detail_value']) ?></span><?php endif; ?></dd></div>
                                     <div><dt>Cleanliness</dt><dd><?= esc((string) $fact['cleanliness_label']) ?></dd></div>
                                     <div><dt><?= esc((string) $fact['energy_label']) ?></dt><dd><?= esc((string) $fact['energy_value']) ?></dd></div>
                                     <div><dt>Provenance</dt><dd><?= esc((string) $fact['source_label']) ?> · <?= esc((string) $fact['actor_label']) ?></dd></div>
                                 </dl>
+                                <?php if ($factType === 'return' && ($fact['event_code'] ?? null) === 'vehicle_recovered'): ?>
+                                    <details class="secondary-disclosure"><summary>Void recovery</summary>
+                                        <form class="issue-filters" action="/operations/checklists/<?= (int) $checklist['id'] ?>/recover-vehicle/void" method="post">
+                                            <?= csrf_field() ?>
+                                            <input type="hidden" name="event_id" value="<?= (int) $fact['event_id'] ?>">
+                                            <label>Why is this recovery invalid?<textarea name="void_reason" rows="2" required></textarea></label>
+                                            <button class="secondary-action" type="submit">Void Vehicle Recovery</button>
+                                        </form>
+                                    </details>
+                                <?php endif; ?>
                             <?php endif; ?>
                         </article>
                     <?php endforeach; ?>
@@ -197,9 +332,11 @@ $energyPercent = $factFormData['energy_percent'] ?? '';
                     </form>
                 <?php elseif (! $correctingFacts && ($tripFacts[$movementType] ?? null) !== null): ?>
                     <div class="import-message tone-success">
-                        <strong><?= $movementType === 'return' ? 'Actual return recorded' : 'Guest pickup recorded' ?></strong>
+                            <strong><?= $movementType === 'return' ? (($tripFacts['return']['event_code'] ?? null) === 'vehicle_recovered' ? 'Vehicle recovery recorded' : 'Actual return recorded') : 'Guest pickup recorded' ?></strong>
                         <span>Use the <?= esc($movementType) ?> fact actions above to correct or repair this observation.</span>
                     </div>
+                <?php elseif ($movementType === 'return' && ! $correctingFacts): ?>
+                    <p class="muted">Use Recover Vehicle above for a new return. Historical actual-return facts remain available for correction and audit.</p>
                 <?php else: ?>
                 <form id="handoff-entry" class="issue-filters" action="<?= esc($formAction, 'attr') ?>" method="post">
                     <?= csrf_field() ?>
@@ -213,9 +350,9 @@ $energyPercent = $factFormData['energy_percent'] ?? '';
                     <label data-location-detail <?= $selectedLocation === 'airport_hnl' ? 'hidden' : '' ?>>Location detail<input name="location_detail" maxlength="500" value="<?= esc((string) ($factFormData['location_detail'] ?? ''), 'attr') ?>" <?= $selectedLocation === 'airport_hnl' ? 'disabled' : '' ?>></label>
                     <fieldset class="hnl-parking-fields" data-hnl-parking data-location-select="movement-location-class">
                         <legend>HNL parking</legend>
+                        <label>Level<select name="airport_parking_level" data-hnl-level><option value="">Choose level</option><?php for ($level = 1; $level <= 8; $level++): ?><option value="<?= $level ?>" <?= $selectedLevel === (string) $level ? 'selected' : '' ?>><?= $level ?></option><?php endfor; ?></select></label>
                         <label>Row<select name="airport_parking_row" data-hnl-row><option value="">Choose row</option><?php foreach ($hnlGarages as $code => $garage): ?><?php foreach ($garage['rows'] as $row): ?><option value="<?= esc($row, 'attr') ?>" data-garage="<?= esc($code, 'attr') ?>" <?= $selectedRow === $row ? 'selected' : '' ?>><?= esc($row) ?></option><?php endforeach; ?><?php endforeach; ?></select></label>
                         <label>Garage<select name="airport_garage_code" data-hnl-garage><option value="">Derived from row</option><?php foreach ($hnlGarages as $code => $garage): ?><option value="<?= esc($code, 'attr') ?>" data-max-level="<?= (int) $garage['levels'] ?>" <?= $selectedGarage === $code ? 'selected' : '' ?>><?= esc($garage['name']) ?> · <?= esc($garage['color']) ?></option><?php endforeach; ?></select></label>
-                        <label>Level<select name="airport_parking_level" data-hnl-level><option value="">Choose level</option><?php for ($level = 1; $level <= 8; $level++): ?><option value="<?= $level ?>" <?= $selectedLevel === (string) $level ? 'selected' : '' ?>><?= $level ?></option><?php endfor; ?></select></label>
                     </fieldset>
                     <label>Cleanliness<select name="cleanliness"><option value="" <?= $selectedCleanliness === '' ? 'selected' : '' ?>>Not captured</option><option value="clean" <?= $selectedCleanliness === 'clean' ? 'selected' : '' ?>>Clean</option><option value="dirty" <?= $selectedCleanliness === 'dirty' ? 'selected' : '' ?>>Dirty</option></select></label>
                     <label>Charge/Fuel percent<input name="energy_percent" type="number" min="0" max="100" value="<?= esc((string) $energyPercent, 'attr') ?>"></label>

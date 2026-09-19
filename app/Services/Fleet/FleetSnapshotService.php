@@ -8,7 +8,7 @@ use RuntimeException;
 
 class FleetSnapshotService
 {
-    public const BUCKETS = ['rented' => 'Rented', 'home' => 'Home', 'hnl' => 'HNL', 'other' => 'Other', 'unknown' => 'Unknown'];
+    public const BUCKETS = ['rented' => 'Rented', 'awaiting_recovery' => 'Awaiting Recovery', 'home' => 'Home', 'hnl' => 'HNL', 'other' => 'Other', 'unknown' => 'Unknown'];
 
     public function __construct(
         private readonly ?CurrentVehicleLocationService $locations = null,
@@ -84,6 +84,9 @@ class FleetSnapshotService
     {
         if (($row['operational_state'] ?? null) === 'rented') {
             return 'rented';
+        }
+        if (($row['operational_state'] ?? null) === 'awaiting_recovery') {
+            return 'awaiting_recovery';
         }
 
         return match ((string) ($row['location_class'] ?? 'unknown')) {

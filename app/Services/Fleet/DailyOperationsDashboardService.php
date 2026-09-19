@@ -52,9 +52,11 @@ class DailyOperationsDashboardService
         $incidentals = $this->incidentals()->attentionSummaryForSingleCompany($asOf);
         $expenses = $this->operatingExpenses()->attentionSummary($companyId);
         $checklists = $this->attachReadinessProjections($this->checklists()->summariesForDay($asOf), $asOf);
+        $awaitingVehicleIds = array_fill_keys(array_map('intval', array_column($today['awaiting_recovery'] ?? [], 'fleet_vehicle_id')), true);
+        $actionableChecklists = array_values(array_filter($checklists, static fn (array $checklist): bool => ! isset($awaitingVehicleIds[(int) ($checklist['fleet_vehicle_id'] ?? 0)])));
         $board = $this->stateService->movementBoard($vehicles, $today, $health, $asOf);
         $board = $this->attachCurrentPositions($board, $fleetSnapshot['vehicles']);
-        $board = $this->attachChecklistSummaries($board, $checklists);
+        $board = $this->attachChecklistSummaries($board, $actionableChecklists);
         $board = $this->movementBoardIntelligence()->enrich($board, $asOf, $companyId);
 
         $externalAlerts = $this->externalAlerts($importIssues, $vehicleMappings, $reconciliation, $airport, $reimbursements, $health);
@@ -69,7 +71,7 @@ class DailyOperationsDashboardService
             'timeline' => $this->attachChecklistTimeline($this->stateService->timeline($today, $asOf), $checklists),
             'attention' => $attention,
             'fleet_status' => $this->stateService->statusCounts($board, (float) $currentMonth['fleet_utilization'], $fleetSnapshot, $today),
-            'operational_queue' => $this->operationalQueue($today, $attention, $importIssues, $vehicleMappings, $reconciliation, $airport, $reimbursements, $incidentals, $expenses, $checklists),
+            'operational_queue' => $this->operationalQueue($today, $attention, $importIssues, $vehicleMappings, $reconciliation, $airport, $reimbursements, $incidentals, $expenses, $actionableChecklists),
             'financial' => [
                 'Realized Operating Revenue' => '$' . number_format((float) $financialSummary['realized_operating_revenue'], 2),
                 'Realized Recoveries' => '$' . number_format((float) $financialSummary['realized_recoveries'], 2),
@@ -116,6 +118,8 @@ class DailyOperationsDashboardService
             ['code' => 'additional', 'label' => 'Review Additional Movement Actions', 'count' => $additionalActions, 'href' => '/?movement=additional#movement-board'],
             ['code' => 'pickup', 'label' => 'Review Today\'s Pickups', 'count' => count($today['todays_pickups']), 'href' => '/?movement=pickup#movement-board'],
             ['code' => 'return', 'label' => 'Review Today\'s Returns', 'count' => count($today['todays_returns']), 'href' => '/?movement=return#movement-board'],
+            ['code' => 'cleaning', 'label' => 'Cleaning Required', 'count' => count($today['cleaning_tasks'] ?? []), 'href' => '/#todays-mission'],
+            ['code' => 'charging', 'label' => 'Charge/Fuel or Energy Check', 'count' => count($today['charging_tasks'] ?? []), 'href' => '/#todays-mission'],
             ['code' => 'turnaround', 'label' => 'Review Same-Day Turnarounds', 'count' => count(array_filter($attention, static fn (array $item): bool => str_contains($item['label'], 'turnaround'))), 'href' => '/?movement=turnaround#movement-board'],
             ['code' => 'airport_preparation', 'label' => 'Prepare Airport Deliveries', 'count' => $pendingAirportDeliveries, 'href' => '/operations/airport'],
             ['code' => 'import_issues', 'label' => 'Review Import Issues', 'count' => (int) $importIssues['total_unresolved'], 'href' => $importIssues['href']],
@@ -127,12 +131,31 @@ class DailyOperationsDashboardService
             ['code' => 'operating_expenses', 'label' => 'Expenses to classify', 'count' => (int) $expenses['total'], 'href' => $expenses['href']],
         ];
 
+        foreach ($today['awaiting_recovery'] ?? [] as $report) {
+            $actions[] = [
+                'code' => 'recover_vehicle_' . (int) $report['turo_trip_normalized_id'],
+                'label' => 'Recover Vehicle',
+                'count' => 1,
+                'href' => $report['href'],
+                'detail' => $report['fleet_label'] . ' — Returned to HNL, awaiting recovery. ' . $report['reported_location_label'],
+            ];
+        }
+        foreach ($today['recovery_exceptions'] ?? [] as $exception) {
+            $actions[] = [
+                'code' => 'recovery_exception_' . (int) $exception['id'],
+                'label' => 'Recovery exception: ' . ucwords(str_replace('_', ' ', (string) $exception['exception_code'])),
+                'count' => 1,
+                'href' => '/operations/checklists/' . (int) $exception['checklist_id'] . '#recovery-exceptions',
+                'detail' => (string) $exception['fleet_code'] . ' — follow up on recovery exception #' . (int) $exception['id'],
+            ];
+        }
+
         return array_values(array_map(static function (array $action): array {
             $count = (int) $action['count'];
 
             return array_merge($action, [
                 'actionable' => true,
-                'detail' => $count . ' item' . ($count === 1 ? '' : 's'),
+                'detail' => $action['detail'] ?? $count . ' item' . ($count === 1 ? '' : 's'),
             ]);
         }, array_filter($actions, static fn (array $action): bool => (int) $action['count'] > 0)));
     }

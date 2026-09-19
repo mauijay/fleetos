@@ -54,14 +54,15 @@ class MovementOperationalFactPresentationService
         $parkingPresentation = $parking === null ? null : $this->hnlGarages->presentation($parking['garage_code'], $parking['level'], $parking['row']);
 
         return array_merge($facts, [
-            'event_title' => $isHandoff ? 'Guest handoff recorded' : ($eventCode === 'vehicle_staged' ? 'Staged for pickup' : ($eventCode === 'actual_return' ? 'Actual return recorded' : ucwords(str_replace('_', ' ', $eventCode)) . ' recorded')),
+            'event_title' => $isHandoff ? 'Guest handoff recorded' : ($eventCode === 'vehicle_staged' ? 'Staged for pickup' : ($eventCode === 'actual_return' ? 'Actual return recorded' : ($eventCode === 'vehicle_recovered' ? 'Vehicle recovery recorded' : ucwords(str_replace('_', ' ', $eventCode)) . ' recorded'))),
             'occurred_at_label' => date('M j, Y g:i A', strtotime((string) $facts['occurred_at'])),
-            'location_label' => $isHandoff ? 'Handoff location' : ($eventCode === 'vehicle_staged' ? 'Staging location' : ($eventCode === 'actual_return' ? 'Return location' : ($eventCode === 'vehicle_positioned' ? 'Position recorded at' : 'Event location'))),
+            'location_label' => $isHandoff ? 'Handoff location' : ($eventCode === 'vehicle_staged' ? 'Staging location' : ($eventCode === 'actual_return' ? 'Return location' : ($eventCode === 'vehicle_recovered' ? 'Recovery location' : ($eventCode === 'vehicle_positioned' ? 'Position recorded at' : 'Event location')))),
             'location_class_label' => $locationLabels[$locationClass] ?? ucwords(str_replace('_', ' ', $locationClass)),
             'location_detail_value' => $locationDetail === '' ? null : $locationDetail,
             'airport_parking' => $parking,
             'airport_garage_line' => $parkingPresentation['garage_line'] ?? null,
             'airport_position_line' => $parkingPresentation['position_line'] ?? null,
+            'airport_location_label' => $parkingPresentation['location_label'] ?? null,
             'approved_turo_garage' => $parkingPresentation['approved_turo_garage'] ?? null,
             'cleanliness_label' => $facts['cleanliness'] === null ? 'Not captured' : ucfirst((string) $facts['cleanliness']),
             'energy_label' => $energyLabel,

@@ -59,6 +59,24 @@ class OperationalMovementWorkService
     }
 
     /** @return list<array<string, mixed>> */
+    public function awaitingRecoveryForCompany(int $companyId, DateTimeImmutable $asOf): array
+    {
+        return array_map(function (array $event): array {
+            $tripId = (int) $event['turo_trip_normalized_id'];
+            $garage = (new HnlGarageCatalog())->presentation($event['airport_garage_code'] ?? null, $event['airport_parking_level'] ?? null, $event['airport_parking_row'] ?? null);
+
+            return array_merge($event, [
+                'fleet_vehicle_id' => (int) $event['fleet_vehicle_id'],
+                'fleet_label' => trim((string) ($event['display_name'] ?? '')) ?: (string) $event['fleet_code'],
+                'reported_location_label' => $garage === null ? 'HNL location unverified' : $garage['location_label'] . ' · unverified',
+                'href' => ($this->repo()->movementChecklistHref($tripId, 'return') ?? '/operations/vehicles/' . (int) $event['fleet_vehicle_id'] . '/trip-history?trip=' . $tripId) . '#recover-vehicle-entry',
+            ]);
+        }, $this->repo()->awaitingRecoveryForCompany($companyId, $asOf->format('Y-m-d H:i:s')));
+    }
+
+    /** @return list<array<string, mixed>>
+     *  @phpstan-impure Reads mutable movement and assessment state.
+     */
     public function cleaningNeedsForCompany(int $companyId, DateTimeImmutable $asOf): array
     {
         $vehicles = $this->repo()->activeFleetVehiclesForCompany($companyId);
@@ -72,14 +90,63 @@ class OperationalMovementWorkService
             $event = $custody[$id] ?? null;
             $assessment = $cleanliness[$id] ?? null;
             if (! in_array($event['event_code'] ?? null, ['actual_return', 'vehicle_recovered'], true)
-                || ($assessment['cleanliness'] ?? null) !== 'dirty'
-                || (string) ($assessment['captured_at'] ?? '') < (string) ($event['occurred_at'] ?? '')) {
+                || (($assessment['cleanliness'] ?? null) === 'clean'
+                    && (string) ($assessment['captured_at'] ?? '') > (string) ($event['occurred_at'] ?? ''))) {
                 continue;
             }
             $needs[] = array_merge($vehicle, [
                 'fleet_vehicle_id' => $id,
                 'turo_trip_normalized_id' => (int) ($event['turo_trip_normalized_id'] ?? 0),
-                'condition_observed_at' => $assessment['captured_at'],
+                'condition_observed_at' => $assessment['captured_at'] ?? null,
+                'recovered_at' => $event['occurred_at'],
+            ]);
+        }
+
+        return $needs;
+    }
+
+    /** @return list<array<string, mixed>> One current energy action per operator-held vehicle.
+     *  @phpstan-impure Reads mutable movement and assessment state.
+     */
+    public function energyNeedsForCompany(int $companyId, DateTimeImmutable $asOf): array
+    {
+        $vehicles = $this->repo()->activeFleetVehiclesForCompany($companyId);
+        $vehicleIds = array_map('intval', array_column($vehicles, 'id'));
+        $timestamp = $asOf->format('Y-m-d H:i:s');
+        $custody = $this->repo()->latestCustodyEventsForCompany($companyId, $vehicleIds, $timestamp);
+        $measurements = $this->repo()->latestEnergyForCompany($companyId, $vehicleIds, $timestamp);
+        $needs = [];
+        foreach ($vehicles as $vehicle) {
+            $id = (int) $vehicle['id'];
+            $event = $custody[$id] ?? null;
+            if (! in_array($event['event_code'] ?? null, ['actual_return', 'vehicle_recovered'], true)) {
+                continue;
+            }
+            $profile = $this->repo()->profile($id);
+            $target = isset($profile['ready_energy_target_percent']) ? (int) $profile['ready_energy_target_percent'] : null;
+            $measurement = $measurements[$id] ?? null;
+            $isCurrent = $measurement !== null && ((int) ($measurement['trip_movement_event_id'] ?? 0) === (int) $event['id']
+                || (string) $measurement['captured_at'] > (string) $event['occurred_at']);
+            $energy = $isCurrent ? (int) $measurement['energy_percent'] : null;
+            $condition = $target === null ? 'target_needed' : ($energy === null ? 'measurement_needed' : ($energy < $target ? 'charge_required' : null));
+            if ($condition === null) {
+                continue;
+            }
+            $tripId = (int) ($event['turo_trip_normalized_id'] ?? 0);
+            $needs[] = array_merge($vehicle, [
+                'fleet_vehicle_id' => $id,
+                'turo_trip_normalized_id' => $tripId,
+                'condition_code' => $condition,
+                'label' => match ($condition) {
+                    'charge_required' => 'Charge/Fuel to ' . $target . '%',
+                    'measurement_needed' => 'Record charge/fuel level',
+                    default => 'Set charge/fuel target',
+                },
+                'energy_percent' => $energy,
+                'target_percent' => $target,
+                'href' => $condition === 'target_needed'
+                    ? '/fleet/vehicles/' . $id
+                    : ($this->repo()->movementChecklistHref($tripId, 'return') ?? '/fleet/vehicles/' . $id),
             ]);
         }
 

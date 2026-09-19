@@ -73,6 +73,8 @@ final class AirportMovementWorkflowServiceTest extends CIUnitTestCase
         $updated = $this->service->workflow(self::COMPANY_ID, (int) $workflow['id']);
 
         $this->assertSame('instructions_sent', $updated['workflow_status']);
+        $this->assertSame('Level 7 · Row F · International Garage', $updated['location_label']);
+        $this->assertStringContainsString('Level 7 · Row F · International Garage', $updated['guest_instructions']);
         $this->assertStringContainsString('Level 7', $updated['guest_instructions']);
         $this->assertStringContainsString('Row F', $updated['guest_instructions']);
         $this->assertStringNotContainsString('Stall', $updated['guest_instructions']);

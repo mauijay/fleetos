@@ -3,7 +3,9 @@
 namespace App\Controllers;
 
 use App\Exceptions\EarlyHandoffConfirmationRequired;
+use App\Repositories\VehicleRecoveryExceptionRepository;
 use App\Services\Fleet\ChecklistActionFocusService;
+use App\Services\Fleet\OperationalMovementWorkService;
 use CodeIgniter\Config\Services as CoreServices;
 use CodeIgniter\HTTP\RedirectResponse;
 use CodeIgniter\Shield\Config\Services as ShieldServices;
@@ -13,7 +15,7 @@ class TripMovementChecklists extends BaseController
 {
     public function show(int $id): string
     {
-        $checklist = Services::tripMovementChecklistService()->checklist($id);
+        $checklist = Services::tripMovementChecklistService()->checklistForCompany($this->activeCompanyId(), $id) ?? ['exists' => false];
         $companyId = (int) ($checklist['company_id'] ?? 0);
         $readiness = ($checklist['exists'] ?? false) && $companyId > 0
             ? (Services::movementReadinessReadService()->forCompany($companyId, [$id])[$id] ?? null)
@@ -22,6 +24,28 @@ class TripMovementChecklists extends BaseController
         $tripFacts = ($checklist['exists'] ?? false) ? $factsPresenter->tripFacts((int) $checklist['turo_trip_normalized_id']) : ['pickup' => null, 'return' => null];
         $latestFacts = ($checklist['exists'] ?? false) ? $factsPresenter->latestForTrip((int) $checklist['turo_trip_normalized_id']) : null;
         $latestEvent = ($checklist['exists'] ?? false) ? Services::movementEventService()->latestForTrip((int) $checklist['turo_trip_normalized_id']) : null;
+        $guestReturn = ($checklist['exists'] ?? false) && ($checklist['movement_type'] ?? null) === 'return'
+            ? Services::movementEventService()->activeForTrip((int) $checklist['turo_trip_normalized_id'], ['guest_return_staged'])
+            : null;
+        $guestReturnActive = $guestReturn !== null && ($checklist['exists'] ?? false)
+            && (int) (Services::operationalFactsRepository()->latestActiveLifecycleEvent((int) $checklist['fleet_vehicle_id'])['id'] ?? 0) === (int) $guestReturn['id'];
+        $returnCompleted = ($checklist['exists'] ?? false) && ($checklist['movement_type'] ?? null) === 'return'
+            && Services::movementEventService()->activeForTrip((int) $checklist['turo_trip_normalized_id'], ['actual_return', 'vehicle_recovered']) !== null;
+        $custody = ($checklist['exists'] ?? false) ? Services::operationalFactsRepository()->latestActiveLifecycleEvent((int) $checklist['fleet_vehicle_id']) : null;
+        $canRecover = ($checklist['movement_type'] ?? null) === 'return' && ! $returnCompleted
+            && (int) ($custody['turo_trip_normalized_id'] ?? 0) === (int) ($checklist['turo_trip_normalized_id'] ?? 0)
+            && in_array($custody['event_code'] ?? null, ['actual_handoff', 'guest_return_staged'], true);
+        $recoveryExceptions = ($checklist['movement_type'] ?? null) === 'return' && $companyId > 0
+            ? (new VehicleRecoveryExceptionRepository())->forTrip($companyId, (int) $checklist['turo_trip_normalized_id'])
+            : [];
+        $turnaroundWork = ['cleaning' => null, 'energy' => null];
+        if (($checklist['movement_type'] ?? null) === 'return' && $companyId > 0 && $returnCompleted) {
+            $work = new OperationalMovementWorkService();
+            $vehicleId = (int) $checklist['fleet_vehicle_id'];
+            $cleaning = array_column($work->cleaningNeedsForCompany($companyId, new \DateTimeImmutable()), null, 'fleet_vehicle_id');
+            $energy = array_column($work->energyNeedsForCompany($companyId, new \DateTimeImmutable()), null, 'fleet_vehicle_id');
+            $turnaroundWork = ['cleaning' => $cleaning[$vehicleId] ?? null, 'energy' => $energy[$vehicleId] ?? null];
+        }
         $isStagedPickup = ($tripFacts['pickup']['event_code'] ?? null) === 'vehicle_staged';
         $handoffRequirement = array_values(array_filter(
             $readiness['requirements'] ?? [],
@@ -30,6 +54,7 @@ class TripMovementChecklists extends BaseController
         $isPickupConfirmed = ($handoffRequirement['status'] ?? null) === 'satisfied';
         $flashedFormData = CoreServices::session()->getFlashdata('movement_fact_data');
         $positionFormData = CoreServices::session()->getFlashdata('vehicle_position_data');
+        $recoveryFormData = CoreServices::session()->getFlashdata('vehicle_recovery_data');
         $isEarlyHandoffWarning = CoreServices::session()->getFlashdata('movement_early_handoff_warning') === '1';
         $factTarget = $this->factTarget((string) $this->request->getGet('fact'));
         if ($factTarget === null && is_array($flashedFormData)) {
@@ -52,6 +77,15 @@ class TripMovementChecklists extends BaseController
             'tripFacts' => $tripFacts,
             'factTarget' => $factTarget,
             'latestEvent' => $latestEvent,
+            'guestReturn' => $guestReturn,
+            'guestReturnActive' => $guestReturnActive,
+            'returnCompleted' => $returnCompleted,
+            'canRecover' => $canRecover,
+            'recoveryExceptions' => $recoveryExceptions,
+            'turnaroundWork' => $turnaroundWork,
+            'correctGuestReturn' => $this->request->getGet('correct_guest_return') === '1',
+            'guestReturnFormData' => CoreServices::session()->getFlashdata('guest_return_data') ?: [],
+            'recoveryFormData' => is_array($recoveryFormData) ? $recoveryFormData : [],
             'isStagedPickup' => $isStagedPickup,
             'isPickupConfirmed' => $isPickupConfirmed,
             'pickupConfirmedAt' => $handoffRequirement['basis_at'] ?? null,
@@ -173,6 +207,148 @@ class TripMovementChecklists extends BaseController
         }
     }
 
+    public function stageGuestReturn(int $id): RedirectResponse
+    {
+        $data = $this->request->getPost();
+        try {
+            $checklist = Services::tripMovementChecklistService()->checklistForCompany($this->activeCompanyId(), $id);
+            if ($checklist === null) {
+                throw new \InvalidArgumentException('Return movement not found in the active company.');
+            }
+            $eventId = Services::movementOperationalFactService()->stageGuestReturn($checklist, $data, $this->actorUserId());
+
+            return $this->back($id, $eventId > 0, 'Guest return reported. Vehicle is awaiting recovery.', 'Guest return report could not be recorded.', 'guest-return-entry');
+        } catch (\InvalidArgumentException $exception) {
+            return $this->back($id, false, '', $exception->getMessage(), 'guest-return-entry')->with('guest_return_data', $data);
+        }
+    }
+
+    public function recoverVehicle(int $id): RedirectResponse
+    {
+        $data = $this->request->getPost();
+        try {
+            $checklist = Services::tripMovementChecklistService()->checklistForCompany($this->activeCompanyId(), $id);
+            if ($checklist === null) {
+                throw new \InvalidArgumentException('Return movement not found in the active company.');
+            }
+            $eventId = Services::movementOperationalFactService()->recoverVehicle($checklist, $data, $this->actorUserId());
+
+            return $this->back($id, $eventId > 0, 'Vehicle recovered. Turnaround work is now actionable.', 'Vehicle recovery could not be recorded.', 'recover-vehicle-entry');
+        } catch (\InvalidArgumentException $exception) {
+            return $this->back($id, false, '', $exception->getMessage(), 'recover-vehicle-entry')->with('vehicle_recovery_data', $data);
+        }
+    }
+
+    public function resolveRecoveryException(int $id, int $exceptionId): RedirectResponse
+    {
+        try {
+            $companyId = $this->activeCompanyId();
+            $checklist = Services::tripMovementChecklistService()->checklistForCompany($companyId, $id);
+            if ($checklist === null || ($checklist['movement_type'] ?? null) !== 'return') {
+                throw new \InvalidArgumentException('Return movement not found in the active company.');
+            }
+            $note = trim((string) $this->request->getPost('resolution_note'));
+            if (mb_strlen($note) > 2000) {
+                throw new \InvalidArgumentException('Resolution note must be 2000 characters or fewer.');
+            }
+            $ok = (new VehicleRecoveryExceptionRepository())->resolveForCompany(
+                $companyId,
+                (int) $checklist['turo_trip_normalized_id'],
+                (int) $checklist['fleet_vehicle_id'],
+                $exceptionId,
+                $this->actorUserId(),
+                $note === '' ? null : $note,
+            );
+
+            return $this->back($id, $ok, 'Recovery exception resolved.', 'Recovery exception could not be resolved.', 'recovery-exceptions');
+        } catch (\InvalidArgumentException $exception) {
+            return $this->back($id, false, '', $exception->getMessage(), 'recovery-exceptions');
+        }
+    }
+
+    public function voidRecoveredVehicle(int $id): RedirectResponse
+    {
+        try {
+            $checklist = Services::tripMovementChecklistService()->checklistForCompany($this->activeCompanyId(), $id);
+            if ($checklist === null) {
+                throw new \InvalidArgumentException('Return movement not found in the active company.');
+            }
+            $ok = Services::movementOperationalFactService()->voidRecoveredVehicle(
+                $checklist,
+                (int) $this->request->getPost('event_id'),
+                $this->actorUserId(),
+                (string) $this->request->getPost('void_reason'),
+            );
+
+            return $this->back($id, $ok, 'Vehicle recovery voided with audit history preserved.', 'Vehicle recovery could not be voided.', 'recover-vehicle-entry');
+        } catch (\InvalidArgumentException | \RuntimeException $exception) {
+            return $this->back($id, false, '', $exception->getMessage(), 'recover-vehicle-entry');
+        }
+    }
+
+    public function correctGuestReturn(int $id): RedirectResponse
+    {
+        $data = $this->request->getPost();
+        try {
+            $event = $this->scopedGuestReturnEvent($id, (int) ($data['event_id'] ?? 0));
+            $reason = trim((string) ($data['correction_reason'] ?? ''));
+            $time = trim((string) ($data['reported_parked_at'] ?? ''));
+            if ($time !== '') {
+                try {
+                    $parsedTime = new \DateTimeImmutable($time);
+                } catch (\Exception) {
+                    throw new \InvalidArgumentException('Choose a valid guest-reported parked time.');
+                }
+                if ($parsedTime > new \DateTimeImmutable()) {
+                    throw new \InvalidArgumentException('Guest-reported parked time cannot be in the future.');
+                }
+            }
+            $replacement = [
+                'occurred_at' => $time === '' ? $event['occurred_at'] : $time,
+                'location_class' => 'airport_hnl',
+                'location_detail' => '',
+                'airport_garage_code' => $data['airport_garage_code'] ?? $event['airport_garage_code'],
+                'airport_parking_level' => $data['airport_parking_level'] ?? $event['airport_parking_level'],
+                'airport_parking_row' => $data['airport_parking_row'] ?? $event['airport_parking_row'],
+                'source' => $time === '' ? $event['source'] : 'guest_reported_parked_time',
+                'note' => $data['note'] ?? $event['note'],
+            ];
+            Services::movementEventService()->correct((int) $event['id'], $replacement, $this->actorUserId(), $reason);
+
+            return $this->back($id, true, 'Guest return report corrected.', '', 'guest-return-entry');
+        } catch (\InvalidArgumentException | \RuntimeException $exception) {
+            return $this->back($id, false, '', $exception->getMessage(), 'guest-return-entry');
+        }
+    }
+
+    public function voidGuestReturn(int $id): RedirectResponse
+    {
+        try {
+            $event = $this->scopedGuestReturnEvent($id, (int) $this->request->getPost('event_id'));
+            $ok = Services::movementEventService()->void((int) $event['id'], $this->actorUserId(), (string) $this->request->getPost('void_reason'));
+
+            return $this->back($id, $ok, 'Guest return report voided.', 'A reason is required to void this report.', 'guest-return-entry');
+        } catch (\InvalidArgumentException $exception) {
+            return $this->back($id, false, '', $exception->getMessage(), 'guest-return-entry');
+        }
+    }
+
+    /** @return array<string, mixed> */
+    private function scopedGuestReturnEvent(int $checklistId, int $eventId): array
+    {
+        $checklist = Services::tripMovementChecklistService()->checklistForCompany($this->activeCompanyId(), $checklistId);
+        $event = $eventId > 0 ? Services::movementEventService()->find($eventId) : null;
+        if ($checklist === null || ($checklist['movement_type'] ?? null) !== 'return' || $event === null
+            || $event['event_code'] !== 'guest_return_staged' || $event['voided_at'] !== null
+            || (int) $event['company_id'] !== $this->activeCompanyId()
+            || (int) $event['fleet_vehicle_id'] !== (int) $checklist['fleet_vehicle_id']
+            || (int) $event['turo_trip_normalized_id'] !== (int) $checklist['turo_trip_normalized_id']) {
+            throw new \InvalidArgumentException('Guest return report not found in the active company.');
+        }
+
+        return $event;
+    }
+
     public function stageAtHnl(int $id): RedirectResponse
     {
         $data = $this->movementFactData();
@@ -225,7 +401,11 @@ class TripMovementChecklists extends BaseController
         $target = $this->factTarget((string) ($data['fact_target'] ?? ''));
         $correctionHref = '/operations/checklists/' . $id . '?correct=1' . ($target === null ? '' : '&fact=' . $target);
         try {
-            $ok = Services::movementOperationalFactService()->correctForChecklist(Services::tripMovementChecklistService()->checklist($id), $data, $this->actorUserId());
+            $checklist = Services::tripMovementChecklistService()->checklistForCompany($this->activeCompanyId(), $id);
+            if ($checklist === null) {
+                throw new \InvalidArgumentException('Movement not found in the active company.');
+            }
+            $ok = Services::movementOperationalFactService()->correctForChecklist($checklist, $data, $this->actorUserId());
             if ($ok) {
                 return $this->back($id, true, 'Recorded facts corrected.', '');
             }

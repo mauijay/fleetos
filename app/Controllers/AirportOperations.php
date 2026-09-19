@@ -61,7 +61,14 @@ class AirportOperations extends BaseController
 
     public function recordReturnLocation(int $id): RedirectResponse
     {
-        return $this->back(service('airportMovementWorkflowService')->recordReturnLocation($this->activeCompanyId(), $id, $this->request->getPost(), $this->actorUserId()), 'Return location saved.', 'Return location could not be saved.');
+        $workflow = service('airportMovementWorkflowService')->workflow($this->activeCompanyId(), $id);
+        $checklistId = (int) ($workflow['trip_movement_checklist_id'] ?? 0);
+        if ($checklistId < 1) {
+            return $this->back(false, '', 'Open the linked return movement to record a guest report.');
+        }
+
+        return Services::redirectresponse()->to('/operations/checklists/' . $checklistId . '#guest-return-entry')
+            ->with('movement_checklist_notice', 'Record the guest report on the return movement. Airport location alone does not establish recovery.');
     }
 
     public function confirmVehicleLocated(int $id): RedirectResponse

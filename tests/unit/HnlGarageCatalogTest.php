@@ -48,6 +48,38 @@ final class HnlGarageCatalogTest extends TestCase
         $this->assertSame('terminal_2', $catalog->validate(null, 4, 'M')['garage_code']);
     }
 
+    public function testCanonicalLocationLabelUsesLevelRowGarageOrderAndOptionalDetail(): void
+    {
+        $catalog = new HnlGarageCatalog();
+
+        $this->assertSame(
+            'Level 7 · Row G · International Garage · Near elevators',
+            $catalog->locationLabel('international', 7, 'G', 'Near elevators'),
+        );
+        $this->assertSame('Row C · Terminal 1 Garage', $catalog->locationLabel(null, null, 'C'));
+        $this->assertSame('Terminal 2 Garage', $catalog->locationLabel('terminal_2', null, null));
+        $this->assertSame('Near elevators', $catalog->locationLabel(null, null, null, 'Near elevators'));
+        $this->assertNull($catalog->locationLabel(null, null, null));
+    }
+
+    #[DataProvider('rowGarageProvider')]
+    public function testCanonicalLocationLabelDerivesEveryGarageFromItsCatalogRow(string $row, string $garageName): void
+    {
+        $this->assertSame(
+            'Level 4 · Row ' . $row . ' · ' . $garageName,
+            (new HnlGarageCatalog())->locationLabel(null, 4, $row),
+        );
+    }
+
+    public static function rowGarageProvider(): array
+    {
+        return [
+            'International' => ['F', 'International Garage'],
+            'Terminal 1' => ['A', 'Terminal 1 Garage'],
+            'Terminal 2' => ['M', 'Terminal 2 Garage'],
+        ];
+    }
+
     public function testDefinitionOwnsColorAndTuroApproval(): void
     {
         $catalog = new HnlGarageCatalog();

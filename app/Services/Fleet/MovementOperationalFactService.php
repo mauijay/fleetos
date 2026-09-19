@@ -4,6 +4,7 @@ namespace App\Services\Fleet;
 
 use App\Exceptions\EarlyHandoffConfirmationRequired;
 use App\Repositories\AirportMovementRepository;
+use App\Repositories\VehicleRecoveryExceptionRepository;
 use CodeIgniter\Database\BaseConnection;
 use Config\Database;
 use Config\MovementIntelligence;
@@ -19,6 +20,7 @@ class MovementOperationalFactService
         private readonly MovementAssessmentService $assessments = new MovementAssessmentService(),
         private readonly ?VehiclePositioningPlanService $positioningPlans = null,
         private readonly MovementIntelligence $movementConfig = new MovementIntelligence(),
+        private readonly ?VehicleRecoveryExceptionRepository $recoveryExceptions = null,
     ) {
         $this->db = $db ?? Database::connect();
     }
@@ -36,9 +38,234 @@ class MovementOperationalFactService
         if ($eventCode === 'actual_handoff') {
             $this->rejectDuplicateHandoff($checklist);
             $this->requireEarlyHandoffConfirmation($checklist, $data);
+        } elseif ($this->events->activeForTrip((int) $checklist['turo_trip_normalized_id'], ['actual_return', 'vehicle_recovered']) !== null) {
+            throw new \InvalidArgumentException('This return is already complete. Correct or void the existing fact instead.');
         }
 
         return $this->recordObservation($checklist, $data, $actorUserId, $eventCode);
+    }
+
+    public function stageGuestReturn(array $checklist, array $data, int $actorUserId): int
+    {
+        if (! ($checklist['exists'] ?? false) || ($checklist['movement_type'] ?? null) !== 'return') {
+            throw new \InvalidArgumentException('Choose a return movement in the active company.');
+        }
+        $this->requireCompanyVehicle((int) ($checklist['company_id'] ?? 0), (int) ($checklist['fleet_vehicle_id'] ?? 0), $actorUserId);
+        $tripId = (int) $checklist['turo_trip_normalized_id'];
+        if ($this->events->activeForTrip($tripId, ['actual_return', 'vehicle_recovered']) !== null) {
+            throw new \InvalidArgumentException('The vehicle return is already complete.');
+        }
+        if ($this->events->activeForTrip($tripId, ['guest_return_staged']) !== null) {
+            throw new \InvalidArgumentException('A guest return report is already active. Correct or void it instead.');
+        }
+
+        $reportedTime = trim((string) ($data['reported_parked_at'] ?? ''));
+        try {
+            $occurredAt = $reportedTime === '' ? new \DateTimeImmutable() : new \DateTimeImmutable($reportedTime);
+        } catch (\Exception) {
+            throw new \InvalidArgumentException('Choose a valid guest-reported parked time.');
+        }
+        if ($occurredAt > new \DateTimeImmutable()) {
+            throw new \InvalidArgumentException('Guest-reported parked time cannot be in the future.');
+        }
+        $garage = trim((string) ($data['airport_garage_code'] ?? ''));
+        $level = $data['airport_parking_level'] ?? null;
+        $row = trim((string) ($data['airport_parking_row'] ?? ''));
+        $parking = $garage === '' && trim((string) $level) === '' && $row === ''
+            ? []
+            : (new HnlGarageCatalog())->validate($garage, $level, $row);
+        $locationNote = trim((string) ($data['location_note'] ?? ''));
+        $reportNote = trim((string) ($data['guest_report_note'] ?? ''));
+        $note = implode("\n", array_filter([
+            $locationNote === '' ? '' : 'Location note: ' . $locationNote,
+            $reportNote === '' ? '' : 'Guest report: ' . $reportNote,
+        ]));
+
+        $this->db->transBegin();
+        try {
+            if ($this->events->activeForTrip($tripId, ['guest_return_staged', 'actual_return', 'vehicle_recovered']) !== null) {
+                throw new \InvalidArgumentException('The return state changed; reload this movement.');
+            }
+            $eventId = $this->events->record(
+                (int) $checklist['fleet_vehicle_id'],
+                $tripId,
+                'guest_return_staged',
+                'return',
+                $occurredAt->format('Y-m-d H:i:s'),
+                'airport_hnl',
+                null,
+                $reportedTime === '' ? 'guest_report_received' : 'guest_reported_parked_time',
+                $actorUserId,
+                $note === '' ? null : $note,
+                $parking,
+            );
+            if ($this->db->transStatus() === false) {
+                throw new RuntimeException('Guest return report transaction failed.');
+            }
+            $this->db->transCommit();
+
+            return $eventId;
+        } catch (\Throwable $exception) {
+            $this->db->transRollback();
+            throw $exception;
+        }
+    }
+
+    public function recoverVehicle(array $checklist, array $data, int $actorUserId): int
+    {
+        if (! ($checklist['exists'] ?? false) || ($checklist['movement_type'] ?? null) !== 'return') {
+            throw new \InvalidArgumentException('Choose a return movement in the active company.');
+        }
+        $companyId = (int) ($checklist['company_id'] ?? 0);
+        $vehicleId = (int) ($checklist['fleet_vehicle_id'] ?? 0);
+        $tripId = (int) ($checklist['turo_trip_normalized_id'] ?? 0);
+        $this->requireCompanyVehicle($companyId, $vehicleId, $actorUserId);
+        $trip = $this->repo()->trip($tripId);
+        if ($trip === null || (int) $trip['company_id'] !== $companyId || (int) $trip['fleet_vehicle_id'] !== $vehicleId) {
+            throw new \InvalidArgumentException('Trip not found in the active fleet company.');
+        }
+        if (($data['confirm_recovery_location'] ?? null) !== '1') {
+            throw new \InvalidArgumentException('Confirm the actual recovery location before recording recovery.');
+        }
+        $occurredAt = $this->requiredPastTimestamp($data, 'Recovery time');
+        $locationClass = trim((string) ($data['location_class'] ?? ''));
+        if (! in_array($locationClass, ['airport_hnl', 'home', 'other_delivery'], true)) {
+            throw new \InvalidArgumentException('Choose the actual recovery location.');
+        }
+        $parking = [];
+        if ($locationClass === 'airport_hnl') {
+            $parking = (new HnlGarageCatalog())->validate(
+                (string) ($data['airport_garage_code'] ?? ''),
+                $data['airport_parking_level'] ?? null,
+                (string) ($data['airport_parking_row'] ?? ''),
+            );
+        }
+        $unknown = ($data['energy_unknown'] ?? null) === '1';
+        $energyValue = trim((string) ($data['energy_percent'] ?? ''));
+        if ($unknown === ($energyValue !== '')) {
+            throw new \InvalidArgumentException('Record a measured charge/fuel percentage or mark energy unknown.');
+        }
+        $energy = null;
+        $reason = trim((string) ($data['energy_unknown_reason'] ?? ''));
+        if ($unknown) {
+            if ($reason === '') {
+                throw new \InvalidArgumentException('Explain why charge/fuel could not be measured.');
+            }
+        } else {
+            $energy = filter_var($energyValue, FILTER_VALIDATE_INT);
+            if ($energy === false || $energy < 0 || $energy > 100) {
+                throw new \InvalidArgumentException('Charge/fuel percentage must be between 0 and 100.');
+            }
+        }
+
+        $exceptionCodes = $data['exception_codes'] ?? [];
+        $exceptionNotes = $data['exception_notes'] ?? [];
+        if (! is_array($exceptionCodes) || ! is_array($exceptionNotes)) {
+            throw new \InvalidArgumentException('Choose valid recovery exceptions.');
+        }
+        $allowedExceptionCodes = ['damage', 'missing_key', 'missing_charge_adapter', 'not_drivable', 'other'];
+        $exceptions = [];
+        foreach ($exceptionCodes as $code) {
+            if (! is_string($code) || ! in_array($code, $allowedExceptionCodes, true) || array_key_exists($code, $exceptions)) {
+                throw new \InvalidArgumentException('Choose each supported recovery exception at most once.');
+            }
+            $note = $exceptionNotes[$code] ?? null;
+            if ($note !== null && ! is_string($note)) {
+                throw new \InvalidArgumentException('Recovery exception notes must be text.');
+            }
+            $note = trim((string) $note);
+            if (mb_strlen($note) > 2000 || ($code === 'other' && $note === '')) {
+                throw new \InvalidArgumentException('Describe the Other recovery exception in 2000 characters or fewer.');
+            }
+            $exceptions[$code] = $note === '' ? null : $note;
+        }
+
+        $this->db->transBegin();
+        try {
+            if ($this->events->activeForTrip($tripId, ['actual_return', 'vehicle_recovered']) !== null) {
+                throw new \InvalidArgumentException('This return is already complete. Correct or void the existing fact instead.');
+            }
+            $custody = $this->repo()->latestActiveLifecycleEvent($vehicleId);
+            if ((int) ($custody['turo_trip_normalized_id'] ?? 0) !== $tripId
+                || ! in_array($custody['event_code'] ?? null, ['actual_handoff', 'guest_return_staged'], true)
+                || (string) $custody['occurred_at'] > (new \DateTimeImmutable($occurredAt))->format('Y-m-d H:i:s')) {
+                throw new \InvalidArgumentException('This trip is not awaiting operator recovery at the selected time.');
+            }
+            $locationNote = trim((string) ($data['recovery_location_note'] ?? ''));
+            $note = trim(implode("\n", array_filter([
+                $locationNote === '' ? '' : 'Recovery location detail: ' . $locationNote,
+                trim((string) ($data['note'] ?? '')),
+            ])));
+            $assessmentNote = $unknown ? 'Energy unknown: ' . $reason : ($note ?: null);
+            $eventId = $this->events->record(
+                $vehicleId,
+                $tripId,
+                'vehicle_recovered',
+                'return',
+                $occurredAt,
+                $locationClass,
+                $locationClass === 'airport_hnl' ? null : ($data['location_detail'] ?? null),
+                'checklist_operator',
+                $actorUserId,
+                $note ?: null,
+                $parking,
+            );
+            $this->assessments->record($vehicleId, $tripId, $eventId, 'return', null, $energy, $occurredAt, 'checklist_operator', $actorUserId, $assessmentNote);
+            foreach ($exceptions as $code => $exceptionNote) {
+                ($this->recoveryExceptions ?? new VehicleRecoveryExceptionRepository($this->db))
+                    ->createForRecovery($companyId, $tripId, $vehicleId, $eventId, $code, $exceptionNote, $actorUserId);
+            }
+            $this->plans()->invalidateForWrite($vehicleId, 'new_actual_movement_event', $actorUserId);
+            if ($this->db->transStatus() === false) {
+                throw new RuntimeException('Vehicle recovery transaction failed.');
+            }
+            $this->db->transCommit();
+
+            return $eventId;
+        } catch (\Throwable $exception) {
+            $this->db->transRollback();
+            throw $exception;
+        }
+    }
+
+    public function voidRecoveredVehicle(array $checklist, int $eventId, int $actorUserId, string $reason): bool
+    {
+        if (! ($checklist['exists'] ?? false) || ($checklist['movement_type'] ?? null) !== 'return') {
+            throw new \InvalidArgumentException('Choose a return movement in the active company.');
+        }
+        $companyId = (int) ($checklist['company_id'] ?? 0);
+        $vehicleId = (int) ($checklist['fleet_vehicle_id'] ?? 0);
+        $tripId = (int) ($checklist['turo_trip_normalized_id'] ?? 0);
+        $this->requireCompanyVehicle($companyId, $vehicleId, $actorUserId);
+        $event = $this->events->find($eventId);
+        $assessment = $this->repo()->assessmentForEventOrTrip($eventId, null);
+        if ($event === null || $event['event_code'] !== 'vehicle_recovered' || $event['voided_at'] !== null
+            || (int) $event['company_id'] !== $companyId || (int) $event['fleet_vehicle_id'] !== $vehicleId
+            || (int) $event['turo_trip_normalized_id'] !== $tripId || $assessment === null
+            || (int) $assessment['trip_movement_event_id'] !== $eventId) {
+            throw new \InvalidArgumentException('Active vehicle recovery not found in the active company.');
+        }
+        if (trim($reason) === '') {
+            throw new \InvalidArgumentException('A void reason is required.');
+        }
+
+        $this->db->transBegin();
+        try {
+            if (! $this->assessments->void((int) $assessment['id'], $actorUserId, $reason)
+                || ! $this->events->void($eventId, $actorUserId, $reason)) {
+                throw new RuntimeException('Vehicle recovery could not be voided.');
+            }
+            $this->plans()->invalidateForWrite($vehicleId, 'voided_actual_movement_event', $actorUserId);
+            if ($this->db->transStatus() === false) {
+                throw new RuntimeException('Vehicle recovery void transaction failed.');
+            }
+            $this->db->transCommit();
+
+            return true;
+        } catch (\Throwable $exception) {
+            $this->db->transRollback();
+            throw $exception;
+        }
     }
 
     public function stageForChecklist(array $checklist, array $data, int $actorUserId): bool
@@ -166,13 +393,17 @@ class MovementOperationalFactService
     {
         $this->requireCompanyVehicle($companyId, $vehicleId, $actorUserId);
         $observedAt = $this->requiredPastTimestamp($data, 'Readiness observation time');
-        $cleanliness = (string) ($data['cleanliness'] ?? '');
-        if (! in_array($cleanliness, ['clean', 'dirty'], true)) {
-            throw new \InvalidArgumentException('Choose Clean or Dirty for current readiness.');
+        $cleanliness = trim((string) ($data['cleanliness'] ?? '')) ?: null;
+        if (! in_array($cleanliness, ['clean', 'dirty', null], true)) {
+            throw new \InvalidArgumentException('Choose Clean or Dirty, or leave cleanliness unobserved.');
         }
-        $energy = filter_var($data['energy_percent'] ?? null, FILTER_VALIDATE_INT);
-        if ($energy === false || $energy < 0 || $energy > 100) {
+        $energyValue = trim((string) ($data['energy_percent'] ?? ''));
+        $energy = $energyValue === '' ? null : filter_var($energyValue, FILTER_VALIDATE_INT);
+        if ($energy === false || ($energy !== null && ($energy < 0 || $energy > 100))) {
             throw new \InvalidArgumentException('Energy must be between 0 and 100.');
+        }
+        if ($cleanliness === null && $energy === null) {
+            throw new \InvalidArgumentException('Observe cleanliness or charge/fuel percentage before saving.');
         }
         $this->rejectGuestPossession($vehicleId);
         $this->rejectExactReadinessReplay($companyId, $vehicleId, $cleanliness, $energy, $observedAt);
@@ -253,7 +484,7 @@ class MovementOperationalFactService
         }
     }
 
-    private function rejectExactReadinessReplay(int $companyId, int $vehicleId, string $cleanliness, int $energy, string $observedAt): void
+    private function rejectExactReadinessReplay(int $companyId, int $vehicleId, ?string $cleanliness, ?int $energy, string $observedAt): void
     {
         if ($this->assessments->hasExactActiveCurrent($companyId, $vehicleId, $cleanliness, $energy, $observedAt)) {
             throw new \InvalidArgumentException('This exact current readiness observation is already recorded.');
@@ -281,7 +512,7 @@ class MovementOperationalFactService
     private function rejectGuestPossession(int $vehicleId): void
     {
         $lifecycle = $this->repo()->latestActiveLifecycleEvent($vehicleId);
-        if (($lifecycle['event_code'] ?? null) === 'actual_handoff') {
+        if (in_array($lifecycle['event_code'] ?? null, ['actual_handoff', 'guest_return_staged'], true)) {
             throw new \InvalidArgumentException('Record the actual return or recovery before updating current vehicle state.');
         }
     }
@@ -380,6 +611,8 @@ class MovementOperationalFactService
         try {
             if ($eventCode === 'actual_handoff') {
                 $this->rejectDuplicateHandoff($checklist);
+            } elseif ($eventCode === 'actual_return' && $this->events->activeForTrip((int) $checklist['turo_trip_normalized_id'], ['actual_return', 'vehicle_recovered']) !== null) {
+                throw new \InvalidArgumentException('This return is already complete. Correct or void the existing fact instead.');
             }
             $eventId = $this->events->record(
                 (int) $checklist['fleet_vehicle_id'],

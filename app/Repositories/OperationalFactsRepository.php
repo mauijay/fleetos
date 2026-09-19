@@ -152,7 +152,7 @@ class OperationalFactsRepository
             ->where('events.company_id', $companyId)
             ->where('trips.deleted_at', null)
             ->whereIn('events.fleet_vehicle_id', $vehicleIds)
-            ->whereIn('events.event_code', ['actual_handoff', 'actual_return', 'vehicle_recovered'])
+            ->whereIn('events.event_code', ['actual_handoff', 'guest_return_staged', 'actual_return', 'vehicle_recovered'])
             ->where('events.voided_at', null)
             ->where('events.occurred_at <=', $asOf)
             ->groupStart()
@@ -203,6 +203,84 @@ class OperationalFactsRepository
         }
 
         return $latest;
+    }
+
+    /** @return array<int, array<string, mixed>> Latest measured, non-voided energy per vehicle. */
+    public function latestEnergyForCompany(int $companyId, array $vehicleIds, string $asOf): array
+    {
+        $vehicleIds = array_values(array_unique(array_filter(array_map('intval', $vehicleIds), static fn (int $id): bool => $id > 0)));
+        if ($companyId < 1 || $vehicleIds === []) {
+            return [];
+        }
+
+        $rows = $this->db->table('movement_assessments assessments')
+            ->select('assessments.id, assessments.fleet_vehicle_id, assessments.trip_movement_event_id, assessments.energy_percent, assessments.captured_at')
+            ->join('trip_movement_events events', 'events.id = assessments.trip_movement_event_id AND events.company_id = assessments.company_id AND events.fleet_vehicle_id = assessments.fleet_vehicle_id AND events.voided_at IS NULL')
+            ->join('fleet_vehicles vehicles', 'vehicles.id = assessments.fleet_vehicle_id AND vehicles.company_id = assessments.company_id')
+            ->where('assessments.company_id', $companyId)
+            ->whereIn('assessments.fleet_vehicle_id', $vehicleIds)
+            ->where('assessments.voided_at', null)
+            ->where('assessments.energy_percent IS NOT NULL', null, false)
+            ->where('assessments.captured_at <=', $asOf)
+            ->where('events.occurred_at <=', $asOf)
+            ->groupStart()
+                ->where('assessments.created_at', null)
+                ->orWhere('assessments.created_at <=', $asOf)
+            ->groupEnd()
+            ->orderBy('assessments.captured_at', 'DESC')
+            ->orderBy('assessments.id', 'DESC')
+            ->get()->getResultArray();
+
+        $latest = [];
+        foreach ($rows as $row) {
+            $latest[(int) $row['fleet_vehicle_id']] ??= $row;
+        }
+
+        return $latest;
+    }
+
+    /**
+     * @return list<array<string, mixed>> One active guest report per vehicle, not a return-completion fact.
+     * @phpstan-impure Reads mutable movement-event state.
+     */
+    public function awaitingRecoveryForCompany(int $companyId, string $asOf): array
+    {
+        if ($companyId < 1) {
+            return [];
+        }
+
+        $events = $this->db->table('trip_movement_events events')
+            ->select('events.*, vehicles.fleet_code, vehicles.display_name, trips.ends_at')
+            ->join('fleet_vehicles vehicles', 'vehicles.id = events.fleet_vehicle_id AND vehicles.company_id = events.company_id')
+            ->join('turo_trips_normalized trips', 'trips.id = events.turo_trip_normalized_id AND trips.fleet_vehicle_id = events.fleet_vehicle_id')
+            ->where('events.company_id', $companyId)
+            ->where('vehicles.deleted_at', null)
+            ->where('trips.deleted_at', null)
+            ->where('events.voided_at', null)
+            ->where('events.occurred_at <=', $asOf)
+            ->groupStart()
+                ->where('events.created_at', null)
+                ->orWhere('events.created_at <=', $asOf)
+            ->groupEnd()
+            ->whereIn('events.event_code', ['vehicle_staged', 'actual_handoff', 'guest_return_staged', 'actual_return', 'vehicle_recovered'])
+            ->orderBy('events.occurred_at', 'DESC')
+            ->orderBy('events.id', 'DESC')
+            ->get()->getResultArray();
+
+        $seenVehicles = [];
+        $awaiting = [];
+        foreach ($events as $event) {
+            $vehicleId = (int) $event['fleet_vehicle_id'];
+            if (isset($seenVehicles[$vehicleId])) {
+                continue;
+            }
+            $seenVehicles[$vehicleId] = true;
+            if ($event['event_code'] === 'guest_return_staged') {
+                $awaiting[] = $event;
+            }
+        }
+
+        return $awaiting;
     }
 
     public function upsertScheduledLocation(int $tripId, ?int $vehicleId, string $movementType, array $classification): int
@@ -748,7 +826,7 @@ class OperationalFactsRepository
         $builder = $this->db->table('trip_movement_events')
             ->select($this->movementEventSelect())
             ->where('fleet_vehicle_id', $vehicleId)
-            ->whereIn('event_code', ['vehicle_staged', 'actual_handoff', 'actual_return', 'vehicle_recovered'])
+            ->whereIn('event_code', ['vehicle_staged', 'actual_handoff', 'guest_return_staged', 'actual_return', 'vehicle_recovered'])
             ->where('voided_at', null);
         if ($asOf !== null) {
             $builder->where('occurred_at <=', $asOf);
@@ -788,6 +866,7 @@ class OperationalFactsRepository
             return [];
         }
 
+        $custody = $this->latestCustodyEventsForCompany($companyId, $vehicleIds, $asOf ?? date('Y-m-d H:i:s'));
         $builder = $this->db->table('movement_assessments assessments')
             ->select('assessments.*, events.occurred_at AS event_occurred_at, events.event_code')
             ->join('trip_movement_events events', 'events.id = assessments.trip_movement_event_id')
@@ -806,7 +885,18 @@ class OperationalFactsRepository
         $latest = [];
         foreach ($builder->orderBy('assessments.captured_at', 'DESC')->orderBy('assessments.id', 'DESC')->get()->getResultArray() as $row) {
             $vehicleId = (int) $row['fleet_vehicle_id'];
-            $latest[$vehicleId] ??= $row;
+            $event = $custody[$vehicleId] ?? null;
+            if (in_array($event['event_code'] ?? null, ['actual_handoff', 'guest_return_staged', 'actual_return', 'vehicle_recovered'], true)
+                && (string) $row['captured_at'] <= (string) $event['occurred_at']) {
+                continue;
+            }
+            $latest[$vehicleId] ??= array_merge($row, ['cleanliness' => null, 'energy_percent' => null]);
+            foreach (['cleanliness', 'energy_percent'] as $field) {
+                if ($latest[$vehicleId][$field] === null && $row[$field] !== null) {
+                    $latest[$vehicleId][$field] = $row[$field];
+                    $latest[$vehicleId]['_' . $field . '_captured_at'] = $row['captured_at'];
+                }
+            }
         }
 
         return $latest;
@@ -863,20 +953,33 @@ class OperationalFactsRepository
     /** @return array<int, array<string, mixed>> */
     public function activeFactsForTrip(int $tripId): array
     {
-        $builder = $this->db->table('movement_assessments assessments')
-            ->select('assessments.id AS assessment_id, assessments.movement_type, assessments.cleanliness, assessments.energy_percent, assessments.captured_at, assessments.source, assessments.actor_user_id, assessments.note')
+        $builder = $this->db->table('trip_movement_events events')
+            ->select('assessments.id AS assessment_id, COALESCE(assessments.movement_type, events.movement_type) AS movement_type, assessments.cleanliness, assessments.energy_percent, assessments.captured_at')
+            ->select('CASE WHEN assessments.id IS NULL THEN events.source ELSE assessments.source END AS source', false)
+            ->select('CASE WHEN assessments.id IS NULL THEN events.actor_user_id ELSE assessments.actor_user_id END AS actor_user_id', false)
+            ->select('CASE WHEN assessments.id IS NULL THEN events.note ELSE assessments.note END AS note', false)
             ->select('events.id AS event_id, events.event_code, events.occurred_at, events.location_class, events.location_detail')
-            ->select('profiles.energy_kind, users.username AS actor_username')
-            ->join('trip_movement_events events', 'events.id = assessments.trip_movement_event_id')
-            ->join('vehicle_operational_profiles profiles', 'profiles.fleet_vehicle_id = assessments.fleet_vehicle_id', 'left')
-            ->join('users', 'users.id = assessments.actor_user_id', 'left')
-            ->where('assessments.turo_trip_normalized_id', $tripId)
-            ->where('assessments.voided_at', null)
+            ->select('profiles.energy_kind')
+            ->select('CASE WHEN assessments.id IS NULL THEN event_users.username ELSE assessment_users.username END AS actor_username', false)
+            ->join('turo_trips_normalized trips', 'trips.id = events.turo_trip_normalized_id AND trips.fleet_vehicle_id = events.fleet_vehicle_id')
+            ->join('fleet_vehicles vehicles', 'vehicles.id = events.fleet_vehicle_id AND vehicles.company_id = events.company_id')
+            ->join('movement_assessments assessments', 'assessments.trip_movement_event_id = events.id AND assessments.voided_at IS NULL', 'left')
+            ->join('vehicle_operational_profiles profiles', 'profiles.fleet_vehicle_id = events.fleet_vehicle_id', 'left')
+            ->join('users assessment_users', 'assessment_users.id = assessments.actor_user_id', 'left')
+            ->join('users event_users', 'event_users.id = events.actor_user_id', 'left')
+            ->where('events.turo_trip_normalized_id', $tripId)
             ->where('events.voided_at', null);
         if ($this->hasStructuredAirportParking()) {
             $builder->select('events.airport_garage_code, events.airport_parking_level, ' . $this->qualifiedAirportParkingRowSelect('events'));
         }
-        return $builder->orderBy('assessments.captured_at', 'DESC')->orderBy('assessments.id', 'DESC')->get()->getResultArray();
+        $facts = [];
+        foreach ($builder->orderBy('events.occurred_at', 'DESC')->orderBy('events.id', 'DESC')
+            ->orderBy('assessments.captured_at', 'DESC')->orderBy('assessments.id', 'DESC')->get()->getResultArray() as $row) {
+            $eventId = (int) $row['event_id'];
+            $facts[$eventId] ??= $row;
+        }
+
+        return array_values($facts);
     }
 
     private function movementEventSelect(): string

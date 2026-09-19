@@ -104,15 +104,25 @@ class VehicleCapital extends BaseController
     /** @return array<string, mixed>|null */
     private function currentReadiness(int $companyId, int $vehicleId, \DateTimeImmutable $asOf): ?array
     {
-        $readiness = Services::operationalFactsRepository()->latestCurrentReadinessAssessment($companyId, $vehicleId, $asOf->format('Y-m-d H:i:s'));
-        $latestHandoff = Services::operationalFactsRepository()->latestActiveHandoffEvent($vehicleId, $asOf->format('Y-m-d H:i:s'));
-        if ($readiness !== null
-            && $latestHandoff !== null
-            && (string) $latestHandoff['occurred_at'] >= (string) $readiness['captured_at']) {
+        $repository = Services::operationalFactsRepository();
+        $custody = $repository->latestActiveLifecycleEvent($vehicleId, $asOf->format('Y-m-d H:i:s'));
+        if (in_array($custody['event_code'] ?? null, ['actual_handoff', 'guest_return_staged'], true)) {
+            return null;
+        }
+        $current = $repository->latestCurrentReadinessAssessment($companyId, $vehicleId, $asOf->format('Y-m-d H:i:s'));
+        if (! in_array($custody['event_code'] ?? null, ['actual_return', 'vehicle_recovered'], true)) {
+            return $current;
+        }
+        $recovery = $repository->assessmentForEventOrTrip((int) $custody['id'], null);
+        if ($current === null && $recovery === null) {
             return null;
         }
 
-        return $readiness;
+        return array_merge($recovery ?? [], $current ?? [], [
+            'cleanliness' => $current['cleanliness'] ?? $recovery['cleanliness'] ?? null,
+            'energy_percent' => $current['energy_percent'] ?? $recovery['energy_percent'] ?? null,
+            'captured_at' => $current['captured_at'] ?? $recovery['captured_at'] ?? null,
+        ]);
     }
 
     private function currentMovementHref(int $vehicleId, \DateTimeImmutable $asOf): ?string

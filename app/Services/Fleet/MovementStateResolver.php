@@ -17,6 +17,10 @@ class MovementStateResolver
         $missing = [];
         $status = (string) ($context['operational_status'] ?? 'available');
 
+        if (($event['event_code'] ?? null) === 'guest_return_staged') {
+            return $this->state('awaiting_recovery', 'Awaiting Recovery', 'warning', 'Returned to HNL — awaiting recovery. Guest-reported location is unverified.', $event, $schedule, $missing, [], 'recover_vehicle', 'Recover Vehicle');
+        }
+
         if (in_array($status, ['offline', 'out_of_service', 'maintenance'], true)) {
             return $this->state('offline', 'Offline', 'neutral', 'Vehicle is unavailable for movement.', $event, $schedule, $missing, $blockers, 'review_vehicle_status', 'Review vehicle status');
         }
@@ -35,25 +39,23 @@ class MovementStateResolver
 
         if (in_array($event['event_code'] ?? null, ['actual_return', 'vehicle_recovered'], true)) {
             $target = isset($profile['ready_energy_target_percent']) ? (int) $profile['ready_energy_target_percent'] : null;
-            if (($assessment['cleanliness'] ?? null) === null) {
-                $missing[] = 'return_cleanliness';
-            }
-            if ($target !== null && ($assessment['energy_percent'] ?? null) === null) {
-                $missing[] = 'return_energy_percent';
-            }
-            if ($missing !== []) {
-                return $this->state('returned_assessment_required', 'Return assessment needed', 'warning', 'Vehicle returned; complete the return assessment.', $event, $schedule, $missing, $blockers, 'complete_return_assessment', 'Complete return assessment');
-            }
-            $dirty = ($assessment['cleanliness'] ?? null) === 'dirty';
-            $lowEnergy = $target !== null && (int) ($assessment['energy_percent'] ?? 0) < $target;
-            if ($dirty || $lowEnergy) {
-                if ($dirty) {
+            $needsCleaning = (bool) ($context['cleaning_required'] ?? (($assessment['cleanliness'] ?? null) !== 'clean'));
+            $energyCondition = array_key_exists('energy_condition', $context) ? $context['energy_condition'] : ($target === null ? 'target_needed' : (($assessment['energy_percent'] ?? null) === null ? 'measurement_needed' : ((int) $assessment['energy_percent'] < $target ? 'charge_required' : null)));
+            if ($needsCleaning || $energyCondition !== null) {
+                if ($needsCleaning) {
                     $blockers[] = ['code' => 'cleaning_required', 'label' => 'Cleaning required', 'severity' => 'meaningful'];
                 }
-                if ($lowEnergy) {
-                    $blockers[] = ['code' => 'energy_below_target', 'label' => 'Energy below ready target', 'severity' => 'meaningful'];
+                if ($energyCondition === 'charge_required') {
+                    $blockers[] = ['code' => 'energy_below_target', 'label' => 'Charge/Fuel to ' . $target . '%', 'severity' => 'meaningful'];
+                } elseif ($energyCondition === 'measurement_needed') {
+                    $missing[] = 'return_energy_percent';
+                    $blockers[] = ['code' => 'energy_measurement_needed', 'label' => 'Record charge/fuel level', 'severity' => 'meaningful'];
+                } elseif ($energyCondition === 'target_needed') {
+                    $missing[] = 'ready_energy_target_percent';
+                    $blockers[] = ['code' => 'energy_target_needed', 'label' => 'Set charge/fuel target', 'severity' => 'meaningful'];
                 }
-                return $this->state('turnaround_attention', 'Turnaround needed', 'warning', 'Vehicle returned and needs turnaround work.', $event, $schedule, $missing, $blockers, 'complete_turnaround', 'Complete turnaround');
+                $recovered = ($event['event_code'] ?? null) === 'vehicle_recovered';
+                return $this->state('turnaround_attention', $recovered ? 'Recovered — turnaround needed' : 'Returned — turnaround needed', 'warning', $recovered ? 'Vehicle recovered; cleaning and any energy work remain actionable.' : 'Vehicle returned; cleaning and any energy work remain actionable.', $event, $schedule, $missing, $blockers, 'complete_turnaround', 'Complete turnaround');
             }
             return $this->state('ready', 'Ready', 'success', 'Return confirmed and readiness facts are complete.', $event, $schedule, $missing, $blockers, 'none', 'No action required');
         }

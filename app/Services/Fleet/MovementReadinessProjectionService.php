@@ -130,37 +130,33 @@ class MovementReadinessProjectionService
         $return = $events['actual_return'] ?? null;
         $recovery = $events['vehicle_recovered'] ?? null;
         $received = $return ?? $recovery;
-        $assessment = $context['active_assessment'];
         $profile = $context['profile'] ?? [];
         $target = isset($profile['ready_energy_target_percent']) ? (int) $profile['ready_energy_target_percent'] : null;
-        $energy = isset($assessment['energy_percent']) ? (int) $assessment['energy_percent'] : null;
-        $cleanlinessKnown = ($assessment['cleanliness'] ?? null) !== null;
         $nextTrip = $context['next_trip'] ?? null;
         $nextPickupAssessment = $this->preparationAssessment($context, true);
         $nextPickupAuthority = $nextPickupAssessment['_authority'] ?? 'movement_assessment';
-        $nextPickupEnergy = isset($nextPickupAssessment['energy_percent']) ? (int) $nextPickupAssessment['energy_percent'] : null;
-        $nextPickupClean = ($nextPickupAssessment['cleanliness'] ?? null) === 'clean';
-
+        $receivedAt = (string) ($received['occurred_at'] ?? '');
+        $cleanAt = (string) ($nextPickupAssessment['_cleanliness_captured_at'] ?? '');
+        $energyAt = (string) ($nextPickupAssessment['_energy_percent_captured_at'] ?? '');
+        $nextPickupEnergy = isset($nextPickupAssessment['energy_percent'])
+            && ($receivedAt === '' || $energyAt > $receivedAt
+                || ($energyAt === $receivedAt && ($nextPickupAssessment['_energy_percent_authority'] ?? null) === 'movement_assessment'))
+            ? (int) $nextPickupAssessment['energy_percent'] : null;
+        $nextPickupClean = ($nextPickupAssessment['cleanliness'] ?? null) === 'clean'
+            && ($receivedAt === '' || $cleanAt > $receivedAt);
         $requirements = [
-            $this->derivedRequirement('vehicle_received', 'Vehicle returned or recovered', self::PHASE_RETURN_INTAKE, $received !== null, true, $received !== null ? 'movement_event' : null, $received['occurred_at'] ?? null, 'Record actual return or recovery'),
-            $this->derivedRequirement('return_time_confirmed', 'Actual return time known', self::PHASE_RETURN_INTAKE, $return !== null, true, $return !== null ? 'movement_event' : null, $return['occurred_at'] ?? null, 'Record actual return time'),
-            $this->derivedRequirement('energy_known', 'Energy known', self::PHASE_RETURN_INTAKE, $energy !== null, true, $energy !== null ? 'movement_assessment' : null, $assessment['captured_at'] ?? null, 'Record Charge/Fuel percentage'),
-            $this->derivedRequirement('cleaning_status_known', 'Cleaning status known', self::PHASE_RETURN_INTAKE, $cleanlinessKnown, true, $cleanlinessKnown ? 'movement_assessment' : null, $assessment['captured_at'] ?? null, 'Record return cleanliness'),
-            $this->humanRequirement($context, 'exterior_inspected', 'Exterior inspected', self::PHASE_RETURN_INTAKE),
-            $this->humanRequirement($context, 'interior_inspected', 'Interior inspected', self::PHASE_RETURN_INTAKE),
-            $this->humanRequirement($context, 'damage_check_completed', 'Damage check completed', self::PHASE_RETURN_INTAKE),
-            $this->humanRequirement($context, 'return_photos_completed', 'Return photos completed', self::PHASE_RETURN_INTAKE),
+            $this->derivedRequirement('vehicle_recovery', 'Vehicle recovery', self::PHASE_RETURN_INTAKE, $received !== null, true, $received !== null ? 'movement_event' : null, $received['occurred_at'] ?? null, 'Recover Vehicle'),
         ];
 
         if ($nextTrip !== null) {
             $requirements[] = $this->nextPickupRequirement(
-                $this->derivedRequirement('vehicle_clean', 'Vehicle clean for next pickup', self::PHASE_NEXT_PICKUP_PREPARATION, $nextPickupClean, true, $nextPickupClean ? $nextPickupAuthority : null, $nextPickupAssessment['captured_at'] ?? null, 'Clean vehicle'),
+                $this->derivedRequirement('vehicle_clean', 'Vehicle clean for next pickup', self::PHASE_NEXT_PICKUP_PREPARATION, $nextPickupClean, true, $nextPickupClean ? ($nextPickupAssessment['_cleanliness_authority'] ?? $nextPickupAuthority) : null, $cleanAt ?: null, 'Clean vehicle'),
                 $nextTrip,
             );
             $requirements[] = $this->nextPickupRequirement(
                 $target === null
                     ? $this->notApplicableRequirement('energy_ready', 'Energy ready for next pickup', self::PHASE_NEXT_PICKUP_PREPARATION)
-                    : $this->derivedRequirement('energy_ready', 'Energy ready for next pickup', self::PHASE_NEXT_PICKUP_PREPARATION, $nextPickupEnergy !== null && $nextPickupEnergy >= $target, true, $nextPickupEnergy !== null ? $nextPickupAuthority . '_and_profile' : null, $nextPickupAssessment['captured_at'] ?? null, 'Charge/Fuel to ' . $target . '%'),
+                    : $this->derivedRequirement('energy_ready', 'Energy ready for next pickup', self::PHASE_NEXT_PICKUP_PREPARATION, $nextPickupEnergy !== null && $nextPickupEnergy >= $target, true, $nextPickupEnergy !== null ? ($nextPickupAssessment['_energy_percent_authority'] ?? $nextPickupAuthority) . '_and_profile' : null, $energyAt ?: null, 'Charge/Fuel to ' . $target . '%'),
                 $nextTrip,
             );
         }
@@ -201,6 +197,7 @@ class MovementReadinessProjectionService
         $selected = null;
         $selectedTimestamp = '';
         $selectedPriority = 0;
+        $fields = [];
         foreach ($candidates as [$priority, $authority, $assessment]) {
             if (! is_array($assessment)) {
                 continue;
@@ -210,6 +207,37 @@ class MovementReadinessProjectionService
                 $selected = array_merge($assessment, ['_authority' => $authority]);
                 $selectedTimestamp = $timestamp;
                 $selectedPriority = $priority;
+            }
+            foreach (['cleanliness', 'energy_percent'] as $field) {
+                if (($assessment[$field] ?? null) === null) {
+                    continue;
+                }
+                $fieldTimestamp = (string) ($assessment['_' . $field . '_captured_at'] ?? $timestamp);
+                if (! isset($fields[$field]) || $fieldTimestamp > $fields[$field]['timestamp']
+                    || ($fieldTimestamp === $fields[$field]['timestamp'] && $priority > $fields[$field]['priority'])) {
+                    $fields[$field] = ['value' => $assessment[$field], 'timestamp' => $fieldTimestamp, 'priority' => $priority, 'authority' => $authority];
+                }
+            }
+        }
+
+        if ($selected === null) {
+            return null;
+        }
+        foreach (['cleanliness', 'energy_percent'] as $field) {
+            $selected[$field] = $fields[$field]['value'] ?? null;
+            $selected['_' . $field . '_captured_at'] = $fields[$field]['timestamp'] ?? null;
+            $selected['_' . $field . '_authority'] = $fields[$field]['authority'] ?? null;
+        }
+        $custody = $context['latest_custody_event'] ?? null;
+        if (in_array($custody['event_code'] ?? null, ['actual_return', 'vehicle_recovered'], true)) {
+            $recoveredAt = (string) ($custody['occurred_at'] ?? '');
+            if ($selected['cleanliness'] === 'clean' && (string) ($selected['_cleanliness_captured_at'] ?? '') <= $recoveredAt) {
+                $selected['cleanliness'] = null;
+            }
+            if ($selected['energy_percent'] !== null && (string) ($selected['_energy_percent_captured_at'] ?? '') <= $recoveredAt
+                && ! (($selected['_energy_percent_authority'] ?? null) === 'movement_assessment'
+                    && (int) ($context['active_assessment']['trip_movement_event_id'] ?? 0) === (int) ($custody['id'] ?? 0))) {
+                $selected['energy_percent'] = null;
             }
         }
 

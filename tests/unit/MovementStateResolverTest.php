@@ -29,7 +29,7 @@ final class MovementStateResolverTest extends CIUnitTestCase
             'passed return while imported in progress' => [['operational_status' => 'in_progress', 'trip_schedule' => ['starts_at' => '2026-09-01 09:00:00', 'ends_at' => '2026-09-03 11:00:00']], 'return_confirmation_overdue'],
             'passed pickup is not handoff' => [['trip_schedule' => ['starts_at' => '2026-09-03 11:00:00', 'ends_at' => '2026-09-04 11:00:00']], 'pickup_confirmation_overdue'],
             'scheduled return alone is not actual return' => [['trip_schedule' => ['starts_at' => '2026-09-04 11:00:00', 'ends_at' => '2026-09-05 11:00:00'], 'next_trip' => $future], 'ready_for_handoff'],
-            'return assessment incomplete' => [['latest_event' => $return, 'assessment' => ['cleanliness' => null, 'energy_percent' => null], 'profile' => ['ready_energy_target_percent' => 80]], 'returned_assessment_required'],
+            'return needs cleaning and energy measurement' => [['latest_event' => $return, 'assessment' => ['cleanliness' => null, 'energy_percent' => null], 'profile' => ['ready_energy_target_percent' => 80]], 'turnaround_attention'],
             'dirty return' => [['latest_event' => $return, 'assessment' => ['cleanliness' => 'dirty', 'energy_percent' => 90], 'profile' => ['ready_energy_target_percent' => 80]], 'turnaround_attention'],
             'low energy return' => [['latest_event' => $return, 'assessment' => ['cleanliness' => 'clean', 'energy_percent' => 25], 'profile' => ['ready_energy_target_percent' => 80]], 'turnaround_attention'],
             'complete return ready' => [['latest_event' => $return, 'assessment' => ['cleanliness' => 'clean', 'energy_percent' => 90], 'profile' => ['ready_energy_target_percent' => 80]], 'ready'],
@@ -87,8 +87,8 @@ final class MovementStateResolverTest extends CIUnitTestCase
         $returnOverdue = $resolver->resolve(['latest_event' => ['event_code' => 'actual_handoff'], 'trip_schedule' => ['ends_at' => '2026-09-03 11:00:00']], $asOf);
 
         $this->assertSame('Currently Rented', $onTrip['label']);
-        $this->assertSame('Return assessment needed', $assessment['label']);
-        $this->assertSame('Turnaround needed', $turnaround['label']);
+        $this->assertSame('Returned — turnaround needed', $assessment['label']);
+        $this->assertSame('Returned — turnaround needed', $turnaround['label']);
         $this->assertSame('Ready for Sep 4, 9:00 AM', $ready['label']);
         $this->assertSame('Pickup confirmation overdue', $pickupOverdue['label']);
         $this->assertSame('Return confirmation overdue', $returnOverdue['label']);

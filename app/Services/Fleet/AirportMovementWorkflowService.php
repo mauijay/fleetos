@@ -268,6 +268,7 @@ class AirportMovementWorkflowService
             'airport_parking' => $parking,
             'garage_line' => $presentation['garage_line'] ?? null,
             'position_line' => $presentation['position_line'] ?? null,
+            'location_label' => $presentation['location_label'] ?? null,
             'approved_turo_garage' => $presentation['approved_turo_garage'] ?? null,
             'garage_attention' => ($presentation['approved_turo_garage'] ?? null) === false ? 'Wrong airport garage - recovery / relocation required' : null,
         ]);

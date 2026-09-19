@@ -7,7 +7,8 @@ export const resolveHnlParkingState = ({
   garageLevels,
 }) => {
   const rowGarage = rowGarages[row] || "";
-  const resolvedGarage = source === "row" && rowGarage ? rowGarage : garageCode;
+  const resolvedGarage =
+    (source === "row" || !garageCode) && rowGarage ? rowGarage : garageCode;
   const resolvedRow =
     resolvedGarage && rowGarage && rowGarage !== resolvedGarage ? "" : row;
   const selectedRowGarage = rowGarages[resolvedRow] || "";

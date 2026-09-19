@@ -37,6 +37,10 @@ test("row-first selection derives each canonical garage", () => {
   assert.equal(resolve({ row: "F" }).garageCode, "international");
 });
 
+test("restored row prefill derives its garage before user interaction", () => {
+  assert.equal(resolve({ source: undefined, row: "G" }).garageCode, "international");
+});
+
 test("Row M clears Level 7 and constrains Terminal 2 levels", () => {
   const state = resolve({ row: "M", level: "7" });
 

@@ -13,6 +13,20 @@ class VehiclePositioningRecommendationService
     /** @return array<string, mixed> */
     public function recommend(array $context): array
     {
+        if (($context['awaiting_recovery'] ?? false) === true) {
+            return [
+                'code' => 'await_recovery',
+                'label' => 'Await recovery',
+                'strength' => 'Informational',
+                'reason_codes' => [],
+                'explanation' => 'Guest-reported location is unverified; physical preparation resumes after operator recovery.',
+                'basis_type' => 'guest_reported',
+                'missing_facts' => [],
+                'freshness_warning' => $context['freshness']['warning'] ?? null,
+                'transportation_dependency' => null,
+                'active_override' => $context['active_override'] ?? null,
+            ];
+        }
         if (($context['guest_possession'] ?? false) === true) {
             return [
                 'code' => 'await_return',
@@ -52,7 +66,7 @@ class VehiclePositioningRecommendationService
                 [$code, $strength, $reasons] = ['leave_at_airport', 'Recommended', ['already_at_hnl', 'next_pickup_hnl', $horizon]];
                 if ($this->requiresUnsupportedHnlEnergy($profile, $assessment)) {
                     [$code, $strength, $reasons] = ['retrieve_home', 'Consider', ['hnl_energy_service_unavailable', 'retrieve_for_turnaround']];
-                } elseif ($this->needsHnlTurnaround($profile, $assessment)) {
+                } elseif ($this->needsHnlTurnaround($profile, $assessment, (bool) ($context['cleaning_required'] ?? false))) {
                     $reasons[] = 'hnl_turnaround_supported';
                 }
             } elseif ($nextTrip !== null && $pickup === 'airport_hnl' && $horizon === 'medium_term') {
@@ -101,16 +115,17 @@ class VehiclePositioningRecommendationService
         ];
     }
 
-    private function needsHnlTurnaround(array $profile, array $assessment): bool
+    private function needsHnlTurnaround(array $profile, array $assessment, bool $cleaningRequired = false): bool
     {
         $target = isset($profile['ready_energy_target_percent']) ? (int) $profile['ready_energy_target_percent'] : null;
-        return ($assessment['cleanliness'] ?? null) === 'dirty'
+        return $cleaningRequired || ($assessment['cleanliness'] ?? null) === 'dirty'
             || ($target !== null && ($assessment['energy_percent'] ?? null) !== null && (int) $assessment['energy_percent'] < $target);
     }
 
     private function requiresUnsupportedHnlEnergy(array $profile, array $assessment): bool
     {
-        if (! $this->needsHnlTurnaround($profile, $assessment)) {
+        $target = isset($profile['ready_energy_target_percent']) ? (int) $profile['ready_energy_target_percent'] : null;
+        if ($target === null || ($assessment['energy_percent'] ?? null) === null || (int) $assessment['energy_percent'] >= $target) {
             return false;
         }
         $kind = (string) ($profile['energy_kind'] ?? 'unknown');

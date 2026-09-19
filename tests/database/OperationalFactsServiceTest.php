@@ -2,6 +2,7 @@
 
 use App\Database\Migrations\CreateMovementOperationalFacts;
 use App\Repositories\OperationalFactsRepository;
+use App\Repositories\VehicleRecoveryExceptionRepository;
 use App\Services\Fleet\CurrentVehicleLocationService;
 use App\Services\Fleet\FleetSnapshotService;
 use App\Services\Fleet\ImportFreshnessService;
@@ -12,6 +13,7 @@ use App\Services\Fleet\MovementOperationalFactPresentationService;
 use App\Services\Fleet\MovementOperationalFactService;
 use App\Services\Fleet\MovementStateResolver;
 use App\Services\Fleet\NextConfirmedTripService;
+use App\Services\Fleet\OperationalMovementWorkService;
 use App\Services\Fleet\ScheduledLocationBackfillService;
 use App\Services\Fleet\VehiclePositioningPlanService;
 use App\Services\Fleet\VehiclePositioningRecommendationService;
@@ -62,6 +64,165 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
         $this->repository = new OperationalFactsRepository($this->connection);
         $this->events = new MovementEventService($this->repository);
         $this->assessments = new MovementAssessmentService($this->repository);
+    }
+
+    public function testRecoverVehicleDerivesIndependentCleaningAndEnergyWorkWithoutDirtyFact(): void
+    {
+        $at = new DateTimeImmutable();
+        foreach (['airport_garage_code VARCHAR(40)', 'airport_parking_level INTEGER', 'airport_parking_row VARCHAR(4)'] as $column) {
+            $this->connection->query('ALTER TABLE ' . $this->table('trip_movement_events') . ' ADD COLUMN ' . $column . ' NULL');
+        }
+        $this->connection->table('vehicle_operational_profiles')->insert([
+            'fleet_vehicle_id' => 10, 'energy_kind' => 'electric', 'ready_energy_target_percent' => 80,
+            'created_by' => 7, 'updated_by' => 7,
+        ]);
+        $priorReadiness = $this->events->record(10, null, 'vehicle_readiness_observed', null, '2026-09-16 08:00:00', null, null, 'vehicle_operator', 7);
+        $this->assessments->record(10, null, $priorReadiness, 'current', 'clean', 90, '2026-09-16 08:00:00', 'vehicle_operator', 7);
+        $this->events->record(10, 100, 'actual_handoff', 'pickup', '2026-09-16 09:00:00', 'airport_hnl', null, 'operator', 7, null, ['garage_code' => 'international', 'level' => 7, 'row' => 'F']);
+        $reportId = $this->events->record(10, 100, 'guest_return_staged', 'return', '2026-09-16 10:00:00', 'airport_hnl', null, 'guest_report_received', 7, null, ['garage_code' => 'international', 'level' => 7, 'row' => 'F']);
+        $work = new OperationalMovementWorkService($this->repository);
+        $this->assertSame([], $work->cleaningNeedsForCompany(1, $at));
+        $this->assertSame([], $work->energyNeedsForCompany(1, $at));
+
+        $service = new MovementOperationalFactService($this->connection, $this->events, $this->assessments);
+        $checklist = ['exists' => true, 'movement_type' => 'return', 'company_id' => 1, 'fleet_vehicle_id' => 10, 'turo_trip_normalized_id' => 100];
+        $recoveryId = $service->recoverVehicle($checklist, [
+            'occurred_at' => '2026-09-16 11:00:00', 'location_class' => 'airport_hnl',
+            'airport_garage_code' => 'international', 'airport_parking_level' => '7', 'airport_parking_row' => 'G',
+            'recovery_location_note' => 'Near elevators', 'energy_percent' => '54', 'confirm_recovery_location' => '1',
+        ], 7);
+        $this->assertSame('vehicle_recovered', $this->repository->event($recoveryId)['event_code']);
+        $this->assertSame('F', $this->repository->event($reportId)['airport_parking_row']);
+        $this->assertSame('G', $this->repository->event($recoveryId)['airport_parking_row']);
+        $currentLocation = (new CurrentVehicleLocationService($this->repository))->resolve(10, $at);
+        $this->assertSame('parked', $currentLocation['operational_state']);
+        $this->assertSame('Near elevators', $currentLocation['location_note']);
+        $this->assertCount(1, $work->cleaningNeedsForCompany(1, $at));
+        $this->assertSame('charge_required', $work->energyNeedsForCompany(1, $at)[0]['condition_code']);
+        $this->assertSame(54, $work->energyNeedsForCompany(1, $at)[0]['energy_percent']);
+        $this->assertSame(0, $this->connection->table('movement_assessments')->where('cleanliness', 'dirty')->countAllResults());
+        try {
+            $service->recoverVehicle($checklist, ['occurred_at' => '2026-09-16 11:01:00', 'location_class' => 'home', 'energy_percent' => '54', 'confirm_recovery_location' => '1'], 7);
+            $this->fail('Duplicate recovery must be rejected.');
+        } catch (InvalidArgumentException $exception) {
+            $this->assertStringContainsString('already complete', $exception->getMessage());
+        }
+
+        $service->recordCurrentReadinessForVehicle(1, 10, ['occurred_at' => '2026-09-16 12:00:00', 'cleanliness' => 'clean'], 7);
+        $this->assertSame([], $work->cleaningNeedsForCompany(1, $at));
+        $this->assertSame('charge_required', $work->energyNeedsForCompany(1, $at)[0]['condition_code']);
+        $service->recordCurrentReadinessForVehicle(1, 10, ['occurred_at' => '2026-09-16 13:00:00', 'energy_percent' => '82'], 7);
+        $this->assertSame([], $work->cleaningNeedsForCompany(1, $at));
+        $this->assertSame([], $work->energyNeedsForCompany(1, $at));
+    }
+
+    public function testUnknownRecoveryEnergyRequiresReasonAndNeverBecomesZero(): void
+    {
+        $this->connection->table('vehicle_operational_profiles')->insert([
+            'fleet_vehicle_id' => 10, 'energy_kind' => 'electric', 'ready_energy_target_percent' => 80,
+            'created_by' => 7, 'updated_by' => 7,
+        ]);
+        $this->events->record(10, 100, 'actual_handoff', 'pickup', '2026-09-16 09:00:00', 'home', null, 'operator', 7);
+        $service = new MovementOperationalFactService($this->connection, $this->events, $this->assessments);
+        $checklist = ['exists' => true, 'movement_type' => 'return', 'company_id' => 1, 'fleet_vehicle_id' => 10, 'turo_trip_normalized_id' => 100];
+        $data = ['occurred_at' => '2026-09-16 11:00:00', 'location_class' => 'home', 'energy_unknown' => '1', 'confirm_recovery_location' => '1'];
+        try {
+            $service->recoverVehicle($checklist, $data, 7);
+            $this->fail('Unknown energy without a reason must be rejected.');
+        } catch (InvalidArgumentException $exception) {
+            $this->assertStringContainsString('Explain why', $exception->getMessage());
+        }
+        $this->assertNull($this->events->activeForTrip(100, ['vehicle_recovered']));
+        $data['energy_unknown_reason'] = 'Display unavailable during recovery';
+        $recoveryId = $service->recoverVehicle($checklist, $data, 7);
+        $assessment = $this->repository->assessmentForEventOrTrip($recoveryId, 100);
+        $this->assertNull($assessment['energy_percent']);
+        $this->assertStringContainsString('Display unavailable', (string) $assessment['note']);
+        $needs = (new OperationalMovementWorkService($this->repository))->energyNeedsForCompany(1, new DateTimeImmutable());
+        $this->assertSame('measurement_needed', $needs[0]['condition_code']);
+        $this->assertNull($needs[0]['energy_percent']);
+        $this->assertTrue($service->voidRecoveredVehicle($checklist, $recoveryId, 8, 'Recovery was entered on the wrong trip.'));
+        $this->assertNull($this->events->activeForTrip(100, ['vehicle_recovered']));
+        $this->assertNotNull($this->assessments->find((int) $assessment['id'])['voided_at']);
+        $this->assertSame([], (new OperationalMovementWorkService($this->repository))->energyNeedsForCompany(1, new DateTimeImmutable()));
+    }
+
+    public function testNonStagedRecoveryStoresIndependentOptionalExceptionsAtomically(): void
+    {
+        $this->connection->query('CREATE TABLE ' . $this->table('vehicle_recovery_exceptions') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, company_id INTEGER, turo_trip_normalized_id INTEGER, fleet_vehicle_id INTEGER, trip_movement_event_id INTEGER, exception_code VARCHAR(40), note TEXT NULL, status VARCHAR(20), created_by INTEGER, created_at DATETIME, resolved_by INTEGER NULL, resolved_at DATETIME NULL, resolution_note TEXT NULL, UNIQUE (trip_movement_event_id, exception_code))');
+        $this->connection->query('CREATE TABLE ' . $this->table('trip_movement_checklists') . ' (id INTEGER PRIMARY KEY, turo_trip_normalized_id INTEGER, fleet_vehicle_id INTEGER, movement_type VARCHAR(20))');
+        $this->connection->table('trip_movement_checklists')->insert(['id' => 901, 'turo_trip_normalized_id' => 100, 'fleet_vehicle_id' => 10, 'movement_type' => 'return']);
+        $this->events->record(10, 100, 'actual_handoff', 'pickup', '2026-09-16 09:00:00', 'home', null, 'operator', 7);
+        $repo = new VehicleRecoveryExceptionRepository($this->connection);
+        $service = new MovementOperationalFactService($this->connection, $this->events, $this->assessments, recoveryExceptions: $repo);
+        $checklist = ['exists' => true, 'movement_type' => 'return', 'company_id' => 1, 'fleet_vehicle_id' => 10, 'turo_trip_normalized_id' => 100];
+        $data = [
+            'occurred_at' => '2026-09-16 11:00:00', 'location_class' => 'home',
+            'energy_percent' => '54', 'confirm_recovery_location' => '1',
+            'exception_codes' => ['damage', 'missing_key', 'missing_charge_adapter', 'not_drivable', 'other'],
+            'exception_notes' => ['damage' => 'Synthetic scratch', 'other' => 'Synthetic other issue'],
+        ];
+
+        foreach ([['damage', 'damage'], ['other'], ['other', 'other']] as $invalidCodes) {
+            $invalid = $data;
+            $invalid['exception_codes'] = $invalidCodes;
+            $invalid['exception_notes'] = [];
+            try {
+                $service->recoverVehicle($checklist, $invalid, 7);
+                $this->fail('Invalid recovery exceptions must be rejected before recording recovery.');
+            } catch (InvalidArgumentException) {
+                $this->assertNull($this->events->activeForTrip(100, ['vehicle_recovered']));
+            }
+        }
+
+        $recoveryId = $service->recoverVehicle($checklist, $data, 7);
+        $this->assertSame('vehicle_recovered', $this->repository->event($recoveryId)['event_code']);
+        $this->assertCount(5, $repo->openForCompany(1));
+        $this->assertSame(['damage', 'missing_key', 'missing_charge_adapter', 'not_drivable', 'other'], array_column($repo->forTrip(1, 100), 'exception_code'));
+        $this->assertSame([], $repo->openForCompany(2));
+        $this->assertFalse($repo->resolveForCompany(2, 100, 10, 1, 8, null));
+        $this->assertTrue($repo->resolveForCompany(1, 100, 10, 1, 8, 'Reviewed'));
+        $this->assertCount(4, $repo->openForCompany(1));
+        $this->assertSame('resolved', $repo->forTrip(1, 100)[0]['status']);
+    }
+
+    public function testRecoveryRejectsWrongCompanyAndRollsBackWhenAssessmentFails(): void
+    {
+        $this->events->record(10, 100, 'actual_handoff', 'pickup', '2026-09-16 09:00:00', 'home', null, 'operator', 7);
+        $data = ['occurred_at' => '2026-09-16 11:00:00', 'location_class' => 'home', 'energy_percent' => '54', 'confirm_recovery_location' => '1'];
+        $service = new MovementOperationalFactService($this->connection, $this->events, $this->assessments);
+        $checklist = ['exists' => true, 'movement_type' => 'return', 'company_id' => 2, 'fleet_vehicle_id' => 10, 'turo_trip_normalized_id' => 100];
+        try {
+            $service->recoverVehicle($checklist, $data, 7);
+            $this->fail('Cross-company recovery must be rejected.');
+        } catch (InvalidArgumentException $exception) {
+            $this->assertStringContainsString('active fleet company', $exception->getMessage());
+        }
+        $this->assertNull($this->events->activeForTrip(100, ['vehicle_recovered']));
+
+        $checklist['company_id'] = 1;
+        foreach ([
+            ['location_class' => 'airport_hnl', 'airport_garage_code' => 'international', 'airport_parking_level' => '7', 'airport_parking_row' => 'A'],
+            ['energy_percent' => '101'],
+            ['confirm_recovery_location' => ''],
+        ] as $invalid) {
+            try {
+                $service->recoverVehicle($checklist, array_merge($data, $invalid), 7);
+                $this->fail('Invalid recovery input must be rejected.');
+            } catch (InvalidArgumentException) {
+                $this->assertNull($this->events->activeForTrip(100, ['vehicle_recovered']));
+            }
+        }
+        $failingAssessments = $this->createMock(MovementAssessmentService::class);
+        $failingAssessments->method('record')->willThrowException(new RuntimeException('Assessment write failed.'));
+        $service = new MovementOperationalFactService($this->connection, $this->events, $failingAssessments);
+        try {
+            $service->recoverVehicle($checklist, $data, 7);
+            $this->fail('Recovery must roll back when the assessment write fails.');
+        } catch (RuntimeException $exception) {
+            $this->assertSame('Assessment write failed.', $exception->getMessage());
+        }
+        $this->assertNull($this->events->activeForTrip(100, ['vehicle_recovered']));
     }
 
     public function testCurrentLocationUsesLatestNonVoidedEventAtOrBeforeAsOf(): void
@@ -158,6 +319,127 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
         $positioned = $snapshot->forCompany(1, $at('13:30:00'));
         $this->assertSame('home', $bucket($positioned));
         $this->assertSame(1, array_sum(array_column($positioned['buckets'], 'count')));
+    }
+
+    public function testGuestReturnReportIsUnverifiedAndNeverCompletesReturn(): void
+    {
+        foreach (['airport_garage_code VARCHAR(40)', 'airport_parking_level INTEGER', 'airport_parking_row VARCHAR(4)'] as $column) {
+            $this->connection->query('ALTER TABLE ' . $this->table('trip_movement_events') . ' ADD COLUMN ' . $column . ' NULL');
+        }
+        $repository = new OperationalFactsRepository($this->connection);
+        $events = new MovementEventService($repository);
+        $now = new DateTimeImmutable();
+        $handoffAt = $now->modify('-2 hours')->format('Y-m-d H:i:s');
+        $reportedAt = $now->modify('-1 hour')->format('Y-m-d H:i:s');
+        $asOf = new DateTimeImmutable($now->format('Y-m-d H:i:s'));
+        $events->record(10, 100, 'actual_handoff', 'pickup', $handoffAt, 'airport_hnl', null, 'operator', 7);
+        $reportId = $events->record(10, 100, 'guest_return_staged', 'return', $reportedAt, 'airport_hnl', null, 'guest_reported_parked_time', 7, 'Guest reported parked.', ['garage_code' => 'international', 'level' => 7, 'row' => 'G']);
+
+        $report = $repository->event($reportId);
+        $this->assertSame('guest_return_staged', $report['event_code']);
+        $this->assertSame('international', $report['airport_garage_code']);
+        $this->assertSame(7, (int) $report['airport_parking_level']);
+        $this->assertSame('G', $report['airport_parking_row']);
+        $this->assertSame('guest_reported_parked_time', $report['source']);
+        $custody = $repository->latestCustodyEventsForCompany(1, [10], $asOf->format('Y-m-d H:i:s'));
+        $this->assertSame('guest_return_staged', $custody[10]['event_code']);
+        $this->assertSame($reportId, (int) $repository->awaitingRecoveryForCompany(1, $asOf->format('Y-m-d H:i:s'))[0]['id']);
+        $this->assertSame([], $repository->awaitingRecoveryForCompany(2, $asOf->format('Y-m-d H:i:s')));
+        $completions = $repository->authoritativeMovementCompletionsForCompany(1, [100], $asOf->format('Y-m-d H:i:s'));
+        $this->assertSame([], array_values(array_filter($completions, static fn (array $row): bool => in_array($row['event_code'], ['actual_return', 'vehicle_recovered'], true))));
+        $location = (new CurrentVehicleLocationService($repository))->resolve(10, $asOf);
+        $this->assertSame('awaiting_recovery', $location['operational_state']);
+        $this->assertSame('unknown', $location['location_class']);
+        $this->assertSame('unverified_guest_report', $location['position_semantics']);
+        $buckets = array_column((new FleetSnapshotService(new CurrentVehicleLocationService($repository), $repository))->forCompany(1, $asOf)['buckets'], null, 'code');
+        $this->assertSame(1, $buckets['awaiting_recovery']['count']);
+        $this->assertSame(0, $buckets['rented']['count']);
+
+        $plans = $this->createStub(VehiclePositioningPlanService::class);
+        $plans->method('active')->willReturn(null);
+        $board = new MovementBoardIntelligenceService(
+            $repository,
+            new NextConfirmedTripService($repository),
+            new ImportFreshnessService(),
+            new MovementStateResolver(),
+            new VehiclePositioningRecommendationService(),
+            $plans,
+        );
+        $staleRentedCard = ['fleet_vehicle_id' => 10, 'fleet_code' => 'Synthetic EV', 'status' => 'in_progress', 'primary_status' => 'currently_rented', 'flags' => ['currently_rented', 'returning_today'], 'actions' => []];
+        $card = $board->enrich([$staleRentedCard], $asOf, 1)[0];
+        $this->assertSame('awaiting_recovery', $card['state']['code']);
+        $this->assertSame('awaiting_recovery', $card['primary_status']);
+        $this->assertNotContains('currently_rented', $card['flags']);
+        $this->assertSame('guest_reported', $card['location_basis']);
+        $this->assertSame('Guest-reported location — unverified', $card['location_heading']);
+        $this->assertSame('await_recovery', $card['recommendation']['code']);
+        $this->assertSame(['Recover Vehicle'], $card['actions']);
+        $this->assertSame([], $card['readiness_blockers']);
+        $this->assertNotContains('charging_required', $card['flags']);
+
+        $correctedId = $events->correct($reportId, ['airport_parking_row' => 'F'], 8, 'Corrected guest-reported row.');
+        $this->assertSame('F', $repository->event($correctedId)['airport_parking_row']);
+        $this->assertSame($correctedId, (int) $repository->awaitingRecoveryForCompany(1, $asOf->format('Y-m-d H:i:s'))[0]['id']);
+        $this->assertTrue($events->void($correctedId, 8, 'Guest report was inaccurate.'));
+        $this->assertSame([], $repository->awaitingRecoveryForCompany(1, $asOf->format('Y-m-d H:i:s')));
+        $this->assertSame('rented', (new CurrentVehicleLocationService($repository))->resolve(10, $asOf)['operational_state']);
+
+        $secondReport = $events->record(10, 100, 'guest_return_staged', 'return', $reportedAt, 'airport_hnl', null, 'guest_report_received', 7, null, ['garage_code' => 'international', 'level' => 7, 'row' => 'G']);
+        $recoveredId = $events->record(10, 100, 'vehicle_recovered', 'return', $now->format('Y-m-d H:i:s'), 'airport_hnl', null, 'operator', 7);
+        $this->assertSame([], $repository->awaitingRecoveryForCompany(1, $asOf->format('Y-m-d H:i:s')));
+        $recoveredCard = $board->enrich([$staleRentedCard], $asOf, 1)[0];
+        $this->assertSame('turnaround_attention', $recoveredCard['primary_status']);
+        $this->assertNotContains('currently_rented', $recoveredCard['flags']);
+        $this->assertTrue($events->void($recoveredId, 8, 'Recovery recorded prematurely.'));
+        $this->assertSame($secondReport, (int) $repository->awaitingRecoveryForCompany(1, $asOf->format('Y-m-d H:i:s'))[0]['id']);
+        $this->assertSame('awaiting_recovery', $board->enrich([$staleRentedCard], $asOf, 1)[0]['primary_status']);
+        $events->record(10, 100, 'actual_return', 'return', $now->format('Y-m-d H:i:s'), 'airport_hnl', null, 'operator', 7);
+        $this->assertSame([], $repository->awaitingRecoveryForCompany(1, $asOf->format('Y-m-d H:i:s')));
+        $this->assertSame('turnaround_attention', $board->enrich([$staleRentedCard], $asOf, 1)[0]['primary_status']);
+    }
+
+    public function testGuestReturnStageRejectsCrossCompanyChecklistAndTrip(): void
+    {
+        $service = new MovementOperationalFactService($this->connection, $this->events, $this->assessments);
+        $checklist = [
+            'exists' => true, 'movement_type' => 'return', 'company_id' => 2,
+            'fleet_vehicle_id' => 10, 'turo_trip_normalized_id' => 100,
+        ];
+        $data = ['airport_garage_code' => 'international', 'airport_parking_level' => 7, 'airport_parking_row' => 'G'];
+        try {
+            $service->stageGuestReturn($checklist, $data, 7);
+            $this->fail('Cross-company checklist should not record a guest return.');
+        } catch (InvalidArgumentException $exception) {
+            $this->assertSame('Vehicle not found in the active fleet company.', $exception->getMessage());
+        }
+
+        $checklist['company_id'] = 1;
+        $checklist['turo_trip_normalized_id'] = 200;
+        try {
+            $service->stageGuestReturn($checklist, $data, 7);
+            $this->fail('Cross-company trip should not record a guest return.');
+        } catch (InvalidArgumentException $exception) {
+            $this->assertSame('Trip does not belong to this vehicle and company.', $exception->getMessage());
+        }
+        $this->assertSame(0, $this->connection->table('trip_movement_events')->countAllResults());
+    }
+
+    public function testGuestReturnStageCanRecordUnknownParkingWithoutInventingDetails(): void
+    {
+        $service = new MovementOperationalFactService($this->connection, $this->events, $this->assessments);
+        $checklist = [
+            'exists' => true, 'movement_type' => 'return', 'company_id' => 1,
+            'fleet_vehicle_id' => 10, 'turo_trip_normalized_id' => 100,
+        ];
+        $eventId = $service->stageGuestReturn($checklist, [], 7);
+        $event = $this->repository->event($eventId);
+
+        $this->assertSame('guest_return_staged', $event['event_code']);
+        $this->assertSame('airport_hnl', $event['location_class']);
+        $this->assertNull($event['location_detail']);
+        $this->assertSame('guest_report_received', $event['source']);
+        $this->assertSame(7, (int) $event['actor_user_id']);
+        $this->assertSame(0, $this->connection->table('movement_assessments')->countAllResults());
     }
 
     public function testVehicleScopedHnlPositionIsPhysicalStorageWithoutTripOrStaging(): void
@@ -1075,6 +1357,67 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
         $this->assertSame('operator', $facts['actor_label']);
         $this->assertSame('clean', $facts['form_data']['cleanliness']);
         $this->assertSame(82, (int) $facts['form_data']['energy_percent']);
+    }
+
+    public function testTripFactsProjectEventOnlyLifecycleTruthWithOptionalLatestAssessmentEnrichment(): void
+    {
+        $this->connection->table('turo_trips_normalized')->insertBatch([
+            ['id' => 101, 'fleet_vehicle_id' => 10, 'deleted_at' => null],
+            ['id' => 102, 'fleet_vehicle_id' => 10, 'deleted_at' => null],
+            ['id' => 103, 'fleet_vehicle_id' => 10, 'deleted_at' => null],
+            ['id' => 104, 'fleet_vehicle_id' => 10, 'deleted_at' => null],
+        ]);
+        $presenter = new MovementOperationalFactPresentationService($this->repository);
+
+        $handoffId = $this->events->record(10, 100, 'actual_handoff', 'pickup', '2026-09-03 08:05:00', 'home', null, 'checklist_operator', 7);
+        $eventOnlyPickup = $presenter->tripFacts(100)['pickup'];
+        $this->assertSame($handoffId, (int) $eventOnlyPickup['event_id']);
+        $this->assertNull($eventOnlyPickup['assessment_id']);
+        $this->assertSame('Guest handoff recorded', $eventOnlyPickup['event_title']);
+        $this->assertSame('Sep 3, 2026 8:05 AM', $eventOnlyPickup['occurred_at_label']);
+        $this->assertSame('Not captured', $eventOnlyPickup['cleanliness_label']);
+        $this->assertSame('Not captured', $eventOnlyPickup['energy_value']);
+
+        $olderAssessmentId = $this->assessments->record(10, 100, $handoffId, 'pickup', 'dirty', 25, '2026-09-03 08:06:00', 'checklist_operator', 7);
+        $latestAssessmentId = $this->assessments->record(10, 100, $handoffId, 'pickup', 'clean', 82, '2026-09-03 08:07:00', 'checklist_operator', 8);
+        $enrichedRows = $this->repository->activeFactsForTrip(100);
+        $this->assertCount(1, $enrichedRows);
+        $this->assertSame($latestAssessmentId, (int) $enrichedRows[0]['assessment_id']);
+        $this->assertNotSame($olderAssessmentId, (int) $enrichedRows[0]['assessment_id']);
+        $enrichedPickup = $presenter->tripFacts(100)['pickup'];
+        $this->assertSame('Clean', $enrichedPickup['cleanliness_label']);
+        $this->assertSame('82%', $enrichedPickup['energy_value']);
+        $this->assertSame('reviewer', $enrichedPickup['actor_label']);
+
+        $recoveredId = $this->events->record(10, 101, 'vehicle_recovered', 'return', '2026-09-03 09:00:00', 'home', null, 'checklist_operator', 7);
+        $recovered = $presenter->tripFacts(101)['return'];
+        $this->assertSame($recoveredId, (int) $recovered['event_id']);
+        $this->assertSame('Vehicle recovery recorded', $recovered['event_title']);
+        $this->assertSame('Not captured', $recovered['energy_value']);
+
+        $returnId = $this->events->record(10, 102, 'actual_return', 'return', '2026-09-03 09:05:00', 'home', null, 'checklist_operator', 7);
+        $returned = $presenter->tripFacts(102)['return'];
+        $this->assertSame($returnId, (int) $returned['event_id']);
+        $this->assertSame('Actual return recorded', $returned['event_title']);
+
+        $stagedId = $this->events->record(10, 103, 'guest_return_staged', 'return', '2026-09-03 09:10:00', 'airport_hnl', null, 'guest_report_received', 7, null, ['garage_code' => 'international', 'level' => 7, 'row' => 'F']);
+        $staged = $presenter->tripFacts(103)['return'];
+        $this->assertSame($stagedId, (int) $staged['event_id']);
+        $this->assertSame('Guest Return Staged recorded', $staged['event_title']);
+        $this->assertSame('Guest Report Received', $staged['source_label']);
+
+        $voidedId = $this->events->record(10, 104, 'actual_return', 'return', '2026-09-03 09:15:00', 'home', null, 'checklist_operator', 7);
+        $this->assertTrue($this->events->void($voidedId, 8, 'Synthetic void test.'));
+        $this->assertSame(['pickup' => null, 'return' => null], $presenter->tripFacts(104));
+
+        $this->connection->table('trip_movement_events')->insert([
+            'company_id' => 2, 'fleet_vehicle_id' => 20, 'turo_trip_normalized_id' => 100,
+            'event_code' => 'actual_return', 'movement_type' => 'return', 'occurred_at' => '2026-09-03 10:00:00',
+            'source' => 'checklist_operator', 'actor_user_id' => 7,
+        ]);
+        $scoped = $presenter->tripFacts(100);
+        $this->assertSame($handoffId, (int) $scoped['pickup']['event_id']);
+        $this->assertNull($scoped['return']);
     }
 
     public function testLatestReturnFactsUseReturnLocationAndFuelOrMissingEnergy(): void

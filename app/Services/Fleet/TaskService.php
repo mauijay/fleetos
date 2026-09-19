@@ -3,6 +3,7 @@
 namespace App\Services\Fleet;
 
 use App\Repositories\FleetIntelligenceRepository;
+use App\Repositories\VehicleRecoveryExceptionRepository;
 use DateTimeImmutable;
 
 class TaskService
@@ -61,12 +62,18 @@ class TaskService
         $companyId = $this->movementWork()->singleActiveCompanyId($asOf);
         $reservations = $this->repo()->operationalReservationsBetween($start, $end, $companyId);
         $completions = $this->movementWork()->completionsForCompany($companyId, array_map('intval', array_column($reservations, 'id')), $asOf);
+        $awaitingRecovery = $this->movementWork()->awaitingRecoveryForCompany($companyId, $asOf);
+        $stagedTripIds = array_fill_keys(array_map('intval', array_column($awaitingRecovery, 'turo_trip_normalized_id')), true);
+        $stagedVehicleIds = array_fill_keys(array_map('intval', array_column($awaitingRecovery, 'fleet_vehicle_id')), true);
 
         return [
             'todays_pickups' => $this->startingReservations($reservations, $start, $end, $completions),
-            'todays_returns' => $this->endingReservations($reservations, $start, $end, $completions),
-            'cleaning_tasks' => $this->health()->vehiclesNeedingCleaning($asOf),
-            'charging_tasks' => [],
+            'todays_returns' => $this->endingReservations($reservations, $start, $end, $completions, $stagedTripIds),
+            'awaiting_recovery' => $day->format('Y-m-d') === $asOf->format('Y-m-d') ? $awaitingRecovery : [],
+            'recovery_exceptions' => $day->format('Y-m-d') === $asOf->format('Y-m-d')
+                ? (new VehicleRecoveryExceptionRepository())->openForCompany($companyId) : [],
+            'cleaning_tasks' => array_values(array_filter($this->health()->vehiclesNeedingCleaning($asOf), static fn (array $vehicle): bool => ! isset($stagedVehicleIds[(int) ($vehicle['fleet_vehicle_id'] ?? $vehicle['id'] ?? 0)]))),
+            'charging_tasks' => array_values(array_filter($this->movementWork()->energyNeedsForCompany($companyId, $asOf), static fn (array $vehicle): bool => ! isset($stagedVehicleIds[(int) $vehicle['fleet_vehicle_id']]))),
             'airport_deliveries' => $this->repo()->airportDeliveriesBetween($start, $end, $companyId),
             'maintenance_tasks' => $this->health()->vehiclesDueForMaintenance($day, 0),
             'registration_renewals' => $this->health()->registrationExpiring($day, 0),
@@ -86,9 +93,10 @@ class TaskService
     }
 
     /** @param array<int, array<string, mixed>> $reservations */
-    private function endingReservations(array $reservations, string $start, string $end, array $completions): array
+    private function endingReservations(array $reservations, string $start, string $end, array $completions, array $stagedTripIds): array
     {
         return array_values(array_filter($reservations, static fn (array $reservation): bool => ! isset($completions[(int) ($reservation['id'] ?? 0) . ':return'])
+            && ! isset($stagedTripIds[(int) ($reservation['id'] ?? 0)])
             && ($reservation['ends_at'] ?? '') >= $start
             && ($reservation['ends_at'] ?? '') < $end
             && ! str_starts_with((string) ($reservation['status_code'] ?? ''), 'canceled')));

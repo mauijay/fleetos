@@ -6,7 +6,7 @@ use App\Repositories\OperationalFactsRepository;
 
 class MovementEventService
 {
-    public const EVENT_CODES = ['vehicle_staged', 'actual_handoff', 'actual_return', 'vehicle_recovered', 'vehicle_positioned', 'vehicle_readiness_observed'];
+    public const EVENT_CODES = ['vehicle_staged', 'actual_handoff', 'guest_return_staged', 'actual_return', 'vehicle_recovered', 'vehicle_positioned', 'vehicle_readiness_observed'];
 
     public function __construct(
         private readonly ?OperationalFactsRepository $repository = null,

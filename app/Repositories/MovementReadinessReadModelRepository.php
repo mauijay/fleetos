@@ -73,6 +73,19 @@ class MovementReadinessReadModelRepository
             ->orderBy('id', 'DESC')
             ->get()
             ->getResultArray();
+        $custodyEvents = $this->db->table('trip_movement_events')
+            ->where('company_id', $companyId)
+            ->whereIn('fleet_vehicle_id', $vehicleIds)
+            ->whereIn('event_code', ['actual_handoff', 'guest_return_staged', 'actual_return', 'vehicle_recovered'])
+            ->where('voided_at', null)
+            ->where('occurred_at <=', $asOfTimestamp)
+            ->groupStart()
+                ->where('created_at', null)
+                ->orWhere('created_at <=', $asOfTimestamp)
+            ->groupEnd()
+            ->orderBy('occurred_at', 'DESC')
+            ->orderBy('id', 'DESC')
+            ->get()->getResultArray();
         $assessments = $this->db->table('movement_assessments assessments')
             ->select('assessments.*')
             ->join('trip_movement_events events', 'events.id = assessments.trip_movement_event_id AND events.voided_at IS NULL')
@@ -154,6 +167,10 @@ class MovementReadinessReadModelRepository
             $eventCode = (string) $event['event_code'];
             $eventsByTrip[$tripId][$movementType][$eventCode] ??= $event;
         }
+        $latestCustodyByVehicle = [];
+        foreach ($custodyEvents as $event) {
+            $latestCustodyByVehicle[(int) $event['fleet_vehicle_id']] ??= $event;
+        }
         $assessmentsByTrip = [];
         foreach ($assessments as $assessment) {
             $tripId = (int) $assessment['turo_trip_normalized_id'];
@@ -162,7 +179,14 @@ class MovementReadinessReadModelRepository
         }
         $currentReadinessByVehicle = [];
         foreach ($currentReadiness as $assessment) {
-            $currentReadinessByVehicle[(int) $assessment['fleet_vehicle_id']] ??= $assessment;
+            $vehicleId = (int) $assessment['fleet_vehicle_id'];
+            $currentReadinessByVehicle[$vehicleId] ??= array_merge($assessment, ['cleanliness' => null, 'energy_percent' => null]);
+            foreach (['cleanliness', 'energy_percent'] as $field) {
+                if ($currentReadinessByVehicle[$vehicleId][$field] === null && $assessment[$field] !== null) {
+                    $currentReadinessByVehicle[$vehicleId][$field] = $assessment[$field];
+                    $currentReadinessByVehicle[$vehicleId]['_' . $field . '_captured_at'] = $assessment['captured_at'];
+                }
+            }
         }
         $profilesByVehicle = [];
         foreach ($profiles as $profile) {
@@ -197,6 +221,7 @@ class MovementReadinessReadModelRepository
             $contexts[$checklistId] = array_merge($checklist, [
                 'items_by_code' => $itemsByChecklist[$checklistId] ?? [],
                 'active_events' => $eventsByTrip[$tripId][$movementType] ?? [],
+                'latest_custody_event' => $latestCustodyByVehicle[$vehicleId] ?? null,
                 'active_assessment' => $assessmentsByTrip[$tripId][$movementType] ?? null,
                 'current_readiness_assessment' => $currentReadinessByVehicle[$vehicleId] ?? null,
                 'target_pickup_assessment' => $nextTrip === null ? null : ($assessmentsByTrip[(int) $nextTrip['id']]['pickup'] ?? null),

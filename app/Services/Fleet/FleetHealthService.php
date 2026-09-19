@@ -33,7 +33,7 @@ class FleetHealthService
         ];
     }
 
-    /** Returns operator-held vehicles with an uncleared Dirty observation after return. */
+    /** Returns operator-held vehicles without a later Clean observation after return. */
     public function vehiclesNeedingCleaning(?DateTimeImmutable $asOf = null): array
     {
         $asOf ??= new DateTimeImmutable();

@@ -47,6 +47,8 @@ final class GlobalCsrfSecurityTest extends CIUnitTestCase
         foreach ([
             'fleet/vehicles/1',
             'operations/checklists/1/complete',
+            'operations/checklists/1/recover-vehicle',
+            'operations/checklists/1/recover-vehicle/void',
             'fleet/vehicles/1/current-position',
             'fleet/vehicles/1/current-readiness',
             'operations/incidentals/1/invoice-sent',
@@ -204,7 +206,7 @@ final class GlobalCsrfSecurityTest extends CIUnitTestCase
     {
         $root = dirname(__DIR__, 2);
         foreach ([
-            '/app/Views/airport_operations/show.php' => 8,
+            '/app/Views/airport_operations/show.php' => 7,
             '/app/Views/airport_reimbursements/index.php' => 6,
             '/app/Views/airport_reimbursements/match.php' => 7,
         ] as $path => $expected) {

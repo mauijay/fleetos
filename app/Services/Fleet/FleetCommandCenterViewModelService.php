@@ -77,7 +77,7 @@ class FleetCommandCenterViewModelService
             'daily_operations' => $dailyOperations,
             'decision_support' => $decisionSupport,
             'vehicles' => $this->vehicleCards($command['vehicle_statuses'], $health),
-            'timeline' => $this->fleetTimeline($timelineItems, $command['vehicle_statuses'], $dailyOperations['timeline'], $timelineStart, $timelineEnd, $timelineCompletions),
+            'timeline' => $this->fleetTimeline($timelineItems, $command['vehicle_statuses'], $dailyOperations['timeline'], $timelineStart, $timelineEnd, $timelineCompletions, $today['awaiting_recovery'] ?? []),
             'financial' => $this->financialSnapshot($financialSummary),
             'health_alerts' => $this->healthAlerts($health),
             'executive_kpis' => $this->executiveKpis($tripAnalytics),
@@ -123,6 +123,7 @@ class FleetCommandCenterViewModelService
         return [
             $this->metricCard('Fleet Size', $fleetSnapshot['total'], 'Active vehicles in current snapshot', '#fleet-snapshot', 'neutral'),
             $this->metricCard('Rented', $counts['rented'] ?? 0, 'Confirmed guest possession', '#fleet-snapshot', 'info'),
+            $this->metricCard('Awaiting Recovery', $counts['awaiting_recovery'] ?? 0, 'Guest report; location unverified', '#fleet-snapshot', 'warning'),
             $this->metricCard('Home', $counts['home'] ?? 0, 'Current position', '#fleet-snapshot', 'success'),
             $this->metricCard('HNL', $counts['hnl'] ?? 0, 'Current position', '#fleet-snapshot', 'info'),
             $this->metricCard('Other', $counts['other'] ?? 0, 'Current position outside Home/HNL', '#fleet-snapshot', 'warning'),
@@ -138,10 +139,11 @@ class FleetCommandCenterViewModelService
         return [
             $this->taskCard('Today\'s Pickups', $today['todays_pickups'], 'pickup', 'info'),
             $this->taskCard('Today\'s Returns', $today['todays_returns'], 'return', 'info'),
+            $this->taskCard('Awaiting Recovery', $today['awaiting_recovery'] ?? [], 'return', 'warning'),
             $this->taskCard('Airport Deliveries', $today['airport_deliveries'], 'airport', 'warning'),
             $this->taskCard('Airport Returns', [], 'airport_return', 'neutral'),
             $this->taskCard('Cleaning Required', $today['cleaning_tasks'], 'cleaning', 'warning'),
-            $this->taskCard('Charging Required', $today['charging_tasks'], 'charging', 'neutral'),
+            $this->taskCard('Charge/Fuel & Energy Checks', $today['charging_tasks'], 'charging', 'warning'),
             $this->taskCard('Registration Due', $today['registration_renewals'], 'registration', 'danger'),
             $this->taskCard('Insurance Due', $today['insurance_renewals'], 'insurance', 'danger'),
             $this->taskCard('Loan Payments Due', $today['loan_payments'], 'loan', 'neutral'),
@@ -184,9 +186,10 @@ class FleetCommandCenterViewModelService
     }
 
     /** @return array{today_date:string,groups:list<array{date:string,label:string,events:list<array<string,mixed>>}>,count:int,completed_today:list<array<string,mixed>>,completed_count:int} */
-    private function fleetTimeline(array $items, array $vehicles, array $todayReadiness, DateTimeImmutable $startsAt, DateTimeImmutable $endsAt, array $completionsByMovement = []): array
+    private function fleetTimeline(array $items, array $vehicles, array $todayReadiness, DateTimeImmutable $startsAt, DateTimeImmutable $endsAt, array $completionsByMovement = [], array $awaitingRecovery = []): array
     {
         $vehiclesById = array_column($vehicles, null, 'fleet_vehicle_id');
+        $awaitingByTrip = array_column($awaitingRecovery, null, 'turo_trip_normalized_id');
         $readinessByMovement = $this->readinessByMovement($todayReadiness);
         $events = [];
         $pickupIndexes = [];
@@ -197,7 +200,7 @@ class FleetCommandCenterViewModelService
             }
 
             foreach (['pickup' => 'starts_at', 'return' => 'ends_at'] as $movementType => $field) {
-                $event = $this->timelineMovementEvent($item, $movementType, $item[$field] ?? null, $vehiclesById, $readinessByMovement, $completionsByMovement, $startsAt, $endsAt);
+                $event = $this->timelineMovementEvent($item, $movementType, $item[$field] ?? null, $vehiclesById, $readinessByMovement, $completionsByMovement, $startsAt, $endsAt, $awaitingByTrip);
                 if ($event === null) {
                     continue;
                 }
@@ -286,7 +289,7 @@ class FleetCommandCenterViewModelService
     }
 
     /** @param array<int|string, array<string, mixed>> $vehiclesById @param array<string, array<string, string>> $readinessByMovement @param array<string, array<string, mixed>> $completionsByMovement */
-    private function timelineMovementEvent(array $item, string $movementType, mixed $scheduledValue, array $vehiclesById, array $readinessByMovement, array $completionsByMovement, DateTimeImmutable $startsAt, DateTimeImmutable $endsAt): ?array
+    private function timelineMovementEvent(array $item, string $movementType, mixed $scheduledValue, array $vehiclesById, array $readinessByMovement, array $completionsByMovement, DateTimeImmutable $startsAt, DateTimeImmutable $endsAt, array $awaitingByTrip = []): ?array
     {
         $scheduledAt = $this->localDateTime($scheduledValue);
         if ($scheduledAt === null || $scheduledAt < $startsAt || $scheduledAt >= $endsAt) {
@@ -301,6 +304,8 @@ class FleetCommandCenterViewModelService
         $tripId = (int) ($source['id'] ?? 0);
         $readiness = ($item['type'] ?? null) === 'reservation' ? ($readinessByMovement[$tripId . ':' . $movementType] ?? null) : null;
         $completion = ($item['type'] ?? null) === 'reservation' ? ($completionsByMovement[$tripId . ':' . $movementType] ?? null) : null;
+        $normalTone = $movementType === 'return' ? 'danger' : 'success';
+        $guestReport = $movementType === 'return' ? ($awaitingByTrip[$tripId] ?? null) : null;
         $completedAt = $this->localDateTime($completion['recorded_at'] ?? null);
         $href = trim((string) ($readiness['href'] ?? ''));
         if ($href === '') {
@@ -321,10 +326,10 @@ class FleetCommandCenterViewModelService
             'fleet_number' => $fleetNumber,
             'fleet_code' => $fleetCode,
             'movement_type' => $movementType,
-            'movement_label' => $movementType === 'return' ? 'Return' : 'Pickup',
-            'tone' => $movementType === 'return' ? 'danger' : 'success',
-            'location_label' => $this->timelineLocation($source, $movementType),
-            'readiness_label' => $readiness['label'] ?? null,
+            'movement_label' => $guestReport === null ? ucfirst($movementType) : 'Awaiting Recovery',
+            'tone' => $guestReport !== null ? 'warning' : $normalTone,
+            'location_label' => $guestReport === null ? $this->timelineLocation($source, $movementType) : 'Guest-reported HNL — ' . $guestReport['reported_location_label'],
+            'readiness_label' => $guestReport === null ? ($readiness['label'] ?? null) : 'Guest report recorded ' . (new DateTimeImmutable((string) $guestReport['occurred_at']))->format('M j, g:i A') . ' · not recovered',
             'readiness_href' => $readiness['href'] ?? null,
             'href' => $href,
             'completed' => $completion !== null,
@@ -544,7 +549,7 @@ class FleetCommandCenterViewModelService
             'todays_pickups' => [$dayLabel . ' Pickups', $scope === 'today' ? '/?queue=today&movement=pickup#movement-board' : '/?queue=tomorrow#fleet-timeline'],
             'todays_returns' => [$dayLabel . ' Returns', $scope === 'today' ? '/?queue=today&movement=return#movement-board' : '/?queue=tomorrow#fleet-timeline'],
             'cleaning_tasks' => ['Cleaning Tasks', '/#todays-mission'],
-            'charging_tasks' => ['Charging Tasks', '/#todays-mission'],
+            'charging_tasks' => ['Charge/Fuel & Energy Checks', '/#todays-mission'],
             'airport_deliveries' => [$dayLabel . ' Airport Deliveries', '/operations/airport'],
             'maintenance_tasks' => ['Maintenance Tasks', '/#fleet-health'],
             'registration_renewals' => ['Registration Renewals', '/#fleet-health'],
@@ -552,7 +557,29 @@ class FleetCommandCenterViewModelService
             'claims' => ['Claims Follow-up', '/#fleet-health'],
         ];
 
-        return $this->scopedActions($tasks, $definitions);
+        $actions = $this->scopedActions($tasks, $definitions);
+        foreach ($tasks['awaiting_recovery'] ?? [] as $report) {
+            $actions[] = [
+                'code' => 'recover_vehicle_' . (int) $report['turo_trip_normalized_id'],
+                'label' => 'Recover Vehicle',
+                'count' => 1,
+                'detail' => $report['fleet_label'] . ' — Returned to HNL, awaiting recovery. ' . $report['reported_location_label'],
+                'href' => $report['href'],
+                'actionable' => true,
+            ];
+        }
+        foreach ($tasks['recovery_exceptions'] ?? [] as $exception) {
+            $actions[] = [
+                'code' => 'recovery_exception_' . (int) $exception['id'],
+                'label' => 'Recovery exception: ' . ucwords(str_replace('_', ' ', (string) $exception['exception_code'])),
+                'count' => 1,
+                'detail' => (string) $exception['fleet_code'] . ' — follow up on recovery exception #' . (int) $exception['id'],
+                'href' => '/operations/checklists/' . (int) $exception['checklist_id'] . '#recovery-exceptions',
+                'actionable' => true,
+            ];
+        }
+
+        return $actions;
     }
 
     /** @return list<array<string, mixed>> */
@@ -620,9 +647,11 @@ class FleetCommandCenterViewModelService
     {
         $vehicle = (string) ($item['display_name'] ?? $item['fleet_code'] ?? $item['guest_name'] ?? $item['source_reservation_id'] ?? 'Task ready');
 
-        return $type === 'loan'
+        return $type === 'charging'
+            ? $vehicle . ' — ' . (string) ($item['label'] ?? 'Review energy')
+            : ($type === 'loan'
             ? $vehicle . ' — ' . (string) ($item['due_label'] ?? 'Due date unavailable')
-            : $vehicle;
+            : $vehicle);
     }
 
     private function businessTimezone(): DateTimeZone

@@ -2618,6 +2618,12 @@ h3 {
   max-width: 100%;
 }
 
+.hnl-parking-fields [data-hnl-garage]:disabled {
+  color: var(--control-text);
+  cursor: default;
+  opacity: 1;
+}
+
 .issue-filters label,
 .resolution-form label {
   color: var(--muted);

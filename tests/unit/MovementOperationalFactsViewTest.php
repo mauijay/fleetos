@@ -56,6 +56,117 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
         $this->assertStringContainsString('Use the return fact actions above', $html);
     }
 
+    public function testReturnChecklistShowsUnverifiedGuestReportAndScopedActions(): void
+    {
+        $guestReturn = [
+            'id' => 44, 'occurred_at' => '2026-09-17 18:10:00', 'source' => 'guest_reported_parked_time',
+            'airport_garage_code' => 'international', 'airport_parking_level' => 7, 'airport_parking_row' => 'G',
+            'note' => 'Guest reported the vehicle parked.',
+        ];
+        $html = $this->render('return', $this->facts(), false, [], [
+            'guestReturn' => $guestReturn, 'guestReturnActive' => true, 'returnCompleted' => false,
+        ]);
+
+        $this->assertStringContainsString('Awaiting Recovery', $html);
+        $this->assertStringContainsString('Guest-reported location', $html);
+        $this->assertStringContainsString('International Garage', $html);
+        $this->assertStringContainsString('Level 7', $html);
+        $this->assertStringContainsString('Row G', $html);
+        $this->assertStringContainsString('/operations/checklists/4/guest-return-staged/void', $html);
+        $this->assertStringContainsString('Correct guest report', $html);
+        $this->assertStringNotContainsString('Mark Awaiting Recovery</button>', $html);
+
+        $empty = $this->render('return', $this->facts(), false, [], ['guestReturn' => null, 'returnCompleted' => false]);
+        $this->assertStringContainsString('/operations/checklists/4/guest-return-staged', $empty);
+        $this->assertStringContainsString('Mark Awaiting Recovery', $empty);
+
+        $completedWithoutReport = $this->render('return', $this->facts(), false, [], ['guestReturn' => null, 'returnCompleted' => true]);
+        $this->assertStringNotContainsString('id="guest-return-entry"', $completedWithoutReport);
+        $this->assertStringNotContainsString('Mark Awaiting Recovery', $completedWithoutReport);
+
+        $guestReturn['airport_garage_code'] = null;
+        $guestReturn['airport_parking_level'] = null;
+        $guestReturn['airport_parking_row'] = null;
+        $unknown = $this->render('return', $this->facts(), false, [], ['guestReturn' => $guestReturn, 'guestReturnActive' => true]);
+        $this->assertStringContainsString('Exact HNL level/row/garage not reported', $unknown);
+    }
+
+    public function testRecoverVehiclePrefillsGuestLocationButRequiresOperatorConfirmation(): void
+    {
+        $report = [
+            'id' => 44, 'occurred_at' => '2026-09-17 18:10:00', 'source' => 'guest_report_received',
+            'location_class' => 'airport_hnl', 'location_detail' => 'International Garage L7 RF',
+            'airport_garage_code' => 'international', 'airport_parking_level' => 7, 'airport_parking_row' => 'F',
+            'note' => "Location note: Near elevators\nGuest report: parked at HNL",
+        ];
+        $html = $this->render('return', $this->facts(), false, [], [
+            'guestReturn' => $report, 'guestReturnActive' => true, 'canRecover' => true,
+        ]);
+
+        $this->assertStringContainsString('id="recover-vehicle-entry"', $html);
+        $this->assertStringContainsString('/operations/checklists/4/recover-vehicle', $html);
+        $this->assertStringContainsString('Guest reported — unverified', $html);
+        $this->assertMatchesRegularExpression('/name="airport_garage_code"[^>]*>.*?<option value="international"[^>]*selected/s', $html);
+        $this->assertMatchesRegularExpression('/name="airport_parking_level"[^>]*>.*?<option value="7"[^>]*selected/s', $html);
+        $this->assertMatchesRegularExpression('/name="airport_parking_row"[^>]*>.*?<option value="F"[^>]*selected/s', $html);
+        $this->assertStringContainsString('name="recovery_location_note" maxlength="500" value="Near elevators"', html_entity_decode($html, ENT_QUOTES | ENT_HTML5));
+        $this->assertStringContainsString('name="confirm_recovery_location"', $html);
+        $this->assertStringContainsString('name="energy_unknown_reason"', $html);
+        $this->assertStringContainsString('Vehicle Recovered', $html);
+        $this->assertStringNotContainsString('name="return_photos_completed"', $html);
+
+        $completed = $this->render('return', $this->facts(), false, [], [
+            'guestReturn' => $report, 'guestReturnActive' => false, 'returnCompleted' => true, 'canRecover' => false,
+        ]);
+        $this->assertStringNotContainsString('/operations/checklists/4/recover-vehicle', $completed);
+        $this->assertStringContainsString('Recovery is authoritative', $completed);
+        $this->assertStringContainsString('Historical guest report', $completed);
+        $this->assertStringNotContainsString('Correct guest report', $completed);
+        $this->assertStringNotContainsString('/guest-return-staged/void', $completed);
+        $this->assertStringNotContainsString('Mark Awaiting Recovery', $completed);
+    }
+
+    public function testCurrentVehiclePositionUsesCanonicalHnlOrderAndOptionalDetail(): void
+    {
+        $html = html_entity_decode($this->render('return', $this->facts(), false, [], [
+            'currentLocation' => [
+                'location_class' => 'airport_hnl',
+                'location_detail' => 'International Garage L7 RG',
+                'location_note' => 'Near elevators',
+                'airport_garage_code' => 'international',
+                'airport_parking_level' => 7,
+                'airport_parking_row' => 'G',
+                'operational_state' => 'parked',
+                'observed_at' => '2026-09-17 18:30:00',
+            ],
+        ]), ENT_QUOTES | ENT_HTML5);
+        $expected = (new \App\Services\Fleet\HnlGarageCatalog())->locationLabel('international', 7, 'G', 'Near elevators');
+
+        $this->assertStringContainsString((string) $expected, $html);
+        $this->assertStringNotContainsString('International Garage L7 RG', $html);
+    }
+
+    public function testRecoveryDetailDoesNotUseCanonicalParkingOrGeneralGuestReportNote(): void
+    {
+        $report = [
+            'id' => 44, 'occurred_at' => '2026-09-17 18:10:00', 'source' => 'guest_report_received',
+            'location_class' => 'airport_hnl', 'location_detail' => 'International Garage L7 RF',
+            'airport_garage_code' => 'international', 'airport_parking_level' => 7, 'airport_parking_row' => 'F',
+            'note' => null,
+        ];
+        $data = ['guestReturn' => $report, 'guestReturnActive' => true, 'canRecover' => true];
+        $withoutNote = html_entity_decode($this->render('return', $this->facts(), false, [], $data), ENT_QUOTES | ENT_HTML5);
+        $this->assertStringContainsString('name="recovery_location_note" maxlength="500" value=""', $withoutNote);
+
+        $data['guestReturn']['note'] = 'Guest report: parked at HNL; keys left inside.';
+        $generalReportOnly = html_entity_decode($this->render('return', $this->facts(), false, [], $data), ENT_QUOTES | ENT_HTML5);
+        $this->assertStringContainsString('name="recovery_location_note" maxlength="500" value=""', $generalReportOnly);
+
+        $data['guestReturn']['location_detail'] = 'Near side doors';
+        $genuineDetail = html_entity_decode($this->render('return', $this->facts(), false, [], $data), ENT_QUOTES | ENT_HTML5);
+        $this->assertStringContainsString('name="recovery_location_note" maxlength="500" value="Near side doors"', $genuineDetail);
+    }
+
     public function testTripFactsRenderAuthoritativePickupAndReturnWithExplicitCorrectionTargets(): void
     {
         $pickup = $this->facts(['event_id' => 11, 'assessment_id' => 12]);
@@ -281,6 +392,7 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
             'location_detail_value' => 'International Garage L7 RF',
             'airport_garage_line' => 'International Garage · Blue',
             'airport_position_line' => 'Level 7 · Row F',
+            'airport_location_label' => 'Level 7 · Row F · International Garage',
             'approved_turo_garage' => true,
         ]);
         $html = $this->render('return', $facts, true, [
@@ -292,16 +404,15 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
             'note' => 'Level confirmed.',
         ]);
 
-        $this->assertStringContainsString('International Garage · Blue', $html);
-        $this->assertStringContainsString('Level 7 · Row F', $html);
+        $this->assertStringContainsString('Level 7 · Row F · International Garage', $html);
         $this->assertStringContainsString('name="airport_garage_code"', $html);
         $this->assertStringContainsString('name="airport_parking_level"', $html);
         $this->assertStringContainsString('name="airport_parking_row"', $html);
         $this->assertStringContainsString('>Row<select name="airport_parking_row"', $html);
         $this->assertStringNotContainsString('stall', strtolower($html));
         $this->assertStringContainsString('value="terminal_2" data-max-level="6"', $html);
+        $this->assertTrue(strpos($html, 'name="airport_parking_level"') < strpos($html, 'name="airport_parking_row"'));
         $this->assertTrue(strpos($html, 'name="airport_parking_row"') < strpos($html, 'name="airport_garage_code"'));
-        $this->assertTrue(strpos($html, 'name="airport_garage_code"') < strpos($html, 'name="airport_parking_level"'));
         $this->assertMatchesRegularExpression('/data-location-detail hidden[^>]*>Location detail<input[^>]*name="location_detail"[^>]*disabled/', $html);
         $this->assertStringContainsString('<label>Note<textarea name="note"', $html);
         $this->assertStringNotContainsString('name="parking_stall"', $html);
@@ -315,6 +426,7 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
             'location_detail_value' => 'Terminal 2 Garage L4 RM',
             'airport_garage_line' => 'Terminal 2 Garage · Red',
             'airport_position_line' => 'Level 4 · Row M',
+            'airport_location_label' => 'Level 4 · Row M · Terminal 2 Garage',
             'approved_turo_garage' => false,
         ]), true, [
             'location_class' => 'airport_hnl',
@@ -325,8 +437,7 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
             'note' => 'Near the elevator.',
         ]);
 
-        $this->assertStringContainsString('Terminal 2 Garage · Red', $html);
-        $this->assertStringContainsString('Level 4 · Row M', $html);
+        $this->assertStringContainsString('Level 4 · Row M · Terminal 2 Garage', $html);
         $this->assertMatchesRegularExpression('/value="terminal_2"[^>]*selected/', $html);
         $this->assertStringContainsString('value="4" selected', $html);
         $this->assertStringContainsString('value="M" data-garage="terminal_2" selected', $html);
@@ -366,6 +477,7 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
             'location_detail_value' => 'International Garage L7 RF',
             'airport_garage_line' => 'International Garage · Blue',
             'airport_position_line' => 'Level 7 · Row F',
+            'airport_location_label' => 'Level 7 · Row F · International Garage',
             'form_data' => ['event_id' => 21, 'assessment_id' => 22, 'occurred_at' => '2026-09-03T09:15', 'location_class' => 'airport_hnl', 'location_detail' => 'International Garage L7 RF', 'airport_garage_code' => 'international', 'airport_parking_level' => 7, 'airport_parking_row' => 'F', 'cleanliness' => 'dirty', 'energy_percent' => 24, 'note' => 'Return checked.'],
         ]);
 
@@ -373,8 +485,7 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
 
         $this->assertStringContainsString('value="2026-09-03T09&#x3A;15"', $html);
         $this->assertStringContainsString('value="airport_hnl" selected', $html);
-        $this->assertStringContainsString('International Garage · Blue', $html);
-        $this->assertStringContainsString('Level 7 · Row F', $html);
+        $this->assertStringContainsString('Level 7 · Row F · International Garage', $html);
         $this->assertMatchesRegularExpression('/value="international"[^>]*selected/', $html);
         $this->assertStringContainsString('value="dirty" selected', $html);
         $this->assertStringContainsString('value="24"', $html);
@@ -413,39 +524,30 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
             'energy_value' => '83%',
         ]), false, [], $this->readinessViewData());
 
-        $this->assertStringContainsString('Return readiness', $html);
-        $this->assertStringContainsString('1 blocking actions remaining', $html);
-        $this->assertStringContainsString('<h3>Known</h3>', $html);
-        $this->assertStringContainsString('Vehicle returned', $html);
+        $this->assertStringContainsString('Return Workflow', $html);
+        $this->assertStringContainsString('Awaiting return', $html);
+        $this->assertStringNotContainsString('1 blocking actions remaining', $html);
         $this->assertStringContainsString('83%', $html);
         $this->assertStringContainsString('Dirty', $html);
-        $this->assertStringContainsString('/operations/checklist-items/81/complete', $html);
-        $this->assertStringContainsString('/operations/checklist-items/82/undo', $html);
-        $this->assertStringContainsString('>Confirm</button>', $html);
-        $this->assertStringContainsString('>Undo</button>', $html);
-        $this->assertStringNotContainsString('>Complete</button>', $html);
-        $this->assertStringNotContainsString('/not-applicable', $html);
-        $this->assertSame(1, substr_count($html, '/disposition'));
-        $this->assertStringContainsString('Exceptional hold', $html);
-        $this->assertStringContainsString('Normal turnaround is driven by recorded condition and energy.', $html);
+        $this->assertStringContainsString('Legacy checklist history', $html);
+        $this->assertStringNotContainsString('/operations/checklist-items/81/complete', $html);
+        $this->assertStringNotContainsString('/operations/checklist-items/82/undo', $html);
+        $this->assertStringNotContainsString('>Confirm</button>', $html);
+        $this->assertStringNotContainsString('Exceptional vehicle hold', $html);
     }
 
     public function testReturnReadinessPutsActionableRowsBeforeKnownAndCompletedFacts(): void
     {
         $data = $this->readinessViewData();
-        $data['readiness']['requirements'][] = [
-            'code' => 'energy_ready', 'label' => 'Energy ready for next pickup', 'phase' => 'next_pickup_preparation',
-            'kind' => 'derived', 'status' => 'unsatisfied', 'blocking' => true, 'satisfied_by' => null,
-            'basis_at' => null, 'action' => ['type' => 'record_fact', 'label' => 'Charge/Fuel to 80%'], 'allows_na' => false,
-        ];
+        $data['returnCompleted'] = true;
+        $data['turnaroundWork'] = ['cleaning' => ['fleet_vehicle_id' => 10], 'energy' => ['label' => 'Charge/Fuel to 80%']];
         $html = $this->render('return', $this->facts(), false, [], $data);
 
-        $this->assertLessThan(strpos($html, '<h3>Known</h3>'), strpos($html, '<h3>Action required</h3>'));
-        $this->assertLessThan(strpos($html, '<h3>Completed checks</h3>'), strpos($html, '<h3>Known</h3>'));
-        $this->assertLessThan(strpos($html, '<h3>Known</h3>'), strpos($html, 'Energy ready for next pickup'));
-        $this->assertStringContainsString('id="checklist-action-exterior_inspected"', $html);
-        $this->assertStringContainsString('id="checklist-action-exterior_inspected" tabindex="-1" class="is-pending readiness-action-row', $html);
-        $this->assertStringContainsString('id="checklist-action-energy_ready"', $html);
+        $this->assertStringContainsString('Recovery complete', $html);
+        $this->assertStringContainsString('Cleaning Required', $html);
+        $this->assertStringContainsString('Charge/Fuel to 80%', $html);
+        $this->assertLessThan(strpos($html, 'Legacy checklist history'), strpos($html, 'Cleaning Required'));
+        $this->assertStringNotContainsString('id="checklist-action-exterior_inspected"', $html);
     }
 
     public function testChecklistFocusTargetsClearStickyMobileNavigation(): void
@@ -482,7 +584,7 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
     {
         $html = $this->render('return', $this->facts(), false, [], $this->readinessViewData());
 
-        $this->assertStringContainsString('<details class="checklist-history"><summary>Checklist history</summary>', $html);
+        $this->assertStringContainsString('<details class="checklist-history"><summary>Legacy checklist history</summary>', $html);
         $this->assertStringContainsString('Legacy return workflow completed', $html);
         $this->assertStringContainsString('Imported history', $html);
         $this->assertSame(1, substr_count($html, 'Legacy return workflow completed'));
@@ -508,10 +610,9 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
 
         $html = $this->render('return', $this->facts(), false, [], $data);
 
-        $this->assertStringContainsString('12 blocking actions remaining', $html);
-        $this->assertSame(12, substr_count($html, 'Complete full action'));
-        $this->assertStringContainsString('Complete full action 1', $html);
-        $this->assertStringContainsString('Complete full action 12', $html);
+        $this->assertStringNotContainsString('12 blocking actions remaining', $html);
+        $this->assertStringNotContainsString('Complete full action', $html);
+        $this->assertStringContainsString('Awaiting return', $html);
     }
 
     public function testClosedWorkflowLocksHumanControlsUntilExplicitReopen(): void
@@ -524,13 +625,11 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
 
         $html = $this->render('return', $this->facts(), false, [], $data);
 
-        $this->assertStringContainsString('Workflow closed', $html);
-        $this->assertStringContainsString('Reopen Workflow', $html);
-        $this->assertStringContainsString('name="confirm_reopen"', $html);
+        $this->assertStringContainsString('Legacy checklist history', $html);
+        $this->assertStringContainsString('Historical workflow completion', $html);
         $this->assertStringNotContainsString('/operations/checklist-items/81/complete', $html);
         $this->assertStringNotContainsString('/operations/checklist-items/82/undo', $html);
         $this->assertStringNotContainsString('Close Movement Workflow', $html);
-        $this->assertStringContainsString('Return reviewed.', $html);
     }
 
     public function testPickupPreparationKeepsGuestHandoffInNonBlockingLifecycle(): void
@@ -564,39 +663,39 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
 
         $html = $this->render('return', $this->facts(), false, [], $data);
 
-        $this->assertStringContainsString('>Blocking</p>', $html);
-        $this->assertStringContainsString('Inspect exterior', $html);
-        $this->assertStringNotContainsString('>Exterior inspected</strong></div>', $html);
+        $this->assertStringNotContainsString('Inspect exterior</button>', $html);
+        $this->assertStringNotContainsString('Inspect exterior</a>', $html);
         $this->assertStringContainsString('<strong>Exterior inspected</strong><span>Open</span>', $html);
-        $this->assertStringContainsString('class="readiness-compound-controls inline-disposition"', $html);
-        $this->assertStringContainsString('<span class="visually-hidden">Choose exceptional hold</span>', $html);
-        $this->assertStringContainsString('<option value="">No exceptional hold</option>', $html);
-        $this->assertStringContainsString('Maintenance required', $html);
-        $this->assertStringContainsString('Claim / damage review required', $html);
-        $this->assertStringContainsString('Offline / unavailable', $html);
-        $this->assertMatchesRegularExpression('/class="is-pending readiness-action-row"><span[^>]*>○<\/span><div class="readiness-action-label"><strong>Inspect exterior<\/strong>/', $html);
-        $this->assertStringNotContainsString('Needs Cleaning</option>', $html);
-        $this->assertStringNotContainsString('Needs Charging</option>', $html);
-        $this->assertStringContainsString('Recorded vehicle disposition', $html);
-        $this->assertStringContainsString('Needs Cleaning', $html);
+        $this->assertStringNotContainsString('Exceptional vehicle hold', $html);
+
+        $data['recoveryExceptions'] = [['id' => 99, 'status' => 'open', 'exception_code' => 'not_drivable', 'note' => 'Tow required']];
+        $exceptionHtml = $this->render('return', $this->facts(), false, [], $data);
+        $this->assertStringContainsString('Exceptional vehicle hold', $exceptionHtml);
+        $this->assertStringContainsString('<option value="">No exceptional hold</option>', $exceptionHtml);
+        $this->assertStringContainsString('Maintenance required', $exceptionHtml);
+        $this->assertStringContainsString('Claim / damage review required', $exceptionHtml);
+        $this->assertStringContainsString('Offline / unavailable', $exceptionHtml);
+        $this->assertStringNotContainsString('Needs Cleaning</option>', $exceptionHtml);
+        $this->assertStringNotContainsString('Needs Charging</option>', $exceptionHtml);
     }
 
     public function testNextPickupHeadingOnlyUsesTurnaroundForSameDayPair(): void
     {
         $data = $this->readinessViewData();
-        $data['readiness']['requirements'][] = ['code' => 'vehicle_clean', 'label' => 'Vehicle clean for next pickup', 'phase' => 'next_pickup_preparation', 'kind' => 'derived', 'status' => 'unsatisfied', 'blocking' => true, 'satisfied_by' => null, 'basis_at' => null, 'action' => ['type' => 'record_fact', 'label' => 'Clean vehicle'], 'allows_na' => false];
+        $data['returnCompleted'] = true;
+        $data['readiness']['next_trip'] = ['starts_at' => '2026-09-04 09:00:00'];
         $data['readiness']['is_same_day_turnaround'] = false;
 
         $preparationHtml = $this->render('return', $this->facts(), false, [], $data);
 
-        $this->assertStringContainsString('Preparation for next pickup', $preparationHtml);
+        $this->assertStringContainsString('Next confirmed pickup: 2026-09-04 09:00:00', $preparationHtml);
         $this->assertStringNotContainsString('Same-day turnaround', $preparationHtml);
 
         $data['readiness']['is_same_day_turnaround'] = true;
         $turnaroundHtml = $this->render('return', $this->facts(), false, [], $data);
 
-        $this->assertStringContainsString('Same-day turnaround', $turnaroundHtml);
-        $this->assertStringNotContainsString('Preparation for next pickup', $turnaroundHtml);
+        $this->assertStringContainsString('Next confirmed pickup: 2026-09-04 09:00:00', $turnaroundHtml);
+        $this->assertStringNotContainsString('Same-day turnaround', $turnaroundHtml);
     }
 
     public function testPickupRendersCompactCompositeCapabilityActionsAndLegacyHistory(): void

@@ -34,7 +34,7 @@ final class TripMovementChecklistServiceTest extends CIUnitTestCase
         $this->assertSame($pickup['id'], $pickupAgain['id']);
         $this->assertSame(2, $this->connection->table('trip_movement_checklists')->countAllResults());
         $this->assertCount(9, $pickup['items']);
-        $this->assertCount(10, $return['items']);
+        $this->assertSame([], $return['items']);
     }
 
     public function testAirportOnlyItemsAreNotAddedToOrdinaryPickup(): void
@@ -83,29 +83,14 @@ final class TripMovementChecklistServiceTest extends CIUnitTestCase
         $this->assertGreaterThan(0, $ready['progress']['required_remaining_count']);
     }
 
-    public function testReturnRequiresDamageInspectionButNotRoutineDispositionBeforeCompletion(): void
+    public function testNewReturnHasNoRoutineInspectionItemsOrManualCompletionGate(): void
     {
         $checklist = $this->service->ensureForMovement($this->reservation(), 'return');
-
-        foreach ($checklist['items'] as $item) {
-            if ((bool) $item['is_critical'] && ! in_array($item['item_code'], ['damage_check_completed', 'vehicle_disposition_selected'], true)) {
-                $this->service->completeItem((int) $item['id']);
-            }
-        }
-
+        $this->assertSame([], $checklist['items']);
+        $this->assertSame(0, $checklist['progress']['required_remaining_count']);
         $this->assertSame('in_progress', $this->service->checklist((int) $checklist['id'])['readiness_status']);
         $this->assertFalse($this->service->completeChecklist((int) $checklist['id']));
-
-        foreach ($this->service->checklist((int) $checklist['id'])['items'] as $item) {
-            if ($item['item_code'] === 'damage_check_completed') {
-                $this->service->completeItem((int) $item['id']);
-            }
-        }
-
-        $this->assertSame('ready', $this->service->checklist((int) $checklist['id'])['readiness_status']);
         $this->assertNull($this->service->checklist((int) $checklist['id'])['vehicle_disposition']);
-        $this->assertTrue($this->service->completeChecklist((int) $checklist['id'], 'Return done'));
-        $this->assertSame('completed', $this->service->checklist((int) $checklist['id'])['readiness_status']);
     }
 
     public function testInvalidStateTransitionsAreRejectedSafely(): void

@@ -82,6 +82,15 @@ class MovementChecklistRepository
             ->getResultArray();
     }
 
+    /** @return array<int, array<string, mixed>> */
+    public function audits(int $checklistId): array
+    {
+        return $this->db->table('trip_movement_checklist_audits')
+            ->where('trip_movement_checklist_id', $checklistId)
+            ->orderBy('id', 'ASC')
+            ->get()->getResultArray();
+    }
+
     /** @return array<string, mixed>|null */
     public function itemForCompany(int $companyId, int $itemId): ?array
     {

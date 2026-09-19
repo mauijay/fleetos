@@ -29,13 +29,15 @@ final class CurrentOperationsViewTest extends CIUnitTestCase
         ])->render('fleet_vehicles/components/current_operations'), ENT_QUOTES | ENT_HTML5);
 
         $this->assertStringContainsString('Current Operations', $html);
-        $this->assertStringContainsString('International Garage · Level 7 · Row F', $html);
+        $this->assertStringContainsString('Level 7 · Row F · International Garage', $html);
         $this->assertStringContainsString('Clean · 88%', $html);
         $this->assertStringContainsString('href="/operations/vehicles/10/trip-history"', $html);
         $this->assertStringContainsString('href="/operations/checklists/41"', $html);
         $this->assertStringContainsString('action="/fleet/vehicles/10/current-position"', $html);
         $this->assertStringContainsString('action="/fleet/vehicles/10/current-readiness"', $html);
         $this->assertStringContainsString('name="airport_parking_row"', $html);
+        $this->assertTrue(strpos($html, 'name="airport_parking_level"') < strpos($html, 'name="airport_parking_row"'));
+        $this->assertTrue(strpos($html, 'name="airport_parking_row"') < strpos($html, 'name="airport_garage_code"'));
         $this->assertStringNotContainsString('stall', strtolower($html));
     }
 
@@ -84,6 +86,32 @@ final class CurrentOperationsViewTest extends CIUnitTestCase
         $this->assertStringContainsString('command-main import-main movement-main', $history);
         $this->assertStringContainsString('max-width: 1440px', $css);
         $this->assertStringContainsString('justify-self: center', $css);
+    }
+
+    public function testEveryStructuredHnlInputUsesLevelRowGarageOrder(): void
+    {
+        $views = [
+            'trip_movement_checklists/show.php' => 3,
+            'trip_movement_checklists/_position.php' => 1,
+            'fleet_vehicles/components/current_operations.php' => 1,
+            'airport_operations/show.php' => 1,
+        ];
+
+        foreach ($views as $relativePath => $expectedFieldsets) {
+            $source = file_get_contents(dirname(__DIR__, 2) . '/app/Views/' . $relativePath);
+            $this->assertIsString($source);
+            $matches = [];
+            preg_match_all('/<fieldset class="hnl-parking-fields".*?<\/fieldset>/s', $source, $matches);
+            $this->assertCount($expectedFieldsets, $matches[0], $relativePath);
+            foreach ($matches[0] as $fieldset) {
+                $this->assertMatchesRegularExpression(
+                    '/data-hnl-level.*data-hnl-row.*data-hnl-garage/s',
+                    $fieldset,
+                    $relativePath,
+                );
+                $this->assertStringNotContainsString('stall', strtolower($fieldset));
+            }
+        }
     }
 
     /** @param array<string, mixed> $currentLocation */

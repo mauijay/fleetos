@@ -42,9 +42,11 @@ $readiness = $vehicle['readiness_compact'] ?? [
             <dt><?= esc($vehicle['location_heading']) ?></dt>
             <dd>
                 <strong><?= esc($vehicle['location_class_label']) ?></strong>
-                <?php if (($vehicle['airport_garage_line'] ?? null) !== null): ?>
-                    <span class="movement-card__garage"><?= esc($vehicle['airport_garage_line']) ?></span>
-                    <span><?= esc($vehicle['airport_position_line']) ?></span>
+                <?php if (($vehicle['guest_reported_at_label'] ?? null) !== null): ?>
+                    <span><?= ($vehicle['guest_report_time_basis'] ?? null) === 'guest_report_received' ? 'Report received' : 'Guest-reported parked time' ?>: <?= esc($vehicle['guest_reported_at_label']) ?></span>
+                <?php endif; ?>
+                <?php if (($vehicle['airport_location_label'] ?? null) !== null): ?>
+                    <span class="movement-card__garage"><?= esc($vehicle['airport_location_label']) ?></span>
                 <?php elseif ($vehicle['location_detail'] !== null): ?>
                     <span><?= esc($vehicle['location_detail']) ?></span>
                 <?php endif; ?>
@@ -75,13 +77,22 @@ $readiness = $vehicle['readiness_compact'] ?? [
     <section class="movement-card__blockers" aria-label="Movement readiness">
         <div class="movement-card__subheading">
             <h4>Readiness</h4>
-            <span><?= (int) $readiness['blocking_count'] === 0 ? 'Ready' : esc((string) $readiness['blocking_count']) ?></span>
+            <span><?= ($state['code'] ?? null) === 'awaiting_recovery' ? 'Pending recovery' : ((int) $readiness['blocking_count'] === 0 ? 'Ready' : esc((string) $readiness['blocking_count'])) ?></span>
         </div>
         <p><strong><?= esc((string) $readiness['summary']) ?></strong></p>
         <?php foreach ($readiness['next_actions'] as $nextAction): ?>
             <p class="movement-card__next-action">Next: <strong><?= esc((string) $nextAction['label']) ?></strong></p>
         <?php endforeach; ?>
     </section>
+
+    <?php if (($vehicle['recovery_exceptions'] ?? []) !== []): ?>
+        <section class="movement-card__blockers" aria-label="Recovery exceptions">
+            <h4>Recovery exception needs attention</h4>
+            <?php foreach ($vehicle['recovery_exceptions'] as $exception): ?>
+                <p><?= esc(ucwords(str_replace('_', ' ', (string) $exception['exception_code']))) ?> · <a class="text-link" href="/operations/checklists/<?= (int) $exception['checklist_id'] ?>#recovery-exceptions">Follow up</a></p>
+            <?php endforeach; ?>
+        </section>
+    <?php endif; ?>
 
     <section class="movement-card__recommendation" aria-label="FleetOS recommendation">
         <p class="eyebrow">FleetOS recommendation</p>

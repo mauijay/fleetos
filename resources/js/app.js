@@ -50,6 +50,8 @@ const initializeHnlParking = (group) => {
     garage.value = state.garageCode;
     row.value = state.row;
     level.value = state.level;
+    garage.disabled = state.selectedRowGarage !== "";
+    garage.required = !garage.disabled;
     for (const option of garage.options) {
       option.disabled =
         option.value !== "" &&
