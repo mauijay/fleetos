@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.14.0 — Vehicle Return & Recovery Workflow
+
+Release date: 2026-09-18
+
+### Authoritative Return Lifecycle
+
+- Add the distinct `guest_return_staged` lifecycle state and Awaiting Recovery operational status. Guest-reported HNL parking remains explicitly unverified and never becomes the authoritative current vehicle position.
+- Make Recover Vehicle the authoritative operator-possession action. `vehicle_recovered` completes the return without manufacturing a duplicate `actual_return`, while backward-compatible `actual_return` facts remain valid.
+- Capture verified recovery location and measured energy—or an explicit unknown-energy reason—in one operator workflow. Known HNL rows derive their garage through the shared catalog and display in Level → Row → Garage → optional-detail order.
+
+### Derived Turnaround Work
+
+- Derive Cleaning Required automatically after recovery until a later authoritative Clean observation clears it.
+- Derive Charge/Fuel work from measured energy against the vehicle's operational target. Unknown energy creates measurement-needed work instead of a guessed 0% value or fabricated charge action.
+- Add recovery follow-up exceptions for damage, missing key, missing charge adapter, not drivable, and other note-backed issues. Resolution preserves history and clears only the resolved active follow-up; damage does not automatically create a claim.
+
+### Simplified Return Workflow & Operational Truth
+
+- Replace duplicate Turo-style inspection, photo, return-time, cleanliness, and energy checklist busy work with one FleetOS recovery action followed by derived turnaround work.
+- Preserve legacy return checklist rows and audits as historical context without allowing incomplete deprecated rows to block current work. Pickup workflow behavior remains unchanged.
+- Render event-only movement facts, including handoff, return, recovery, and staged guest return, without requiring companion assessment rows.
+- Keep Command Center and Operations Queue counts reconciled to visible actionable recovery, cleaning, energy, and exception work.
+
+### Migration & Release Boundaries
+
+- Add migration `2026-09-17-000022_CreateVehicleRecoveryExceptions` for company-scoped vehicle recovery exceptions and their resolution history.
+- Make no financial formula changes, Extras Performance implementation, or loan-payment ledger changes in this release.
+
 ## v0.13.0 — Operational Truth & Command Center Refinement
 
 Release date: 2026-09-17
