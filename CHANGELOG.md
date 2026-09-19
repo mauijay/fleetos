@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.14.1 — Readiness Filtering & Test Stability
+
+Release date: 2026-09-18
+
+### Authoritative Actionable Readiness
+
+- Filter checklist readiness against the authoritative actionable movement set before projecting current blockers. Canceled pickup checklists no longer contribute current readiness work, while their stored rows, audits, and direct historical views remain unchanged.
+- Keep valid booked pickups actionable, including applicable legacy pickup checklist codes and legitimate Photos complete work.
+- Match actionable movements by exact trip identity and movement type. Identical vehicle or schedule times do not cross-match, prior-trip return or recovery facts do not suppress later pickup preparation, and same-trip handoff continues to complete pickup work.
+
+### Reconciled Independent Work
+
+- Keep derived cleaning, charging, energy-measurement, recovery, and recovery-exception work independent of checklist-readiness filtering.
+- Keep Command Center, Movement Board, Immediate Attention, and Today/Tomorrow/Urgent readiness counts aligned with the visible actionable movement set.
+
+### Test Stability & Release Boundaries
+
+- Stabilize operational-facts as-of tests deterministically by evaluating corrected events after their persisted creation timestamps without weakening production as-of filtering.
+- Make no migration or schema change, frontend asset change, dependency change, financial behavior change, production data repair, or checklist row deletion or auto-completion in this release.
+
 ## v0.14.0 — Vehicle Return & Recovery Workflow
 
 Release date: 2026-09-18
