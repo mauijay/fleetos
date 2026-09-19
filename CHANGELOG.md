@@ -1,5 +1,43 @@
 # Changelog
 
+## v0.15.0 — Operator Actionability & Guided Turnaround
+
+Release date: 2026-09-19
+
+### Operator Actionability
+
+- Prioritize the active operational commitment more clearly. An overdue or unconfirmed pickup now appears ahead of later reservations with the correct guest and trip plus a direct **Record Guest Handoff** action.
+- Keep schedule and custody truth separate: passage of the scheduled pickup time never creates guest possession, while an exact `actual_handoff` establishes it for that trip.
+- Make routine operator actions prominent while keeping correction, void, provenance, and configuration controls secondary.
+
+### Exact Movement Identity & Clear Counts
+
+- Associate Timeline readiness by exact `trip_id + movement_type`, preventing same-vehicle movements from cross-associating readiness state or collapsing legitimate movements.
+- Use scope-specific count language for pickup/return actions, vehicle-wide movement actions, and Operations Queue work.
+
+### Guided Turnaround
+
+- Turn Recovery Complete into actionable work: **Cleaning Required** offers **Mark Clean** and **Record Condition**, while unknown or low energy offers the appropriate **Record Fuel Level** or **Record Charge Level** action.
+- Display measured low energy alongside its configured target. Present a missing target as vehicle configuration requiring **Configure Vehicle**, not a routine operator policy decision or an inferred value.
+- Keep recovery exceptions independently actionable and route damage attention to the existing review workflow.
+
+### Dynamic Operational State
+
+- Compose recovered-state language from the work that actually remains. A later Clean observation removes cleaning language, energy wording reflects only remaining fuel/charge work, and a satisfied turnaround reports **Ready for the next trip**.
+- Continue suppressing impossible physical preparation work while the guest has possession.
+
+### Data Integrity & Security
+
+- Reuse the existing authenticated, CSRF-protected, company- and vehicle-scoped write paths; no generic raw-event endpoint is introduced.
+- Make **Mark Clean** create `vehicle_readiness_observed` with cleanliness `clean` without rewriting recovery or overwriting the recovery energy observation.
+- Keep cleanliness and energy field-independent, preserve historical recovery observations, and never infer missing energy values or targets.
+
+### UX & Release Boundaries
+
+- Polish the Trip Facts **Record Guest Handoff** action row for a one-line desktop action and contained full-width mobile behavior. Responsive acceptance covers 390px, 440px, desktop, and wide desktop layouts.
+- Include frontend CSS source changes; local Vite production assets were rebuilt for verification and remain untracked according to repository convention.
+- Make no migration, schema, dependency, or financial behavior change in this release.
+
 ## v0.14.2 — Retroactive Guest Handoff Recording
 
 Release date: 2026-09-19
