@@ -51,7 +51,11 @@ class DailyOperationsDashboardService
         $reimbursements = $this->reimbursements()->attentionSummary($companyId);
         $incidentals = $this->incidentals()->attentionSummaryForSingleCompany($asOf);
         $expenses = $this->operatingExpenses()->attentionSummary($companyId);
-        $checklists = $this->attachReadinessProjections($this->checklists()->summariesForDay($asOf), $asOf);
+        $checklistSummaries = $this->filterActionableMovementChecklists(
+            $this->checklists()->summariesForDay($asOf),
+            $today,
+        );
+        $checklists = $this->attachReadinessProjections($checklistSummaries, $asOf);
         $awaitingVehicleIds = array_fill_keys(array_map('intval', array_column($today['awaiting_recovery'] ?? [], 'fleet_vehicle_id')), true);
         $actionableChecklists = array_values(array_filter($checklists, static fn (array $checklist): bool => ! isset($awaitingVehicleIds[(int) ($checklist['fleet_vehicle_id'] ?? 0)])));
         $board = $this->stateService->movementBoard($vehicles, $today, $health, $asOf);
@@ -389,5 +393,39 @@ class DailyOperationsDashboardService
                 'checklist_href' => $summary['href'] ?? '#operational-queue',
             ]);
         }, $timeline);
+    }
+
+    /**
+     * Checklist rows are historical storage. Current readiness is limited to the
+     * movement identities TaskService has already classified as actionable.
+     *
+     * @param array<int, array<string, mixed>> $checklists
+     * @param array<string, array<int, array<string, mixed>>> $today
+     * @return array<int, array<string, mixed>>
+     */
+    private function filterActionableMovementChecklists(array $checklists, array $today): array
+    {
+        $allowed = [];
+        foreach ([
+            'todays_pickups' => 'pickup',
+            'todays_returns' => 'return',
+        ] as $taskKey => $movementType) {
+            foreach ($today[$taskKey] ?? [] as $movement) {
+                $tripId = (int) ($movement['id'] ?? $movement['turo_trip_normalized_id'] ?? 0);
+                if ($tripId > 0) {
+                    $allowed[$tripId . ':' . $movementType] = true;
+                }
+            }
+        }
+
+        return array_values(array_filter(
+            $checklists,
+            static function (array $checklist) use ($allowed): bool {
+                $tripId = (int) ($checklist['turo_trip_normalized_id'] ?? 0);
+                $movementType = (string) ($checklist['movement_type'] ?? '');
+
+                return isset($allowed[$tripId . ':' . $movementType]);
+            },
+        ));
     }
 }

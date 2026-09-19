@@ -260,6 +260,60 @@ final class MovementReadinessProjectionServiceTest extends CIUnitTestCase
         $this->assertNotContains('turo_access_instructions_confirmed', array_column($projection['requirements'], 'code'));
     }
 
+    public function testActiveBookedPickupPreservesProductionLegacyNineItemReadinessShape(): void
+    {
+        $this->insertChecklist(109, 1006, 16, 'pickup');
+        $this->insertItems(109, [
+            ['vehicle_inspected', 'Vehicle inspected', 'open', 'applicable'],
+            ['vehicle_cleaned', 'Vehicle cleaned', 'open', 'applicable'],
+            ['charge_confirmed', 'Charge confirmed', 'open', 'applicable'],
+            ['exterior_photos_completed', 'Exterior condition photos completed', 'open', 'applicable'],
+            ['interior_photos_completed', 'Interior condition photos completed', 'open', 'applicable'],
+            ['key_card_confirmed', 'Key card confirmed', 'open', 'applicable'],
+            ['location_confirmed', 'Pickup or delivery location confirmed', 'open', 'applicable'],
+            ['vehicle_staged', 'Vehicle staged or ready', 'open', 'applicable'],
+            ['guest_handoff_completed', 'Guest handoff completed', 'open', 'applicable'],
+        ]);
+        $this->connection->table('vehicle_operational_profiles')->insert([
+            'id' => 9, 'fleet_vehicle_id' => 16, 'energy_kind' => 'electric', 'ready_energy_target_percent' => 80,
+        ]);
+        $this->connection->table('vehicle_operational_capabilities')->insertBatch([
+            ['id' => 9, 'fleet_vehicle_id' => 16, 'capability_code' => 'key_card', 'is_applicable' => 1],
+            ['id' => 10, 'fleet_vehicle_id' => 16, 'capability_code' => 'charging_adapter', 'is_applicable' => 1],
+        ]);
+        $this->connection->table('scheduled_movement_locations')->insert([
+            'id' => 9,
+            'turo_trip_normalized_id' => 1006,
+            'fleet_vehicle_id' => 16,
+            'movement_type' => 'pickup',
+            'location_class' => 'airport_hnl',
+            'source_text' => 'Synthetic HNL pickup',
+        ]);
+
+        $projection = $this->service->forCompany(1, [109])[109];
+        $blocking = array_values(array_filter(
+            $projection['requirements'],
+            static fn (array $requirement): bool => $requirement['phase'] === $projection['readiness_phase']
+                && $requirement['blocking']
+                && $requirement['status'] === 'unsatisfied',
+        ));
+
+        $this->assertFalse($projection['ready']);
+        $this->assertSame(8, $projection['blocking_remaining_count']);
+        $this->assertSame([
+            'photos_complete',
+            'vehicle_clean',
+            'energy_known',
+            'energy_ready',
+            'location_confirmed',
+            'key_card_confirmed',
+            'charging_adapter_confirmed',
+            'airport_staging',
+        ], array_column($blocking, 'code'));
+        $this->assertSame('Photos complete', $blocking[0]['action']['label']);
+        $this->assertCount(9, $projection['workflow_history']['legacy_items']);
+    }
+
     public function testConventionalVehicleUsesKeysAndDoesNotReceiveChargingAdapterWork(): void
     {
         $this->insertChecklist(108, 1008, 18, 'pickup');

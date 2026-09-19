@@ -193,6 +193,10 @@ final class DailyOperationsDashboardServiceTest extends CIUnitTestCase
         $reimbursements = $this->createMock(TuroAccessReimbursementService::class);
 
         $today = $this->today();
+        $today['todays_pickups'][] = [
+            'id' => 274,
+            ...$this->reservation(1, '2026-07-19 13:30:00', '2026-07-21 10:00:00'),
+        ];
         $today['airport_deliveries'][] = ['fleet_vehicle_id' => 1, 'scheduled_at' => '2026-07-19 07:00:00', 'completed_at' => '2026-07-19 07:30:00'];
         $tasks->method('today')->willReturn($today);
         $availability->method('vehicleStatus')->willReturn([$this->vehicle(1)]);
@@ -202,15 +206,30 @@ final class DailyOperationsDashboardServiceTest extends CIUnitTestCase
         $vehicleMappings->method('attentionSummary')->willReturn(['unique_unmatched_vehicles' => 0, 'affected_issues' => 0, 'href' => '/turo/vehicle-matches']);
         $reconciliation->method('attentionSummary')->willReturn(['awaiting_reconciliation' => 0, 'href' => '/turo/vehicle-matches']);
         $checklists->expects($this->never())->method('ensureForDay');
-        $checklists->method('summariesForDay')->willReturn([[
-            'id' => 41,
-            'company_id' => 1,
-            'fleet_vehicle_id' => 1,
-            'movement_type' => 'pickup',
-            'required_remaining_count' => 4,
-            'critical_open_count' => 1,
-            'href' => '/operations/checklists/41',
-        ]]);
+        $checklists->method('summariesForDay')->willReturn([
+            [
+                'id' => 77,
+                'turo_trip_normalized_id' => 258,
+                'company_id' => 1,
+                'fleet_vehicle_id' => 1,
+                'movement_type' => 'pickup',
+                'scheduled_at' => '2026-07-19 13:30:00',
+                'required_remaining_count' => 9,
+                'critical_open_count' => 7,
+                'href' => '/operations/checklists/77',
+            ],
+            [
+                'id' => 106,
+                'turo_trip_normalized_id' => 274,
+                'company_id' => 1,
+                'fleet_vehicle_id' => 1,
+                'movement_type' => 'pickup',
+                'scheduled_at' => '2026-07-19 13:30:00',
+                'required_remaining_count' => 9,
+                'critical_open_count' => 7,
+                'href' => '/operations/checklists/106',
+            ],
+        ]);
         $airport->expects($this->once())->method('attentionSummary')->with(1, $this->isInstanceOf(DateTimeImmutable::class))->willReturn(['airport_workflows_requiring_action' => 0, 'href' => '/operations/airport']);
         $reimbursements->expects($this->once())->method('attentionSummary')->with(1)->willReturn([
             'needs_setup' => 0,
@@ -222,8 +241,8 @@ final class DailyOperationsDashboardServiceTest extends CIUnitTestCase
         ]);
 
         $readiness = $this->createMock(MovementReadinessReadService::class);
-        $readiness->expects($this->once())->method('forCompany')->with(1, [41], $this->isInstanceOf(DateTimeImmutable::class))->willReturn([41 => [
-            'checklist_id' => 41,
+        $readiness->expects($this->once())->method('forCompany')->with(1, [106], $this->isInstanceOf(DateTimeImmutable::class))->willReturn([106 => [
+            'checklist_id' => 106,
             'readiness_phase' => 'pickup_preparation',
             'ready' => false,
             'blocking_remaining_count' => 2,
@@ -251,7 +270,7 @@ final class DailyOperationsDashboardServiceTest extends CIUnitTestCase
             $this->callback(static fn (array $board): bool => ($board[0]['checklist_critical_open'] ?? null) === 2
                 && ($board[0]['readiness_additional_remaining'] ?? null) === 1
                 && ($board[0]['readiness_primary_action'] ?? null) === 'Confirm vehicle inspected'
-                && ($board[0]['checklist_href'] ?? null) === '/operations/checklists/41'),
+                && ($board[0]['checklist_href'] ?? null) === '/operations/checklists/106'),
             $this->isInstanceOf(DateTimeImmutable::class),
         )->willReturnArgument(0);
         $financialSummary = $this->createMock(FinancialSummaryService::class);
@@ -285,8 +304,11 @@ final class DailyOperationsDashboardServiceTest extends CIUnitTestCase
 
         $byCode = array_column($queue, null, 'code');
         $this->assertSame('/?movement=readiness#movement-board', $byCode['readiness']['href']);
+        $this->assertSame(2, $byCode['readiness']['count']);
         $this->assertSame('/?movement=additional#movement-board', $byCode['additional']['href']);
+        $this->assertSame(1, $byCode['additional']['count']);
         $this->assertSame('/?movement=pickup#movement-board', $byCode['pickup']['href']);
+        $this->assertSame(3, $byCode['pickup']['count']);
         $this->assertSame('/?movement=return#movement-board', $byCode['return']['href']);
         $this->assertSame('/operations/airport', $byCode['airport_preparation']['href']);
         $this->assertSame(1, $byCode['airport_preparation']['count']);
@@ -294,6 +316,35 @@ final class DailyOperationsDashboardServiceTest extends CIUnitTestCase
         $this->assertArrayNotHasKey('airport_receipts', $byCode);
         $this->assertArrayNotHasKey('turo_import', $byCode);
         $this->assertStringContainsString('latest recorded movement assessment', $result['data_honesty'][0]);
+    }
+
+    public function testChecklistReadinessUsesAuthoritativeTripAndMovementIdentity(): void
+    {
+        $dashboard = new DailyOperationsDashboardService();
+        $method = new ReflectionMethod($dashboard, 'filterActionableMovementChecklists');
+        $scheduledAt = '2026-09-18 13:30:00';
+        $summaries = [
+            ['id' => 77, 'turo_trip_normalized_id' => 258, 'fleet_vehicle_id' => 4, 'movement_type' => 'pickup', 'scheduled_at' => $scheduledAt],
+            ['id' => 78, 'turo_trip_normalized_id' => 258, 'fleet_vehicle_id' => 4, 'movement_type' => 'return', 'scheduled_at' => '2026-09-23 13:30:00'],
+            ['id' => 106, 'turo_trip_normalized_id' => 274, 'fleet_vehicle_id' => 8, 'movement_type' => 'pickup', 'scheduled_at' => $scheduledAt],
+            ['id' => 107, 'turo_trip_normalized_id' => 274, 'fleet_vehicle_id' => 8, 'movement_type' => 'return', 'scheduled_at' => '2026-09-23 13:30:00'],
+            ['id' => 60, 'turo_trip_normalized_id' => 257, 'fleet_vehicle_id' => 8, 'movement_type' => 'return', 'scheduled_at' => '2026-09-13 12:00:00'],
+            ['id' => 201, 'turo_trip_normalized_id' => 301, 'fleet_vehicle_id' => 9, 'movement_type' => 'return', 'scheduled_at' => '2026-09-18 17:00:00'],
+        ];
+        $today = [
+            'todays_pickups' => [
+                ['id' => 274, 'fleet_vehicle_id' => 8, 'starts_at' => $scheduledAt],
+            ],
+            'todays_returns' => [
+                ['id' => 301, 'fleet_vehicle_id' => 9, 'ends_at' => '2026-09-18 17:00:00'],
+            ],
+        ];
+
+        $filtered = $method->invoke($dashboard, $summaries, $today);
+
+        $this->assertSame([106, 201], array_column($filtered, 'id'));
+        $this->assertSame([274, 301], array_column($filtered, 'turo_trip_normalized_id'));
+        $this->assertNotContains(77, array_column($filtered, 'id'));
     }
 
     public function testMovementFiltersUseProjectedReadinessAndMovementSemantics(): void
