@@ -331,11 +331,12 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
         $now = new DateTimeImmutable();
         $handoffAt = $now->modify('-2 hours')->format('Y-m-d H:i:s');
         $reportedAt = $now->modify('-1 hour')->format('Y-m-d H:i:s');
-        $asOf = new DateTimeImmutable($now->format('Y-m-d H:i:s'));
         $events->record(10, 100, 'actual_handoff', 'pickup', $handoffAt, 'airport_hnl', null, 'operator', 7);
         $reportId = $events->record(10, 100, 'guest_return_staged', 'return', $reportedAt, 'airport_hnl', null, 'guest_reported_parked_time', 7, 'Guest reported parked.', ['garage_code' => 'international', 'level' => 7, 'row' => 'G']);
 
         $report = $repository->event($reportId);
+        $this->assertNotNull($report);
+        $asOf = (new DateTimeImmutable((string) $report['created_at']))->modify('+1 second');
         $this->assertSame('guest_return_staged', $report['event_code']);
         $this->assertSame('international', $report['airport_garage_code']);
         $this->assertSame(7, (int) $report['airport_parking_level']);
@@ -343,7 +344,9 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
         $this->assertSame('guest_reported_parked_time', $report['source']);
         $custody = $repository->latestCustodyEventsForCompany(1, [10], $asOf->format('Y-m-d H:i:s'));
         $this->assertSame('guest_return_staged', $custody[10]['event_code']);
-        $this->assertSame($reportId, (int) $repository->awaitingRecoveryForCompany(1, $asOf->format('Y-m-d H:i:s'))[0]['id']);
+        $awaitingRecovery = $repository->awaitingRecoveryForCompany(1, $asOf->format('Y-m-d H:i:s'));
+        $this->assertCount(1, $awaitingRecovery);
+        $this->assertSame($reportId, (int) $awaitingRecovery[0]['id']);
         $this->assertSame([], $repository->awaitingRecoveryForCompany(2, $asOf->format('Y-m-d H:i:s')));
         $completions = $repository->authoritativeMovementCompletionsForCompany(1, [100], $asOf->format('Y-m-d H:i:s'));
         $this->assertSame([], array_values(array_filter($completions, static fn (array $row): bool => in_array($row['event_code'], ['actual_return', 'vehicle_recovered'], true))));
@@ -378,22 +381,35 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
         $this->assertNotContains('charging_required', $card['flags']);
 
         $correctedId = $events->correct($reportId, ['airport_parking_row' => 'F'], 8, 'Corrected guest-reported row.');
-        $this->assertSame('F', $repository->event($correctedId)['airport_parking_row']);
-        $this->assertSame($correctedId, (int) $repository->awaitingRecoveryForCompany(1, $asOf->format('Y-m-d H:i:s'))[0]['id']);
+        $correctedReport = $repository->event($correctedId);
+        $this->assertNotNull($correctedReport);
+        $this->assertSame('F', $correctedReport['airport_parking_row']);
+        $asOf = (new DateTimeImmutable((string) $correctedReport['created_at']))->modify('+1 second');
+        $awaitingRecovery = $repository->awaitingRecoveryForCompany(1, $asOf->format('Y-m-d H:i:s'));
+        $this->assertCount(1, $awaitingRecovery);
+        $this->assertSame($correctedId, (int) $awaitingRecovery[0]['id']);
         $this->assertTrue($events->void($correctedId, 8, 'Guest report was inaccurate.'));
         $this->assertSame([], $repository->awaitingRecoveryForCompany(1, $asOf->format('Y-m-d H:i:s')));
         $this->assertSame('rented', (new CurrentVehicleLocationService($repository))->resolve(10, $asOf)['operational_state']);
 
         $secondReport = $events->record(10, 100, 'guest_return_staged', 'return', $reportedAt, 'airport_hnl', null, 'guest_report_received', 7, null, ['garage_code' => 'international', 'level' => 7, 'row' => 'G']);
         $recoveredId = $events->record(10, 100, 'vehicle_recovered', 'return', $now->format('Y-m-d H:i:s'), 'airport_hnl', null, 'operator', 7);
+        $recovered = $repository->event($recoveredId);
+        $this->assertNotNull($recovered);
+        $asOf = (new DateTimeImmutable((string) $recovered['created_at']))->modify('+1 second');
         $this->assertSame([], $repository->awaitingRecoveryForCompany(1, $asOf->format('Y-m-d H:i:s')));
         $recoveredCard = $board->enrich([$staleRentedCard], $asOf, 1)[0];
         $this->assertSame('turnaround_attention', $recoveredCard['primary_status']);
         $this->assertNotContains('currently_rented', $recoveredCard['flags']);
         $this->assertTrue($events->void($recoveredId, 8, 'Recovery recorded prematurely.'));
-        $this->assertSame($secondReport, (int) $repository->awaitingRecoveryForCompany(1, $asOf->format('Y-m-d H:i:s'))[0]['id']);
+        $awaitingRecovery = $repository->awaitingRecoveryForCompany(1, $asOf->format('Y-m-d H:i:s'));
+        $this->assertCount(1, $awaitingRecovery);
+        $this->assertSame($secondReport, (int) $awaitingRecovery[0]['id']);
         $this->assertSame('awaiting_recovery', $board->enrich([$staleRentedCard], $asOf, 1)[0]['primary_status']);
-        $events->record(10, 100, 'actual_return', 'return', $now->format('Y-m-d H:i:s'), 'airport_hnl', null, 'operator', 7);
+        $actualReturnId = $events->record(10, 100, 'actual_return', 'return', $now->format('Y-m-d H:i:s'), 'airport_hnl', null, 'operator', 7);
+        $actualReturn = $repository->event($actualReturnId);
+        $this->assertNotNull($actualReturn);
+        $asOf = (new DateTimeImmutable((string) $actualReturn['created_at']))->modify('+1 second');
         $this->assertSame([], $repository->awaitingRecoveryForCompany(1, $asOf->format('Y-m-d H:i:s')));
         $this->assertSame('turnaround_attention', $board->enrich([$staleRentedCard], $asOf, 1)[0]['primary_status']);
     }
