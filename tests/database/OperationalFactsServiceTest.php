@@ -109,8 +109,13 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
         }
 
         $service->recordCurrentReadinessForVehicle(1, 10, ['occurred_at' => '2026-09-16 12:00:00', 'cleanliness' => 'clean'], 7);
+        $cleanObservation = $this->repository->latestCurrentReadinessAssessment(1, 10);
+        $this->assertSame('clean', $cleanObservation['cleanliness']);
+        $this->assertNull($cleanObservation['energy_percent']);
+        $this->assertSame('vehicle_readiness_observed', $this->repository->event((int) $cleanObservation['trip_movement_event_id'])['event_code']);
         $this->assertSame([], $work->cleaningNeedsForCompany(1, $at));
         $this->assertSame('charge_required', $work->energyNeedsForCompany(1, $at)[0]['condition_code']);
+        $this->assertSame(54, $work->energyNeedsForCompany(1, $at)[0]['energy_percent']);
         $service->recordCurrentReadinessForVehicle(1, 10, ['occurred_at' => '2026-09-16 13:00:00', 'energy_percent' => '82'], 7);
         $this->assertSame([], $work->cleaningNeedsForCompany(1, $at));
         $this->assertSame([], $work->energyNeedsForCompany(1, $at));

@@ -74,6 +74,8 @@ class TripMovementChecklists extends BaseController
             && $tripFacts['pickup'] === null
             && $tripFacts['return'] === null
             && in_array($tripSchedule['trip_status_code'] ?? null, ['booked', 'in_progress'], true);
+        $checklistNotice = session()->getFlashdata('movement_checklist_notice');
+        $checklistError = session()->getFlashdata('movement_checklist_error');
         return view('trip_movement_checklists/show', [
             'assets' => Services::assetManifestService()->appAssets(),
             'navigation' => $this->navigation(),
@@ -110,8 +112,8 @@ class TripMovementChecklists extends BaseController
             'positionFormData' => is_array($positionFormData) ? $positionFormData : [],
             'showPositionForm' => $this->request->getGet('action') === 'position',
             'hnlGarages' => (new \App\Services\Fleet\HnlGarageCatalog())->definitions(),
-            'notice' => session()->getFlashdata('movement_checklist_notice'),
-            'error' => session()->getFlashdata('movement_checklist_error'),
+            'notice' => $checklistNotice ?? CoreServices::session()->getFlashdata('vehicle_current_state_notice'),
+            'error' => $checklistError ?? CoreServices::session()->getFlashdata('vehicle_current_state_error'),
         ]);
     }
 

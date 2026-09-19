@@ -26,6 +26,8 @@ class VehicleCurrentState extends BaseController
     public function recordReadiness(int $vehicleId): RedirectResponse
     {
         $data = $this->withLocalTimestamp($this->request->getPost());
+        $returnChecklistId = (int) ($data['return_checklist_id'] ?? 0);
+        unset($data['return_checklist_id']);
 
         return $this->record(
             $vehicleId,
@@ -33,15 +35,30 @@ class VehicleCurrentState extends BaseController
             fn (int $companyId, int $actorUserId): bool => Services::movementOperationalFactService()->recordCurrentReadinessForVehicle($companyId, $vehicleId, $data, $actorUserId),
             'Current vehicle readiness recorded.',
             'current_readiness_data',
+            $returnChecklistId > 0
+                ? function (int $companyId) use ($returnChecklistId, $vehicleId): string {
+                    $checklist = Services::tripMovementChecklistService()->checklistForCompany($companyId, $returnChecklistId);
+                    if ($checklist === null || ($checklist['movement_type'] ?? null) !== 'return'
+                        || (int) ($checklist['fleet_vehicle_id'] ?? 0) !== $vehicleId) {
+                        throw new RuntimeException('The return workflow does not belong to this vehicle in the active company.');
+                    }
+
+                    return '/operations/checklists/' . $returnChecklistId . '#turnaround-actions';
+                }
+            : null,
         );
     }
 
-    /** @param callable(int, int): bool $write */
-    private function record(int $vehicleId, array $data, callable $write, string $notice, string $flashKey): RedirectResponse
+    /** @param callable(int, int): bool $write @param (callable(int): string)|null $redirectPath */
+    private function record(int $vehicleId, array $data, callable $write, string $notice, string $flashKey, ?callable $redirectPath = null): RedirectResponse
     {
         $response = CoreServices::redirectresponse()->to('/fleet/vehicles/' . $vehicleId . '#current-operations');
         try {
-            if (! $write($this->activeCompanyId(), $this->actorUserId())) {
+            $companyId = $this->activeCompanyId();
+            if ($redirectPath !== null) {
+                $response = CoreServices::redirectresponse()->to($redirectPath($companyId));
+            }
+            if (! $write($companyId, $this->actorUserId())) {
                 throw new RuntimeException('The current vehicle state could not be recorded.');
             }
 

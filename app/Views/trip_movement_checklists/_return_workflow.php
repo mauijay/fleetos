@@ -27,9 +27,22 @@ $currentDisposition = trim((string) ($checklist['vehicle_disposition'] ?? ''));
         <p class="muted">Turo handles its own return photos and inspection. FleetOS records custody and derives turnaround work after recovery.</p>
         <?php if ($canRecover): ?><a class="button-link" href="#recover-vehicle-entry">Recover Vehicle</a><?php endif; ?>
     <?php else: ?>
-        <div class="readiness-subgroup"><h3>Turnaround</h3><ul class="readiness-list">
-            <?php if (($turnaroundWork['cleaning'] ?? null) !== null): ?><li class="is-pending"><span aria-hidden="true">○</span><div><strong>Cleaning Required</strong></div></li><?php endif; ?>
-            <?php if ($energyWork !== null): ?><li class="is-pending"><span aria-hidden="true">○</span><div><strong><?= esc((string) ($energyWork['label'] ?? 'Record charge/fuel level')) ?></strong></div></li><?php endif; ?>
+        <div class="readiness-subgroup" id="turnaround-actions" tabindex="-1"><h3>Turnaround</h3><ul class="readiness-list readiness-actions turnaround-action-list">
+            <?php if (($turnaroundWork['cleaning'] ?? null) !== null): ?>
+                <li class="is-pending readiness-action-row"><span aria-hidden="true">○</span><div class="readiness-action-label"><strong>Cleaning Required</strong><small>Record the vehicle's current condition after service.</small></div><div class="readiness-action-controls">
+                    <form action="/fleet/vehicles/<?= (int) $checklist['fleet_vehicle_id'] ?>/current-readiness" method="post"><?= csrf_field() ?><input type="hidden" name="occurred_at" value="<?= esc(date('Y-m-d\TH:i:s'), 'attr') ?>"><input type="hidden" name="cleanliness" value="clean"><input type="hidden" name="return_checklist_id" value="<?= (int) $checklist['id'] ?>"><button class="primary-action" type="submit">Mark Clean</button></form>
+                    <a class="action-link" href="/fleet/vehicles/<?= (int) $checklist['fleet_vehicle_id'] ?>#current-operations">Record Condition</a>
+                </div></li>
+            <?php endif; ?>
+            <?php if ($energyWork !== null): ?>
+                <li class="is-pending readiness-action-row"><span aria-hidden="true">○</span><div class="readiness-action-label"><strong><?= esc((string) ($energyWork['label'] ?? 'Fuel/Charge level unknown')) ?></strong><?php if (($energyWork['condition_code'] ?? null) === 'target_needed'): ?><small>Configuration needed before FleetOS can evaluate readiness.</small><?php else: ?><small>Record the measured post-service level; FleetOS will evaluate it against the configured target.</small><?php endif; ?></div><div class="readiness-action-controls">
+                    <?php if (($energyWork['condition_code'] ?? null) === 'target_needed'): ?>
+                        <a class="action-link" href="<?= esc((string) $energyWork['href'], 'attr') ?>"><?= esc((string) ($energyWork['action_label'] ?? 'Configure Vehicle')) ?></a>
+                    <?php else: ?>
+                        <form class="turnaround-energy-form" action="/fleet/vehicles/<?= (int) $checklist['fleet_vehicle_id'] ?>/current-readiness" method="post"><?= csrf_field() ?><input type="hidden" name="occurred_at" value="<?= esc(date('Y-m-d\TH:i:s'), 'attr') ?>"><input type="hidden" name="return_checklist_id" value="<?= (int) $checklist['id'] ?>"><label><span class="visually-hidden"><?= esc((string) ($energyWork['action_label'] ?? 'Record Fuel/Charge Level')) ?></span><input type="number" name="energy_percent" min="0" max="100" required inputmode="numeric" placeholder="%"></label><button class="primary-action" type="submit"><?= esc((string) ($energyWork['action_label'] ?? 'Record Fuel/Charge Level')) ?></button></form>
+                    <?php endif; ?>
+                </div></li>
+            <?php endif; ?>
             <?php if (($turnaroundWork['cleaning'] ?? null) === null && $energyWork === null): ?><li class="is-complete"><span aria-hidden="true">✓</span><div><strong>No current cleaning or energy action</strong></div></li><?php endif; ?>
         </ul></div>
         <?php if (($readiness['next_trip'] ?? null) !== null): ?><p class="muted">Next confirmed pickup: <?= esc((string) ($readiness['next_trip']['starts_at'] ?? 'Time not captured')) ?>. Preparation remains derived from current vehicle facts.</p><?php endif; ?>
@@ -40,7 +53,7 @@ $currentDisposition = trim((string) ($checklist['vehicle_disposition'] ?? ''));
             <?php foreach ($openExceptions as $exception): ?>
                 <div class="import-message tone-warning"><strong><?= esc((string) ($exceptionLabels[$exception['exception_code']] ?? 'Recovery exception')) ?></strong>
                     <?php if (trim((string) ($exception['note'] ?? '')) !== ''): ?><span><?= esc((string) $exception['note']) ?></span><?php endif; ?>
-                    <?php if ($exception['exception_code'] === 'damage'): ?><span>Review the existing claim process; no claim was created automatically. <a class="text-link" href="/#fleet-health">Review claims</a></span><?php endif; ?>
+                    <?php if ($exception['exception_code'] === 'damage'): ?><span>Review the existing claim process; no claim was created automatically. <a class="action-link" href="/#fleet-health">Review Damage</a></span><?php endif; ?>
                     <?php if ($exception['exception_code'] === 'not_drivable'): ?><span>Assess maintenance or an offline hold before the next movement.</span><?php endif; ?>
                     <form class="issue-filters" action="/operations/checklists/<?= (int) $checklist['id'] ?>/recovery-exceptions/<?= (int) $exception['id'] ?>/resolve" method="post"><?= csrf_field() ?><label>Resolution note (optional)<input name="resolution_note" maxlength="2000"></label><button class="secondary-action" type="submit">Resolve exception</button></form>
                 </div>

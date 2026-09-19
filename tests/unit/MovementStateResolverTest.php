@@ -90,7 +90,25 @@ final class MovementStateResolverTest extends CIUnitTestCase
         $this->assertSame('Returned — turnaround needed', $assessment['label']);
         $this->assertSame('Returned — turnaround needed', $turnaround['label']);
         $this->assertSame('Ready for Sep 4, 9:00 AM', $ready['label']);
-        $this->assertSame('Pickup confirmation overdue', $pickupOverdue['label']);
+        $this->assertSame('Pickup awaiting confirmation', $pickupOverdue['label']);
         $this->assertSame('Return confirmation overdue', $returnOverdue['label']);
+    }
+
+    public function testRecoveredCopyNamesOnlyTheWorkThatActuallyRemains(): void
+    {
+        $resolver = new MovementStateResolver();
+        $asOf = new DateTimeImmutable('2026-09-19 12:00:00');
+        $event = ['event_code' => 'vehicle_recovered'];
+        $profile = ['energy_kind' => 'gasoline', 'ready_energy_target_percent' => 90];
+
+        $both = $resolver->resolve(['latest_event' => $event, 'assessment' => ['cleanliness' => 'dirty', 'energy_percent' => 75], 'profile' => $profile], $asOf);
+        $fuelOnly = $resolver->resolve(['latest_event' => $event, 'assessment' => ['cleanliness' => 'clean', 'energy_percent' => 75], 'profile' => $profile], $asOf);
+        $cleanOnly = $resolver->resolve(['latest_event' => $event, 'assessment' => ['cleanliness' => 'dirty', 'energy_percent' => 95], 'profile' => $profile], $asOf);
+        $ready = $resolver->resolve(['latest_event' => $event, 'assessment' => ['cleanliness' => 'clean', 'energy_percent' => 95], 'profile' => $profile], $asOf);
+
+        $this->assertSame('Vehicle recovered; cleaning and fueling remain.', $both['primary_line']);
+        $this->assertSame('Vehicle recovered; fueling remains.', $fuelOnly['primary_line']);
+        $this->assertSame('Vehicle recovered; cleaning remains.', $cleanOnly['primary_line']);
+        $this->assertSame('Ready for the next trip.', $ready['primary_line']);
     }
 }

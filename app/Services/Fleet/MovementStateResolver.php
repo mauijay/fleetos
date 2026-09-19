@@ -41,7 +41,8 @@ class MovementStateResolver
             $target = isset($profile['ready_energy_target_percent']) ? (int) $profile['ready_energy_target_percent'] : null;
             $needsCleaning = (bool) ($context['cleaning_required'] ?? (($assessment['cleanliness'] ?? null) !== 'clean'));
             $energyCondition = array_key_exists('energy_condition', $context) ? $context['energy_condition'] : ($target === null ? 'target_needed' : (($assessment['energy_percent'] ?? null) === null ? 'measurement_needed' : ((int) $assessment['energy_percent'] < $target ? 'charge_required' : null)));
-            if ($needsCleaning || $energyCondition !== null) {
+            $hasPickupPreparation = $this->hasCriticalBlockers($context, $blockers);
+            if ($needsCleaning || $energyCondition !== null || $hasPickupPreparation) {
                 if ($needsCleaning) {
                     $blockers[] = ['code' => 'cleaning_required', 'label' => 'Cleaning required', 'severity' => 'meaningful'];
                 }
@@ -52,12 +53,28 @@ class MovementStateResolver
                     $blockers[] = ['code' => 'energy_measurement_needed', 'label' => 'Record charge/fuel level', 'severity' => 'meaningful'];
                 } elseif ($energyCondition === 'target_needed') {
                     $missing[] = 'ready_energy_target_percent';
-                    $blockers[] = ['code' => 'energy_target_needed', 'label' => 'Set charge/fuel target', 'severity' => 'meaningful'];
+                    $blockers[] = ['code' => 'energy_target_needed', 'label' => $this->energyTargetLabel($profile) . ' not configured', 'severity' => 'meaningful'];
                 }
                 $recovered = ($event['event_code'] ?? null) === 'vehicle_recovered';
-                return $this->state('turnaround_attention', $recovered ? 'Recovered — turnaround needed' : 'Returned — turnaround needed', 'warning', $recovered ? 'Vehicle recovered; cleaning and any energy work remain actionable.' : 'Vehicle returned; cleaning and any energy work remain actionable.', $event, $schedule, $missing, $blockers, 'complete_turnaround', 'Complete turnaround');
+                $prefix = $recovered ? 'Vehicle recovered; ' : 'Vehicle returned; ';
+                $energyWork = match ($energyCondition) {
+                    'charge_required' => $this->energyWorkLabel($profile) . ' remains.',
+                    'measurement_needed' => 'record the ' . $this->energyLevelLabel($profile) . '.',
+                    'target_needed' => $this->energyTargetLabel($profile) . ' configuration is missing.',
+                    default => null,
+                };
+                $primary = match (true) {
+                    $needsCleaning && $energyCondition === 'charge_required' => $prefix . 'cleaning and ' . $this->energyWorkLabel($profile) . ' remain.',
+                    $needsCleaning && $energyCondition === 'measurement_needed' => $prefix . 'cleaning remains; record the ' . $this->energyLevelLabel($profile) . '.',
+                    $needsCleaning && $energyCondition === 'target_needed' => $prefix . 'cleaning remains; ' . $this->energyTargetLabel($profile) . ' configuration is missing.',
+                    $needsCleaning => $prefix . 'cleaning remains.',
+                    $energyWork !== null => $prefix . $energyWork,
+                    default => $prefix . 'pickup preparation remains.',
+                };
+
+                return $this->state('turnaround_attention', $recovered ? 'Recovered — turnaround needed' : 'Returned — turnaround needed', 'warning', $primary, $event, $schedule, $missing, $blockers, 'complete_turnaround', 'Continue Turnaround');
             }
-            return $this->state('ready', 'Ready', 'success', 'Return confirmed and readiness facts are complete.', $event, $schedule, $missing, $blockers, 'none', 'No action required');
+            return $this->state('ready', 'Ready', 'success', 'Ready for the next trip.', $event, $schedule, $missing, $blockers, 'none', 'No action required');
         }
 
         if (($event['event_code'] ?? null) === 'vehicle_staged') {
@@ -77,7 +94,7 @@ class MovementStateResolver
 
         $startsAt = $schedule['starts_at'] ?? null;
         if ($startsAt !== null && new \DateTimeImmutable((string) $startsAt) <= $asOf) {
-            return $this->state('pickup_confirmation_overdue', 'Pickup confirmation overdue', 'danger', 'Scheduled pickup passed without a handoff event.', $event, $schedule, $missing, $blockers, 'confirm_handoff', 'Confirm guest handoff');
+            return $this->state('pickup_confirmation_overdue', 'Pickup awaiting confirmation', 'danger', 'Scheduled pickup time passed; guest possession is not recorded.', $event, $schedule, $missing, $blockers, 'confirm_handoff', 'Record Guest Handoff');
         }
 
         if ($nextTrip !== null) {
@@ -102,6 +119,30 @@ class MovementStateResolver
             }
         }
         return false;
+    }
+
+    /** @param array<string, mixed> $profile */
+    private function energyWorkLabel(array $profile): string
+    {
+        return ($profile['energy_kind'] ?? null) === 'electric'
+            ? 'charging'
+            : (($profile['energy_kind'] ?? null) === 'unknown' ? 'fuel/charge work' : 'fueling');
+    }
+
+    /** @param array<string, mixed> $profile */
+    private function energyLevelLabel(array $profile): string
+    {
+        return ($profile['energy_kind'] ?? null) === 'electric'
+            ? 'charge level'
+            : (($profile['energy_kind'] ?? null) === 'unknown' ? 'fuel/charge level' : 'fuel level');
+    }
+
+    /** @param array<string, mixed> $profile */
+    private function energyTargetLabel(array $profile): string
+    {
+        return ($profile['energy_kind'] ?? null) === 'electric'
+            ? 'Charge target'
+            : (($profile['energy_kind'] ?? null) === 'unknown' ? 'Fuel/charge target' : 'Fuel target');
     }
 
     /** @return array<string, mixed> */

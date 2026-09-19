@@ -305,6 +305,7 @@ final class DailyOperationsDashboardServiceTest extends CIUnitTestCase
         $byCode = array_column($queue, null, 'code');
         $this->assertSame('/?movement=readiness#movement-board', $byCode['readiness']['href']);
         $this->assertSame(2, $byCode['readiness']['count']);
+        $this->assertSame('Movement-readiness Actions', $byCode['readiness']['label']);
         $this->assertSame('/?movement=additional#movement-board', $byCode['additional']['href']);
         $this->assertSame(1, $byCode['additional']['count']);
         $this->assertSame('/?movement=pickup#movement-board', $byCode['pickup']['href']);
@@ -345,6 +346,25 @@ final class DailyOperationsDashboardServiceTest extends CIUnitTestCase
         $this->assertSame([106, 201], array_column($filtered, 'id'));
         $this->assertSame([274, 301], array_column($filtered, 'turo_trip_normalized_id'));
         $this->assertNotContains(77, array_column($filtered, 'id'));
+    }
+
+    public function testTimelineReadinessAttachesByExactTripAndMovementIdentity(): void
+    {
+        $dashboard = new DailyOperationsDashboardService();
+        $method = new ReflectionMethod($dashboard, 'attachChecklistTimeline');
+        $timeline = [
+            ['event_type' => 'Pickup', 'reservation' => ['id' => 501, 'fleet_vehicle_id' => 9]],
+            ['event_type' => 'Pickup', 'reservation' => ['id' => 502, 'fleet_vehicle_id' => 9]],
+        ];
+        $checklists = [
+            ['id' => 41, 'turo_trip_normalized_id' => 501, 'fleet_vehicle_id' => 9, 'movement_type' => 'pickup', 'status_label' => '1 pickup action remaining'],
+            ['id' => 42, 'turo_trip_normalized_id' => 502, 'fleet_vehicle_id' => 9, 'movement_type' => 'pickup', 'status_label' => 'Ready'],
+        ];
+
+        $attached = $method->invoke($dashboard, $timeline, $checklists);
+
+        $this->assertSame('1 pickup action remaining', $attached[0]['checklist_status_label']);
+        $this->assertSame('Ready', $attached[1]['checklist_status_label']);
     }
 
     public function testMovementFiltersUseProjectedReadinessAndMovementSemantics(): void

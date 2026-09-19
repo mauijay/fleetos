@@ -76,7 +76,7 @@ $readiness = $vehicle['readiness_compact'] ?? [
 
     <section class="movement-card__blockers" aria-label="Movement readiness">
         <div class="movement-card__subheading">
-            <h4>Readiness</h4>
+            <h4>Today's movement actions</h4>
             <span><?= ($state['code'] ?? null) === 'awaiting_recovery' ? 'Pending recovery' : ((int) $readiness['blocking_count'] === 0 ? 'Ready' : esc((string) $readiness['blocking_count'])) ?></span>
         </div>
         <p><strong><?= esc((string) $readiness['summary']) ?></strong></p>
@@ -125,6 +125,6 @@ $readiness = $vehicle['readiness_compact'] ?? [
                 <a class="text-link" href="/turo/imports">Refresh Turo data</a>
             <?php endif; ?>
         </div>
-        <a class="button-link movement-card__action" href="<?= esc($vehicle['action']['href'], 'attr') ?>"><?= esc($vehicle['action']['label']) ?></a>
+        <?php if (($vehicle['action'] ?? null) !== null): ?><a class="button-link movement-card__action" href="<?= esc($vehicle['action']['href'], 'attr') ?>"><?= esc($vehicle['action']['label']) ?></a><?php endif; ?>
     </footer>
 </article>

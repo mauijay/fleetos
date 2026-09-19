@@ -40,7 +40,7 @@ final class MovementBoardCardViewTest extends CIUnitTestCase
         $this->assertStringContainsString('href="/turo/imports"', $html);
         $this->assertStringContainsString('href="&#x2F;operations&#x2F;checklists&#x2F;41"', $html);
         $this->assertSame(1, substr_count($html, 'movement-card__action'));
-        $this->assertStringContainsString('12 blocking', $html);
+        $this->assertStringContainsString('12 actions across today&#039;s movements', $html);
         $this->assertStringContainsString('3 additional', $html);
         $this->assertStringContainsString('Next: <strong>Record actual return</strong>', $html);
         $this->assertStringNotContainsString('Complete action 2', $html);
@@ -60,7 +60,7 @@ final class MovementBoardCardViewTest extends CIUnitTestCase
 
         $html = $this->render($vehicle);
 
-        $this->assertStringContainsString('<h4>Readiness</h4>', $html);
+        $this->assertStringContainsString("<h4>Today's movement actions</h4>", $html);
         $this->assertSame(2, substr_count($html, '>Ready<'));
         $this->assertStringNotContainsString('Next:', $html);
         $this->assertStringNotContainsString('<li>', $html);
@@ -157,7 +157,7 @@ final class MovementBoardCardViewTest extends CIUnitTestCase
             'readiness_compact' => [
                 'blocking_count' => 12,
                 'additional_count' => 3,
-                'summary' => '12 blocking · 3 additional',
+                'summary' => '12 actions across today\'s movements · 3 additional',
                 'next_actions' => [['code' => 'vehicle_received', 'label' => 'Record actual return', 'href' => '/operations/checklists/41']],
             ],
             'recommendation' => ['display_label' => 'Recommended: Leave at HNL', 'reason_labels' => ['Already at HNL.', 'Clean and charge on site.']],

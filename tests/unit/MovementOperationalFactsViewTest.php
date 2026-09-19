@@ -584,14 +584,40 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
     {
         $data = $this->readinessViewData();
         $data['returnCompleted'] = true;
-        $data['turnaroundWork'] = ['cleaning' => ['fleet_vehicle_id' => 10], 'energy' => ['label' => 'Charge/Fuel to 80%']];
-        $html = $this->render('return', $this->facts(), false, [], $data);
+        $data['turnaroundWork'] = ['cleaning' => ['fleet_vehicle_id' => 10], 'energy' => ['label' => 'Charge Needed — 25%, target 80%', 'condition_code' => 'charge_required', 'action_label' => 'Record Charge Level']];
+        $html = html_entity_decode($this->render('return', $this->facts(), false, [], $data), ENT_QUOTES | ENT_HTML5);
 
         $this->assertStringContainsString('Recovery complete', $html);
         $this->assertStringContainsString('Cleaning Required', $html);
-        $this->assertStringContainsString('Charge/Fuel to 80%', $html);
+        $this->assertStringContainsString('Charge Needed — 25%, target 80%', $html);
+        $this->assertStringContainsString('>Mark Clean</button>', $html);
+        $this->assertStringContainsString('>Record Condition</a>', $html);
+        $this->assertStringContainsString('>Record Charge Level</button>', $html);
+        $this->assertSame(2, substr_count($html, 'action="/fleet/vehicles/10/current-readiness"'));
+        $this->assertSame(2, substr_count($html, 'name="return_checklist_id"'));
+        $this->assertGreaterThanOrEqual(2, substr_count($html, 'method="post"'));
         $this->assertLessThan(strpos($html, 'Legacy checklist history'), strpos($html, 'Cleaning Required'));
         $this->assertStringNotContainsString('id="checklist-action-exterior_inspected"', $html);
+    }
+
+    public function testMissingEnergyTargetIsConfigurationRatherThanRoutineTargetDecision(): void
+    {
+        $data = $this->readinessViewData();
+        $data['returnCompleted'] = true;
+        $data['turnaroundWork'] = ['cleaning' => null, 'energy' => [
+            'label' => 'Fuel target not configured',
+            'condition_code' => 'target_needed',
+            'action_label' => 'Configure Vehicle',
+            'href' => '/fleet/vehicles/10/edit',
+        ]];
+
+        $html = html_entity_decode($this->render('return', $this->facts(), false, [], $data), ENT_QUOTES | ENT_HTML5);
+
+        $this->assertStringContainsString('Fuel target not configured', $html);
+        $this->assertStringContainsString('Configuration needed', $html);
+        $this->assertStringContainsString('href="/fleet/vehicles/10/edit"', $html);
+        $this->assertStringContainsString('>Configure Vehicle</a>', $html);
+        $this->assertStringNotContainsString('Set charge/fuel target', $html);
     }
 
     public function testChecklistFocusTargetsClearStickyMobileNavigation(): void
@@ -607,6 +633,17 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
         $this->assertStringContainsString('min-height: var(--mobile-nav-height);', $css);
         $this->assertStringContainsString('max-height: calc(100vh - var(--mobile-nav-height));', $css);
         $this->assertStringContainsString('--checklist-focus-offset: calc(var(--mobile-nav-height) + 20px);', $css);
+    }
+
+    public function testTripFactsHandoffActionsUseResponsiveSharedFormActions(): void
+    {
+        $view = file_get_contents(dirname(__DIR__, 2) . '/app/Views/trip_movement_checklists/show.php');
+        $css = file_get_contents(dirname(__DIR__, 2) . '/resources/css/app.css');
+
+        $this->assertStringContainsString('<div class="form-actions"><button class="primary-action" type="submit">Record Guest Handoff</button><a class="action-link"', $view);
+        $this->assertMatchesRegularExpression('/\.issue-filters > \.form-actions\s*\{[^}]*grid-column: 1 \/ -1;[^}]*min-width: 0;/s', $css);
+        $this->assertMatchesRegularExpression('/\.form-actions \.primary-action\s*\{[^}]*min-width: 220px;[^}]*min-height: 52px;[^}]*white-space: nowrap;/s', $css);
+        $this->assertMatchesRegularExpression('/@media \(max-width: 560px\).*?\.form-actions \.primary-action\s*\{[^}]*width: 100%;[^}]*min-width: 0;.*?\.issue-filters > \.form-actions\s*\{[^}]*justify-content: flex-start;/s', $css);
     }
 
     public function testActionRequiredRowsUseSharedAlignedActionColumnWithoutChangingPostSecurity(): void

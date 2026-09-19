@@ -97,6 +97,7 @@ class OperationalMovementWorkService
             $needs[] = array_merge($vehicle, [
                 'fleet_vehicle_id' => $id,
                 'turo_trip_normalized_id' => (int) ($event['turo_trip_normalized_id'] ?? 0),
+                'cleanliness' => $assessment['cleanliness'] ?? null,
                 'condition_observed_at' => $assessment['captured_at'] ?? null,
                 'recovered_at' => $event['occurred_at'],
             ]);
@@ -133,20 +134,25 @@ class OperationalMovementWorkService
                 continue;
             }
             $tripId = (int) ($event['turo_trip_normalized_id'] ?? 0);
+            $energyKind = (string) ($profile['energy_kind'] ?? 'unknown');
+            $noun = $energyKind === 'electric' ? 'Charge' : ($energyKind === 'unknown' ? 'Fuel/Charge' : 'Fuel');
             $needs[] = array_merge($vehicle, [
                 'fleet_vehicle_id' => $id,
                 'turo_trip_normalized_id' => $tripId,
                 'condition_code' => $condition,
                 'label' => match ($condition) {
-                    'charge_required' => 'Charge/Fuel to ' . $target . '%',
-                    'measurement_needed' => 'Record charge/fuel level',
-                    default => 'Set charge/fuel target',
+                    'charge_required' => $noun . ' Needed — ' . $energy . '%, target ' . $target . '%',
+                    'measurement_needed' => $noun . ' level unknown',
+                    default => $noun . ' target not configured',
                 },
+                'action_label' => $condition === 'target_needed' ? 'Configure Vehicle' : 'Record ' . $noun . ' Level',
                 'energy_percent' => $energy,
                 'target_percent' => $target,
+                'energy_kind' => $energyKind,
+                'configuration_required' => $condition === 'target_needed',
                 'href' => $condition === 'target_needed'
-                    ? '/fleet/vehicles/' . $id
-                    : ($this->repo()->movementChecklistHref($tripId, 'return') ?? '/fleet/vehicles/' . $id),
+                    ? '/fleet/vehicles/' . $id . '/edit'
+                    : ($this->repo()->movementChecklistHref($tripId, 'return') ?? '/fleet/vehicles/' . $id) . '#turnaround-actions',
             ]);
         }
 

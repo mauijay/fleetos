@@ -118,7 +118,7 @@ class DailyOperationsDashboardService
         $pendingAirportDeliveries = count(array_filter($today['airport_deliveries'], static fn (array $delivery): bool => ($delivery['completed_at'] ?? null) === null));
 
         $actions = [
-            ['code' => 'readiness', 'label' => 'Complete Movement Readiness', 'count' => $blockingActions, 'href' => '/?movement=readiness#movement-board'],
+            ['code' => 'readiness', 'label' => 'Movement-readiness Actions', 'count' => $blockingActions, 'href' => '/?movement=readiness#movement-board'],
             ['code' => 'additional', 'label' => 'Review Additional Movement Actions', 'count' => $additionalActions, 'href' => '/?movement=additional#movement-board'],
             ['code' => 'pickup', 'label' => 'Review Today\'s Pickups', 'count' => count($today['todays_pickups']), 'href' => '/?movement=pickup#movement-board'],
             ['code' => 'return', 'label' => 'Review Today\'s Returns', 'count' => count($today['todays_returns']), 'href' => '/?movement=return#movement-board'],
@@ -288,12 +288,13 @@ class DailyOperationsDashboardService
             }
             $blocking = (int) $projection['blocking_remaining_count'];
             $additional = (int) $projection['additional_actions_remaining_count'];
+            $movementType = (string) ($projection['movement_type'] ?? $checklist['movement_type'] ?? 'movement');
 
             return array_merge($checklist, [
                 'readiness_projection' => $projection,
                 'blocking_remaining_count' => $blocking,
                 'additional_actions_remaining_count' => $additional,
-                'status_label' => $blocking === 0 ? 'Ready' : $blocking . ' blocking action' . ($blocking === 1 ? '' : 's') . ' remaining',
+                'status_label' => $blocking === 0 ? 'Ready' : $blocking . ' ' . $movementType . ' action' . ($blocking === 1 ? '' : 's') . ' remaining',
             ]);
         }, $checklists);
     }
@@ -352,7 +353,7 @@ class DailyOperationsDashboardService
                 'actions' => $actions,
                 'charging_status_label' => $energyMissing ? 'Charge/Fuel not captured' : ($energyBelowTarget ? 'Below pickup target' : 'No actionable Charge/Fuel preparation recorded'),
                 'checklists' => $vehicleChecklists,
-                'checklist_progress_label' => $vehicleChecklists === [] ? 'No movement workflow today' : ($remaining === 0 ? 'Ready' : $remaining . ' blocking action' . ($remaining === 1 ? '' : 's') . ' remaining'),
+                'checklist_progress_label' => $vehicleChecklists === [] ? 'No movement workflow today' : ($remaining === 0 ? 'Ready' : $remaining . ' action' . ($remaining === 1 ? '' : 's') . ' across today\'s movements'),
                 'checklist_ready' => $vehicleChecklists !== [] && $remaining === 0,
                 'checklist_required_remaining' => $remaining,
                 'checklist_critical_open' => $remaining,
@@ -378,15 +379,19 @@ class DailyOperationsDashboardService
 
     private function attachChecklistTimeline(array $timeline, array $checklists): array
     {
-        $byVehicleType = [];
+        $byMovement = [];
         foreach ($checklists as $checklist) {
-            $eventType = $checklist['movement_type'] === 'return' ? 'Return' : 'Pickup';
-            $byVehicleType[(int) $checklist['fleet_vehicle_id'] . ':' . $eventType] = $checklist;
+            $tripId = (int) ($checklist['turo_trip_normalized_id'] ?? 0);
+            $movementType = strtolower((string) ($checklist['movement_type'] ?? ''));
+            if ($tripId > 0 && in_array($movementType, ['pickup', 'return'], true)) {
+                $byMovement[$tripId . ':' . $movementType] = $checklist;
+            }
         }
 
-        return array_map(static function (array $event) use ($byVehicleType): array {
-            $key = (int) ($event['reservation']['fleet_vehicle_id'] ?? 0) . ':' . ($event['event_type'] ?? '');
-            $summary = $byVehicleType[$key] ?? null;
+        return array_map(static function (array $event) use ($byMovement): array {
+            $tripId = (int) ($event['reservation']['id'] ?? 0);
+            $movementType = strtolower((string) ($event['event_type'] ?? ''));
+            $summary = $byMovement[$tripId . ':' . $movementType] ?? null;
 
             return array_merge($event, [
                 'checklist_status_label' => $summary['status_label'] ?? 'Checklist not created',

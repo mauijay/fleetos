@@ -134,7 +134,7 @@ class VehicleDailyStateService
                 $items[] = $this->attention(
                     'today',
                     $vehicle['fleet_code'] . ': ' . $readinessAction . '.',
-                    $remaining . ' blocking action' . ($remaining === 1 ? '' : 's') . ' remaining.',
+                    $remaining . ' action' . ($remaining === 1 ? '' : 's') . ' across today\'s movements.',
                     (string) ($vehicle['checklist_href'] ?? '#movement-board'),
                 );
             }
@@ -282,7 +282,7 @@ class VehicleDailyStateService
     {
         $actions = [];
         if (in_array('same_day_turnaround', $flags, true)) {
-            $actions[] = 'Review turnaround readiness' . ($turnaround === null ? '' : ' within ' . $turnaround['label']);
+            $actions[] = 'Continue turnaround' . ($turnaround === null ? '' : ' within ' . $turnaround['label']);
         }
         if (in_array('departing_today', $flags, true) && ! in_array('same_day_turnaround', $flags, true)) {
             $actions[] = 'Confirm pickup readiness';

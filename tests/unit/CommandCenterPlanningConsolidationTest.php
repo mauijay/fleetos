@@ -131,6 +131,28 @@ final class CommandCenterPlanningConsolidationTest extends CIUnitTestCase
         $this->assertSame('/operations/vehicles/1/trip-history?trip=10', $upcoming[2]['href']);
     }
 
+    public function testSameVehicleSameTimeReservationsRemainDistinctTimelineMovements(): void
+    {
+        $start = new DateTimeImmutable('2026-09-19 00:00:00', new DateTimeZone('Pacific/Honolulu'));
+        $items = [
+            $this->reservation(501, 9, 'First Synthetic Guest', '2026-09-19 10:00:00', '2026-09-21 10:00:00'),
+            $this->reservation(502, 9, 'Second Synthetic Guest', '2026-09-19 10:00:00', '2026-09-22 10:00:00'),
+        ];
+        $vehicles = [['fleet_vehicle_id' => 9, 'fleet_number' => 9, 'fleet_code' => 'Fleet-9', 'display_name' => 'Vehicle 9']];
+        $readiness = [
+            ['event_type' => 'Pickup', 'reservation' => ['id' => 501], 'checklist_status_label' => '2 pickup actions remaining', 'checklist_href' => '/operations/checklists/51'],
+            ['event_type' => 'Pickup', 'reservation' => ['id' => 502], 'checklist_status_label' => 'Ready', 'checklist_href' => '/operations/checklists/52'],
+        ];
+
+        $timeline = $this->timeline($items, $vehicles, $readiness, $start, []);
+        $events = array_merge(...array_column($timeline['groups'], 'events'));
+        $pickups = array_values(array_filter($events, static fn (array $event): bool => $event['movement_type'] === 'pickup'));
+
+        $this->assertCount(2, $pickups);
+        $this->assertSame([501, 502], array_column($pickups, 'trip_id'));
+        $this->assertSame(['2 pickup actions remaining', 'Ready'], array_column($pickups, 'readiness_label'));
+    }
+
     public function testVehicleRecoveryAlsoCompletesReturnButStagingDoesNotCompletePickup(): void
     {
         $start = new DateTimeImmutable('2026-09-13 00:00:00', new DateTimeZone('Pacific/Honolulu'));

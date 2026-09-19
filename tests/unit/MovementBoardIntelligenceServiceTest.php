@@ -39,7 +39,7 @@ final class MovementBoardIntelligenceServiceTest extends CIUnitTestCase
 
         $this->assertSame(12, $card['readiness_compact']['blocking_count']);
         $this->assertSame(3, $card['readiness_compact']['additional_count']);
-        $this->assertStringContainsString('12 blocking', $card['readiness_compact']['summary']);
+        $this->assertStringContainsString("12 actions across today's movements", $card['readiness_compact']['summary']);
         $this->assertStringContainsString('3 additional', $card['readiness_compact']['summary']);
         $this->assertSame([['code' => 'vehicle_received', 'label' => 'Record actual return', 'href' => null]], $card['readiness_compact']['next_actions']);
         $this->assertCount(12, $card['blockers']);
@@ -248,8 +248,8 @@ final class MovementBoardIntelligenceServiceTest extends CIUnitTestCase
 
         $card = $service->enrich([['fleet_vehicle_id' => 9, 'status' => 'available', 'pickup' => ['id' => 900], 'checklists' => [['movement_type' => 'pickup', 'href' => '/operations/checklists/40']]]], new DateTimeImmutable('2026-09-03 16:27:00'))[0];
 
-        $this->assertSame('Record handoff', $card['action']['label']);
-        $this->assertSame('/operations/checklists/40?action=handoff', $card['action']['href']);
+        $this->assertSame('Record Guest Handoff', $card['action']['label']);
+        $this->assertSame('/operations/checklists/40?action=record-handoff#pickup-fact-heading', $card['action']['href']);
         $this->assertSame(['id' => 900, 'guest_name' => 'Overdue Guest', 'timing_label' => 'Scheduled Sep 2, 9:30 PM'], $card['current_trip']);
         $this->assertSame('/operations/checklists/40', $card['current_movement_href']);
     }
@@ -347,8 +347,33 @@ final class MovementBoardIntelligenceServiceTest extends CIUnitTestCase
 
         $card = $service->enrich([['fleet_vehicle_id' => 9, 'status' => 'available']], new DateTimeImmutable('2026-09-03 12:00:00'))[0];
 
-        $this->assertSame('Set positioning plan', $card['action']['label']);
-        $this->assertSame('/fleet/vehicles/9/positioning-plan', $card['action']['href']);
+        $this->assertNull($card['action']);
+    }
+
+    public function testOverduePickupSupersedesPriorRecoveryWithoutInventingCustody(): void
+    {
+        $service = $this->service(
+            ['id' => 90, 'turo_trip_normalized_id' => 899, 'event_code' => 'vehicle_recovered', 'occurred_at' => '2026-09-18 18:00:00'],
+            ['id' => 900, 'guest_name' => 'Current Guest', 'starts_at' => '2026-09-19 08:00:00', 'ends_at' => '2026-09-22 17:00:00'],
+            null,
+            ['energy_kind' => 'electric', 'ready_energy_target_percent' => 80, 'capabilities' => []],
+            ['id' => 901, 'guest_name' => 'Later Guest', 'starts_at' => '2026-09-24 08:00:00', 'pickup_location_class' => 'home'],
+        );
+
+        $card = $service->enrich([[
+            'fleet_vehicle_id' => 9,
+            'status' => 'available',
+            'flags' => ['departing_today', 'currently_rented'],
+            'pickup' => ['id' => 900, 'starts_at' => '2026-09-19 08:00:00'],
+            'checklists' => [['turo_trip_normalized_id' => 900, 'movement_type' => 'pickup', 'href' => '/operations/checklists/40']],
+        ]], new DateTimeImmutable('2026-09-19 09:00:00'))[0];
+
+        $this->assertSame('pickup_confirmation_overdue', $card['state']['code']);
+        $this->assertSame('Pickup awaiting confirmation', $card['state']['label']);
+        $this->assertSame('Current Guest', $card['current_trip']['guest_name']);
+        $this->assertSame('Later Guest', $card['next_trip']['guest_name']);
+        $this->assertSame('Record Guest Handoff', $card['action']['label']);
+        $this->assertNotContains('currently_rented', $card['flags']);
     }
 
     public function testOperatorPlanAgreementAndDisagreementNeverReplaceRecommendation(): void

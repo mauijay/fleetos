@@ -193,6 +193,7 @@ class FleetCommandCenterViewModelService
         $readinessByMovement = $this->readinessByMovement($todayReadiness);
         $events = [];
         $pickupIndexes = [];
+        $seenMovements = [];
 
         foreach ($items as $item) {
             if (($item['type'] ?? null) !== 'reservation') {
@@ -204,9 +205,14 @@ class FleetCommandCenterViewModelService
                 if ($event === null) {
                     continue;
                 }
-                if ($movementType === 'pickup') {
-                    $pickupIndexes[$this->movementIdentity($event)] = count($events);
+                $identity = $this->movementIdentity($event);
+                if (isset($seenMovements[$identity])) {
+                    continue;
                 }
+                if ($movementType === 'pickup') {
+                    $pickupIndexes[$this->scheduleCorrelationIdentity($event)][] = count($events);
+                }
+                $seenMovements[$identity] = true;
                 $events[] = $event;
             }
         }
@@ -221,14 +227,20 @@ class FleetCommandCenterViewModelService
                 continue;
             }
 
-            $matchingPickup = $pickupIndexes[$this->movementIdentity($event)] ?? null;
-            if ($matchingPickup !== null) {
+            $matches = $pickupIndexes[$this->scheduleCorrelationIdentity($event)] ?? [];
+            if (count($matches) === 1) {
+                $matchingPickup = $matches[0];
                 if ($events[$matchingPickup]['location_label'] === null && $event['location_label'] !== null) {
                     $events[$matchingPickup]['location_label'] = $event['location_label'];
                 }
                 continue;
             }
 
+            $identity = $this->movementIdentity($event);
+            if (isset($seenMovements[$identity])) {
+                continue;
+            }
+            $seenMovements[$identity] = true;
             $events[] = $event;
         }
 
@@ -315,6 +327,8 @@ class FleetCommandCenterViewModelService
         }
 
         return [
+            'source_type' => (string) ($item['type'] ?? 'unknown'),
+            'source_id' => (int) ($source['id'] ?? 0),
             'trip_id' => ($item['type'] ?? null) === 'reservation' && $tripId > 0 ? $tripId : null,
             'date' => $scheduledAt->format('Y-m-d'),
             'date_time' => $scheduledAt,
@@ -377,7 +391,17 @@ class FleetCommandCenterViewModelService
 
     private function movementIdentity(array $event): string
     {
-        return (int) $event['fleet_vehicle_id'] . ':' . (int) $event['timestamp'];
+        $tripId = (int) ($event['trip_id'] ?? 0);
+        if ($tripId > 0) {
+            return 'trip:' . $tripId . ':' . (string) ($event['movement_type'] ?? 'movement');
+        }
+
+        return (string) ($event['source_type'] ?? 'source') . ':' . (int) ($event['source_id'] ?? 0) . ':' . (string) ($event['movement_type'] ?? 'movement');
+    }
+
+    private function scheduleCorrelationIdentity(array $event): string
+    {
+        return (int) ($event['fleet_vehicle_id'] ?? 0) . ':' . (int) ($event['timestamp'] ?? 0) . ':' . (string) ($event['movement_type'] ?? 'movement');
     }
 
     private function timelineDateLabel(DateTimeImmutable $date, DateTimeImmutable $today): string

@@ -60,10 +60,12 @@ class MovementBoardIntelligenceService
     {
         $vehicleId = (int) ($card['fleet_vehicle_id'] ?? 0);
         $event = $this->repo()->latestActiveMovementEvent($vehicleId, $asOf->format('Y-m-d H:i:s'));
-        $lifecycleEvent = $this->repo()->latestActiveLifecycleEvent($vehicleId, $asOf->format('Y-m-d H:i:s'));
+        $latestLifecycleEvent = $this->repo()->latestActiveLifecycleEvent($vehicleId, $asOf->format('Y-m-d H:i:s'));
+        $commitment = $this->activeOperationalCommitment($latestLifecycleEvent, $card, $asOf);
+        $lifecycleEvent = $commitment['event'];
         $awaitingRecovery = ($lifecycleEvent['event_code'] ?? null) === 'guest_return_staged';
-        $tripId = $this->relevantTripId($lifecycleEvent, $card);
-        $schedule = $tripId === null ? null : $this->repo()->tripSchedule($tripId);
+        $tripId = $commitment['trip_id'];
+        $schedule = $commitment['schedule'];
         $assessment = $this->repo()->assessmentForEventOrTrip(isset($lifecycleEvent['id']) ? (int) $lifecycleEvent['id'] : null, $tripId);
         if ($awaitingRecovery) {
             $assessment = null;
@@ -88,7 +90,7 @@ class MovementBoardIntelligenceService
         $profile = $this->repo()->profile($vehicleId) ?? ['energy_kind' => 'unknown', 'ready_energy_target_percent' => null, 'capabilities' => []];
         $nextTrip = $this->nextTrips()->forVehicle($vehicleId, $asOf);
         $freshness = $this->freshness()->assess($nextTrip['import_completed_at'] ?? $schedule['import_completed_at'] ?? null, $asOf);
-        $location = $this->positionBasis($lifecycleEvent, $schedule, $card['current_position'] ?? null);
+        $location = $this->positionBasis($lifecycleEvent ?? $event, $schedule, $card['current_position'] ?? null);
         $blockers = $this->blockers($card);
         if ($location['basis'] === 'actual' && $location['approved_turo_garage'] === false) {
             $blockers[] = ['code' => 'wrong_airport_garage', 'label' => 'Wrong airport garage - recovery / relocation required', 'severity' => 'critical'];
@@ -138,7 +140,8 @@ class MovementBoardIntelligenceService
         }
         $lifecycleCode = (string) ($lifecycleEvent['event_code'] ?? '');
         $hasCustodyFact = in_array($lifecycleCode, ['actual_handoff', 'guest_return_staged', 'actual_return', 'vehicle_recovered'], true);
-        $primaryStatus = $hasCustodyFact ? match ($state['code']) {
+        $usesResolvedState = $hasCustodyFact || in_array($state['code'], ['pickup_confirmation_overdue', 'return_confirmation_overdue'], true);
+        $primaryStatus = $usesResolvedState ? match ($state['code']) {
             'on_trip' => 'currently_rented',
             'return_confirmation_overdue' => 'late_return',
             'ready' => 'available',
@@ -147,6 +150,8 @@ class MovementBoardIntelligenceService
         $flags = $card['flags'] ?? [];
         if ($lifecycleCode === 'actual_handoff') {
             $flags = array_values(array_unique([...$flags, 'currently_rented']));
+        } elseif ($state['code'] === 'pickup_confirmation_overdue') {
+            $flags = array_values(array_diff($flags, ['currently_rented']));
         } elseif ($awaitingRecovery) {
             $flags = array_values(array_diff($flags, ['currently_rented', 'cleaning_required', 'charging_required', 'energy_check_required', 'late_return', 'returning_today']));
         } elseif (in_array($lifecycleCode, ['actual_return', 'vehicle_recovered'], true)) {
@@ -165,8 +170,8 @@ class MovementBoardIntelligenceService
         return array_merge($card, [
             'recovery_exceptions' => $recoveryExceptions,
             'primary_status' => $primaryStatus,
-            'primary_status_label' => $hasCustodyFact ? $state['label'] : ($card['primary_status_label'] ?? null),
-            'status_tone' => $hasCustodyFact ? $state['tone'] : ($card['status_tone'] ?? null),
+            'primary_status_label' => $usesResolvedState ? $state['label'] : ($card['primary_status_label'] ?? null),
+            'status_tone' => $usesResolvedState ? $state['tone'] : ($card['status_tone'] ?? null),
             'state' => $state,
             'primary_line' => $state['primary_line'],
             'location' => $location,
@@ -206,17 +211,53 @@ class MovementBoardIntelligenceService
         ]);
     }
 
-    private function relevantTripId(?array $event, array $card): ?int
+    /** @return array{event:?array,trip_id:?int,schedule:?array} */
+    private function activeOperationalCommitment(?array $event, array $card, \DateTimeImmutable $asOf): array
     {
-        if (isset($event['turo_trip_normalized_id'])) {
-            return (int) $event['turo_trip_normalized_id'];
+        if (in_array($event['event_code'] ?? null, ['actual_handoff', 'guest_return_staged', 'vehicle_staged'], true)
+            && isset($event['turo_trip_normalized_id'])) {
+            $tripId = (int) $event['turo_trip_normalized_id'];
+
+            return ['event' => $event, 'trip_id' => $tripId, 'schedule' => $this->repo()->tripSchedule($tripId)];
         }
-        foreach ([$card['return']['id'] ?? null, $card['pickup']['id'] ?? null] as $tripId) {
-            if ($tripId !== null && (int) $tripId > 0) {
-                return (int) $tripId;
+
+        $pickup = $card['pickup'] ?? null;
+        $pickupId = (int) ($pickup['id'] ?? $pickup['turo_trip_normalized_id'] ?? 0);
+        $pickupSchedule = $pickupId > 0 ? ($this->repo()->tripSchedule($pickupId) ?? $pickup) : null;
+        $pickupAt = trim((string) ($pickupSchedule['starts_at'] ?? ''));
+        if ($pickupId > 0 && $pickupAt !== '' && new \DateTimeImmutable($pickupAt) <= $asOf
+            && $this->repo()->activeMovementConflict($pickupId, ['actual_handoff', 'actual_return', 'vehicle_recovered']) === null) {
+            return ['event' => null, 'trip_id' => $pickupId, 'schedule' => $pickupSchedule];
+        }
+
+        $return = $card['return'] ?? null;
+        $returnId = (int) ($return['id'] ?? $return['turo_trip_normalized_id'] ?? 0);
+        $returnSchedule = $returnId > 0 ? ($this->repo()->tripSchedule($returnId) ?? $return) : null;
+        $returnAt = trim((string) ($returnSchedule['ends_at'] ?? ''));
+        if ($returnId > 0 && $returnAt !== '' && new \DateTimeImmutable($returnAt) <= $asOf
+            && $this->repo()->activeMovementConflict($returnId, ['actual_return', 'vehicle_recovered']) === null) {
+            return ['event' => null, 'trip_id' => $returnId, 'schedule' => $returnSchedule];
+        }
+
+        if (in_array($event['event_code'] ?? null, ['actual_return', 'vehicle_recovered'], true)
+            && isset($event['turo_trip_normalized_id'])) {
+            $tripId = (int) $event['turo_trip_normalized_id'];
+
+            return ['event' => $event, 'trip_id' => $tripId, 'schedule' => $this->repo()->tripSchedule($tripId)];
+        }
+
+        if ($event !== null) {
+            return ['event' => $event, 'trip_id' => null, 'schedule' => null];
+        }
+
+        foreach ([$return, $pickup] as $movement) {
+            $movementId = (int) ($movement['id'] ?? $movement['turo_trip_normalized_id'] ?? 0);
+            if ($movementId > 0) {
+                return ['event' => null, 'trip_id' => $movementId, 'schedule' => $this->repo()->tripSchedule($movementId) ?? $movement];
             }
         }
-        return null;
+
+        return ['event' => null, 'trip_id' => null, 'schedule' => null];
     }
 
     /** @return array{heading:string,class:string,detail:?string,basis:string,airport_garage_code:?string,garage_line:?string,position_line:?string,location_label:?string,approved_turo_garage:?bool} */
@@ -346,7 +387,8 @@ class MovementBoardIntelligenceService
         } elseif ($blockingRemaining === 0) {
             $summary = (($card['turnaround'] ?? null) !== null ? 'Ready for next pickup' : 'Ready');
         } else {
-            $summary = $blockingRemaining . ' blocking' . ($additional > 0 ? ' · ' . $additional . ' additional' : '');
+            $summary = $blockingRemaining . ' action' . ($blockingRemaining === 1 ? '' : 's') . ' across today\'s movements'
+                . ($additional > 0 ? ' · ' . $additional . ' additional' : '');
         }
 
         return [
@@ -504,25 +546,30 @@ class MovementBoardIntelligenceService
         ]);
     }
 
-    /** @return array{code:string,label:string,href:string} */
-    private function presentAction(array $state, array $card, int $vehicleId, ?array $schedule): array
+    /** @return array{code:string,label:string,href:string}|null */
+    private function presentAction(array $state, array $card, int $vehicleId, ?array $schedule): ?array
     {
         $code = (string) ($state['primary_action']['code'] ?? 'none');
         $checklistHref = $this->movementHref($state, $card, $schedule);
         $checklistHref ??= $card['checklist_href'] ?? null;
         $checklistLabels = [
             'recover_vehicle' => 'Recover Vehicle',
-            'confirm_handoff' => in_array($state['code'] ?? null, ['staged_for_pickup', 'staged_pickup_confirmation_needed'], true) ? 'Confirm Guest Pickup' : 'Record handoff',
-            'monitor_pickup' => 'Record handoff',
+            'confirm_handoff' => in_array($state['code'] ?? null, ['staged_for_pickup', 'staged_pickup_confirmation_needed'], true) ? 'Confirm Guest Pickup' : 'Record Guest Handoff',
+            'monitor_pickup' => 'Continue Pickup',
             'confirm_return' => 'Record return',
             'monitor_return' => 'Record return',
             'complete_return_assessment' => 'Review return assessment',
-            'complete_turnaround' => 'Review turnaround',
-            'clear_blockers' => 'Review blockers',
+            'complete_turnaround' => 'Continue Turnaround',
+            'clear_blockers' => 'Continue Pickup',
         ];
         if ($checklistHref !== null && isset($checklistLabels[$code])) {
-            $action = in_array($state['code'] ?? null, ['staged_for_pickup', 'staged_pickup_confirmation_needed'], true) ? 'confirm-pickup' : 'handoff';
-            $href = in_array($code, ['confirm_handoff', 'monitor_pickup'], true) ? (string) $checklistHref . '?action=' . $action : (string) $checklistHref;
+            $action = in_array($state['code'] ?? null, ['staged_for_pickup', 'staged_pickup_confirmation_needed'], true) ? 'confirm-pickup' : 'record-handoff';
+            $href = $code === 'confirm_handoff'
+                ? (string) $checklistHref . '?action=' . $action
+                : (string) $checklistHref;
+            if ($code === 'confirm_handoff' && $action === 'record-handoff') {
+                $href .= '#pickup-fact-heading';
+            }
             if ($code === 'recover_vehicle') {
                 $href .= '#recover-vehicle-entry';
             }
@@ -530,7 +577,11 @@ class MovementBoardIntelligenceService
             return ['code' => $code, 'label' => $checklistLabels[$code], 'href' => $href];
         }
 
-        $isPositioningAction = in_array($code, ['none', 'review_vehicle_status'], true);
+        if ($code === 'none') {
+            return null;
+        }
+
+        $isPositioningAction = $code === 'review_vehicle_status';
         return [
             'code' => $code,
             'label' => $isPositioningAction ? 'Set positioning plan' : 'View vehicle',
@@ -541,7 +592,7 @@ class MovementBoardIntelligenceService
     private function movementHref(array $state, array $card, ?array $schedule): ?string
     {
         $code = (string) ($state['primary_action']['code'] ?? 'none');
-        $movementType = in_array($code, ['confirm_handoff', 'monitor_pickup'], true) ? 'pickup'
+        $movementType = in_array($code, ['confirm_handoff', 'monitor_pickup', 'clear_blockers'], true) ? 'pickup'
             : (in_array($code, ['confirm_return', 'monitor_return', 'recover_vehicle', 'complete_return_assessment', 'complete_turnaround'], true) ? 'return' : null);
         $tripId = (int) ($schedule['id'] ?? 0);
         foreach ($card['checklists'] ?? [] as $checklist) {
