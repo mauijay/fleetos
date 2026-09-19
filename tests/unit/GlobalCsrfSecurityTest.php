@@ -47,6 +47,7 @@ final class GlobalCsrfSecurityTest extends CIUnitTestCase
         foreach ([
             'fleet/vehicles/1',
             'operations/checklists/1/complete',
+            'operations/trips/1/actual-handoff',
             'operations/checklists/1/recover-vehicle',
             'operations/checklists/1/recover-vehicle/void',
             'fleet/vehicles/1/current-position',

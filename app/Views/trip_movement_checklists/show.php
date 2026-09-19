@@ -19,6 +19,9 @@
 /** @var array<string, array<string, mixed>|null>|null $tripContext */
 /** @var array<string, mixed> $positionFormData */
 /** @var bool $showPositionForm */
+/** @var bool $canRecordRetroactiveHandoff */
+/** @var bool $showRetroactiveHandoffForm */
+/** @var array<string, mixed> $retroactiveHandoffData */
 /** @var array<string, mixed>|null $guestReturn */
 /** @var bool $guestReturnActive */
 /** @var array<string, mixed> $guestReturnFormData */
@@ -49,6 +52,9 @@ $isEarlyHandoffWarning ??= false;
 $readiness ??= null;
 $positionFormData ??= [];
 $showPositionForm ??= false;
+$canRecordRetroactiveHandoff ??= false;
+$showRetroactiveHandoffForm ??= false;
+$retroactiveHandoffData ??= [];
 $factTarget ??= null;
 $tripFacts ??= [
     'pickup' => ($latestFacts['movement_type'] ?? $checklist['movement_type'] ?? null) === 'pickup' ? $latestFacts : null,
@@ -245,6 +251,22 @@ $tripFacts ??= [
                                     </div>
                                 <?php endif; ?>
                             </div>
+                            <?php if ($factType === 'pickup' && $fact === null && $canRecordRetroactiveHandoff): ?>
+                                <?php if (! $showRetroactiveHandoffForm): ?>
+                                    <a class="action-link" href="?action=record-handoff#pickup-fact-heading">Record pickup / handoff</a>
+                                <?php else: ?>
+                                    <form class="issue-filters" action="/operations/trips/<?= (int) $checklist['turo_trip_normalized_id'] ?>/actual-handoff" method="post">
+                                        <?= csrf_field() ?>
+                                        <label>Actual pickup time (Honolulu)<input type="datetime-local" name="occurred_at" required value="<?= esc((string) ($retroactiveHandoffData['occurred_at'] ?? ''), 'attr') ?>"></label>
+                                        <label>Handoff location (optional)<select name="location_class"><option value="">Not captured</option><?php foreach (['unknown' => 'Unknown', 'home' => 'Home', 'airport_hnl' => 'Airport HNL', 'waikiki_hotel' => 'Waikiki Hotel', 'other_delivery' => 'Other delivery'] as $locationCode => $locationLabel): ?><option value="<?= esc($locationCode, 'attr') ?>" <?= ($retroactiveHandoffData['location_class'] ?? '') === $locationCode ? 'selected' : '' ?>><?= esc($locationLabel) ?></option><?php endforeach; ?></select></label>
+                                        <label>Location detail (optional)<input name="location_detail" maxlength="500" value="<?= esc((string) ($retroactiveHandoffData['location_detail'] ?? ''), 'attr') ?>"></label>
+                                        <label>Cleanliness (optional)<select name="cleanliness"><option value="">Not captured</option><option value="clean" <?= ($retroactiveHandoffData['cleanliness'] ?? '') === 'clean' ? 'selected' : '' ?>>Clean</option><option value="dirty" <?= ($retroactiveHandoffData['cleanliness'] ?? '') === 'dirty' ? 'selected' : '' ?>>Dirty</option></select></label>
+                                        <label>Charge/Fuel percent (optional)<input name="energy_percent" type="number" min="0" max="100" value="<?= esc((string) ($retroactiveHandoffData['energy_percent'] ?? ''), 'attr') ?>"></label>
+                                        <label>Note (optional)<textarea name="note" rows="2" maxlength="2000"><?= esc((string) ($retroactiveHandoffData['note'] ?? '')) ?></textarea></label>
+                                        <div class="form-actions"><button class="primary-action" type="submit">Record Guest Handoff</button><a class="action-link" href="/operations/checklists/<?= (int) $checklist['id'] ?>#pickup-fact-heading">Cancel</a></div>
+                                    </form>
+                                <?php endif; ?>
+                            <?php endif; ?>
                             <?php if ($fact !== null): ?>
                                 <p class="trip-fact__time"><?= esc((string) $fact['occurred_at_label']) ?></p>
                                 <dl class="movement-fact-summary">

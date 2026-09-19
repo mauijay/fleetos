@@ -340,6 +340,50 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
         $this->assertStringNotContainsString('name="confirm_early_handoff"', $html);
     }
 
+    public function testMissingPickupFactOffersTripScopedRetroactiveHandoffWithoutPickupChecklist(): void
+    {
+        $html = $this->render('return', $this->facts(), false, [], [
+            'tripFacts' => ['pickup' => null, 'return' => null],
+            'canRecordRetroactiveHandoff' => true,
+        ]);
+
+        $this->assertStringContainsString('<h3 id="pickup-fact-heading">Not recorded</h3>', $html);
+        $this->assertStringContainsString('Record pickup / handoff', $html);
+        $this->assertStringContainsString('?action=record-handoff#pickup-fact-heading', $html);
+        $this->assertStringNotContainsString('/operations/trips/100/actual-handoff', $html);
+    }
+
+    public function testRetroactiveHandoffFormUsesTripScopedPostAndOptionalTruthfulFields(): void
+    {
+        $html = $this->render('return', $this->facts(), false, [], [
+            'tripFacts' => ['pickup' => null, 'return' => null],
+            'canRecordRetroactiveHandoff' => true,
+            'showRetroactiveHandoffForm' => true,
+            'retroactiveHandoffData' => ['occurred_at' => '2026-09-18T17:00'],
+        ]);
+
+        $this->assertStringContainsString('action="/operations/trips/100/actual-handoff" method="post"', $html);
+        $this->assertStringContainsString('Actual pickup time (Honolulu)', $html);
+        $this->assertStringContainsString('name="occurred_at" required value="2026-09-18T17&#x3A;00"', $html);
+        $this->assertStringContainsString('Handoff location (optional)', $html);
+        $this->assertStringContainsString('Cleanliness (optional)', $html);
+        $this->assertStringContainsString('Charge/Fuel percent (optional)', $html);
+        $this->assertStringContainsString('Record Guest Handoff', $html);
+        $this->assertStringNotContainsString('name="company_id"', $html);
+    }
+
+    public function testRecordedPickupFactNeverOffersRetroactiveHandoffAction(): void
+    {
+        $pickup = $this->facts();
+        $html = $this->render('return', $pickup, false, [], [
+            'tripFacts' => ['pickup' => $pickup, 'return' => null],
+            'canRecordRetroactiveHandoff' => true,
+        ]);
+
+        $this->assertStringNotContainsString('Record pickup / handoff', $html);
+        $this->assertStringNotContainsString('/operations/trips/100/actual-handoff', $html);
+    }
+
     public function testEarlyWarningRetainsSubmittedTimeSelectedTripAndRequiresConfirmation(): void
     {
         $trip = ['id' => 100, 'turo_trip_id' => 900100, 'guest_name' => 'Selected Guest', 'starts_at' => '2026-10-06 21:30:00', 'ends_at' => '2026-10-12 06:00:00', 'pickup_location_class' => 'home', 'return_location_class' => 'home', 'trip_status_code' => 'booked'];

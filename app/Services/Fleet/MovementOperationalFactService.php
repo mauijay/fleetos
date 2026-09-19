@@ -8,6 +8,8 @@ use App\Repositories\VehicleRecoveryExceptionRepository;
 use CodeIgniter\Database\BaseConnection;
 use Config\Database;
 use Config\MovementIntelligence;
+use DateTimeImmutable;
+use DateTimeZone;
 use RuntimeException;
 
 class MovementOperationalFactService
@@ -43,6 +45,89 @@ class MovementOperationalFactService
         }
 
         return $this->recordObservation($checklist, $data, $actorUserId, $eventCode);
+    }
+
+    public function recordRetroactiveHandoff(int $companyId, int $tripId, array $data, int $actorUserId): int
+    {
+        $trip = $this->repo()->trip($tripId);
+        $schedule = $this->repo()->tripSchedule($tripId);
+        if ($companyId < 1 || $tripId < 1 || $actorUserId < 1 || $trip === null || $schedule === null
+            || (int) ($trip['company_id'] ?? 0) !== $companyId
+            || (int) ($schedule['fleet_vehicle_id'] ?? 0) !== (int) ($trip['fleet_vehicle_id'] ?? 0)) {
+            throw new \InvalidArgumentException('Trip not found in the active fleet company.');
+        }
+        if (! in_array($schedule['trip_status_code'] ?? null, ['booked', 'in_progress'], true)) {
+            throw new \InvalidArgumentException('A missing handoff can only be recorded for an active trip.');
+        }
+
+        $vehicleId = (int) $trip['fleet_vehicle_id'];
+        $occurredAt = $this->retroactiveHandoffTime($data, $schedule);
+        $locationClass = trim((string) ($data['location_class'] ?? ''));
+        if (! in_array($locationClass, ['', 'unknown', 'home', 'airport_hnl', 'waikiki_hotel', 'other_delivery'], true)) {
+            throw new \InvalidArgumentException('Choose a valid handoff location.');
+        }
+        $locationDetail = trim((string) ($data['location_detail'] ?? ''));
+        if (mb_strlen($locationDetail) > 500) {
+            throw new \InvalidArgumentException('Location detail must be 500 characters or fewer.');
+        }
+        if ($locationClass === '' && $locationDetail !== '') {
+            throw new \InvalidArgumentException('Choose a handoff location before adding location detail.');
+        }
+
+        $cleanliness = trim((string) ($data['cleanliness'] ?? ''));
+        if (! in_array($cleanliness, ['', 'clean', 'dirty'], true)) {
+            throw new \InvalidArgumentException('Choose a valid cleanliness observation.');
+        }
+        $energyValue = trim((string) ($data['energy_percent'] ?? ''));
+        $energy = $energyValue === '' ? null : filter_var($energyValue, FILTER_VALIDATE_INT);
+        if ($energy === false || ($energy !== null && ($energy < 0 || $energy > 100))) {
+            throw new \InvalidArgumentException('Charge/Fuel percent must be between 0 and 100.');
+        }
+        $note = trim((string) ($data['note'] ?? ''));
+        if (mb_strlen($note) > 2000) {
+            throw new \InvalidArgumentException('Note must be 2000 characters or fewer.');
+        }
+
+        $this->db->transBegin();
+        try {
+            $this->rejectRetroactiveHandoffConflict($tripId, $vehicleId, $occurredAt);
+            $eventId = $this->events->record(
+                $vehicleId,
+                $tripId,
+                'actual_handoff',
+                'pickup',
+                $occurredAt,
+                $locationClass === '' ? null : $locationClass,
+                $locationDetail === '' ? null : $locationDetail,
+                'retroactive_trip_operator',
+                $actorUserId,
+                $note === '' ? null : $note,
+            );
+            if ($cleanliness !== '' || $energy !== null) {
+                $this->assessments->record(
+                    $vehicleId,
+                    $tripId,
+                    $eventId,
+                    'pickup',
+                    $cleanliness === '' ? null : $cleanliness,
+                    $energy,
+                    $occurredAt,
+                    'retroactive_trip_operator',
+                    $actorUserId,
+                    $note === '' ? null : $note,
+                );
+            }
+            $this->plans()->invalidateForWrite($vehicleId, 'new_actual_movement_event', $actorUserId);
+            if ($this->db->transStatus() === false) {
+                throw new RuntimeException('Guest handoff transaction failed.');
+            }
+            $this->db->transCommit();
+
+            return $eventId;
+        } catch (\Throwable $exception) {
+            $this->db->transRollback();
+            throw $exception;
+        }
     }
 
     public function stageGuestReturn(array $checklist, array $data, int $actorUserId): int
@@ -599,6 +684,55 @@ class MovementOperationalFactService
         }
     }
 
+    /** @param array<string, mixed> $schedule */
+    private function retroactiveHandoffTime(array $data, array $schedule): string
+    {
+        $value = trim((string) ($data['occurred_at'] ?? ''));
+        if ($value === '') {
+            throw new \InvalidArgumentException('Actual pickup time is required.');
+        }
+
+        $timezone = new DateTimeZone('Pacific/Honolulu');
+        $timestamp = DateTimeImmutable::createFromFormat('!Y-m-d\TH:i', $value, $timezone);
+        $errors = DateTimeImmutable::getLastErrors();
+        if ($timestamp === false || ($errors !== false && ($errors['warning_count'] > 0 || $errors['error_count'] > 0))) {
+            throw new \InvalidArgumentException('Choose a valid Honolulu pickup date and time.');
+        }
+        if ($timestamp > new DateTimeImmutable('now', $timezone)) {
+            throw new \InvalidArgumentException('Actual pickup time cannot be in the future.');
+        }
+
+        $startsAt = trim((string) ($schedule['starts_at'] ?? ''));
+        $endsAt = trim((string) ($schedule['ends_at'] ?? ''));
+        if ($startsAt !== '' && $timestamp < (new DateTimeImmutable($startsAt, $timezone))->modify('-' . $this->movementConfig->repairCandidateWindowHours . ' hours')) {
+            throw new \InvalidArgumentException('Actual pickup time is too early for the selected trip.');
+        }
+        if ($endsAt !== '' && $timestamp > new DateTimeImmutable($endsAt, $timezone)) {
+            throw new \InvalidArgumentException('Actual pickup time cannot be after this trip\'s scheduled return.');
+        }
+
+        return $timestamp->format('Y-m-d H:i:s');
+    }
+
+    private function rejectRetroactiveHandoffConflict(int $tripId, int $vehicleId, string $occurredAt): void
+    {
+        if ($this->events->activeForTrip($tripId, ['actual_handoff']) !== null) {
+            throw new \InvalidArgumentException('Guest pickup is already recorded for this trip. Use the existing correction workflow instead.');
+        }
+        if ($this->events->activeForTrip($tripId, ['actual_return', 'vehicle_recovered', 'guest_return_staged']) !== null) {
+            throw new \InvalidArgumentException('A later return or recovery fact already exists. Review the trip facts instead of inserting a handoff.');
+        }
+        if ($this->events->activeForTrip($tripId, ['vehicle_staged']) !== null) {
+            throw new \InvalidArgumentException('This pickup is staged. Use the existing Confirm Guest Pickup action.');
+        }
+
+        $lifecycle = $this->repo()->latestActiveLifecycleEvent($vehicleId);
+        if ($lifecycle !== null && (string) ($lifecycle['occurred_at'] ?? '') > $occurredAt
+            && (int) ($lifecycle['turo_trip_normalized_id'] ?? 0) !== $tripId) {
+            throw new \InvalidArgumentException('A later authoritative vehicle lifecycle fact belongs to another trip. Review the trip assignment before recording handoff.');
+        }
+    }
+
     private function recordObservation(array $checklist, array $data, int $actorUserId, string $eventCode): bool
     {
         $movementType = (string) $checklist['movement_type'];
@@ -675,11 +809,14 @@ class MovementOperationalFactService
         $assessmentId = (int) ($data['assessment_id'] ?? 0);
         $reason = trim((string) ($data['correction_reason'] ?? ''));
         $event = $this->events->find($eventId);
-        $assessment = $this->assessments->find($assessmentId);
-        if ($event === null || $assessment === null
+        $assessment = $assessmentId > 0 ? $this->assessments->find($assessmentId) : null;
+        $linkedAssessment = $this->repo()->assessmentForEventOrTrip($eventId, null);
+        if ($event === null
             || (int) $event['turo_trip_normalized_id'] !== (int) $checklist['turo_trip_normalized_id']
-            || (int) $assessment['turo_trip_normalized_id'] !== (int) $checklist['turo_trip_normalized_id']
-            || (int) $assessment['trip_movement_event_id'] !== $eventId) {
+            || ($assessmentId > 0 && ($assessment === null
+                || (int) $assessment['turo_trip_normalized_id'] !== (int) $checklist['turo_trip_normalized_id']
+                || (int) $assessment['trip_movement_event_id'] !== $eventId))
+            || ($assessmentId <= 0 && $linkedAssessment !== null)) {
             throw new \InvalidArgumentException('The recorded facts do not belong to this movement.');
         }
 
@@ -694,13 +831,28 @@ class MovementOperationalFactService
                 'airport_parking_row' => $this->presentValue($data, 'airport_parking_row', $event['airport_parking_row'] ?? null),
                 'note' => $this->presentValue($data, 'note', $event['note']),
             ], $actorUserId, $reason, false);
-            $this->assessments->correct($assessmentId, [
-                'trip_movement_event_id' => $replacementEventId,
-                'captured_at' => $this->presentValue($data, 'occurred_at', $assessment['captured_at']),
-                'cleanliness' => $this->presentValue($data, 'cleanliness', $assessment['cleanliness']),
-                'energy_percent' => $this->presentValue($data, 'energy_percent', $assessment['energy_percent']),
-                'note' => $this->presentValue($data, 'note', $assessment['note']),
-            ], $actorUserId, $reason, false);
+            if ($assessment !== null) {
+                $this->assessments->correct($assessmentId, [
+                    'trip_movement_event_id' => $replacementEventId,
+                    'captured_at' => $this->presentValue($data, 'occurred_at', $assessment['captured_at']),
+                    'cleanliness' => $this->presentValue($data, 'cleanliness', $assessment['cleanliness']),
+                    'energy_percent' => $this->presentValue($data, 'energy_percent', $assessment['energy_percent']),
+                    'note' => $this->presentValue($data, 'note', $assessment['note']),
+                ], $actorUserId, $reason, false);
+            } elseif (trim((string) ($data['cleanliness'] ?? '')) !== '' || trim((string) ($data['energy_percent'] ?? '')) !== '') {
+                $this->assessments->record(
+                    (int) $event['fleet_vehicle_id'],
+                    (int) $event['turo_trip_normalized_id'],
+                    $replacementEventId,
+                    (string) $event['movement_type'],
+                    trim((string) ($data['cleanliness'] ?? '')) ?: null,
+                    $data['energy_percent'] ?? null,
+                    (string) $this->presentValue($data, 'occurred_at', $event['occurred_at']),
+                    'operator_correction',
+                    $actorUserId,
+                    $this->presentValue($data, 'note', $event['note']),
+                );
+            }
             $this->plans()->invalidateForWrite((int) $checklist['fleet_vehicle_id'], 'corrected_actual_movement_event', $actorUserId);
             if ($this->db->transStatus() === false) {
                 throw new RuntimeException('Operational fact correction transaction failed.');

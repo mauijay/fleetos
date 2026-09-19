@@ -66,6 +66,14 @@ class TripMovementChecklists extends BaseController
         $factFormData = $correctingFacts && is_array($flashedFormData)
             ? $factsPresenter->mergeCorrectionFormData($selectedFacts['form_data'], $flashedFormData)
             : ($correctingFacts ? $selectedFacts['form_data'] : (is_array($flashedFormData) ? $flashedFormData : []));
+        $retroactiveHandoffData = CoreServices::session()->getFlashdata('retroactive_handoff_data');
+        $tripSchedule = ($checklist['exists'] ?? false)
+            ? Services::operationalFactsRepository()->tripSchedule((int) $checklist['turo_trip_normalized_id'])
+            : null;
+        $canRecordRetroactiveHandoff = ($checklist['exists'] ?? false)
+            && $tripFacts['pickup'] === null
+            && $tripFacts['return'] === null
+            && in_array($tripSchedule['trip_status_code'] ?? null, ['booked', 'in_progress'], true);
         return view('trip_movement_checklists/show', [
             'assets' => Services::assetManifestService()->appAssets(),
             'navigation' => $this->navigation(),
@@ -94,6 +102,10 @@ class TripMovementChecklists extends BaseController
             'repairCandidates' => $repairingFacts ? Services::movementOperationalFactService()->wrongTripCandidates($checklist, (int) $selectedFacts['event_id']) : [],
             'repairConflicts' => $repairingFacts ? Services::movementOperationalFactService()->wrongTripConflicts($checklist, (int) $selectedFacts['event_id']) : [],
             'factFormData' => $factFormData,
+            'canRecordRetroactiveHandoff' => $canRecordRetroactiveHandoff,
+            'showRetroactiveHandoffForm' => $canRecordRetroactiveHandoff
+                && ($this->request->getGet('action') === 'record-handoff' || is_array($retroactiveHandoffData)),
+            'retroactiveHandoffData' => is_array($retroactiveHandoffData) ? $retroactiveHandoffData : [],
             'isEarlyHandoffWarning' => $isEarlyHandoffWarning,
             'positionFormData' => is_array($positionFormData) ? $positionFormData : [],
             'showPositionForm' => $this->request->getGet('action') === 'position',
@@ -204,6 +216,24 @@ class TripMovementChecklists extends BaseController
                 ->with('movement_early_handoff_warning', '1');
         } catch (\InvalidArgumentException $exception) {
             return $this->back($id, false, '', $exception->getMessage(), 'handoff-entry')->with('movement_fact_data', $data);
+        }
+    }
+
+    public function recordRetroactiveHandoff(int $tripId): RedirectResponse
+    {
+        $companyId = $this->activeCompanyId();
+        $data = $this->request->getPost();
+        $redirect = $this->tripMovementHrefForCompany($companyId, $tripId);
+
+        try {
+            Services::movementOperationalFactService()->recordRetroactiveHandoff($companyId, $tripId, $data, $this->actorUserId());
+
+            return CoreServices::redirectresponse()->to($redirect . '#pickup-fact-heading')
+                ->with('movement_checklist_notice', 'Guest handoff recorded.');
+        } catch (\InvalidArgumentException | \RuntimeException $exception) {
+            return CoreServices::redirectresponse()->to($redirect . '?action=record-handoff#pickup-fact-heading')
+                ->with('movement_checklist_error', $exception->getMessage())
+                ->with('retroactive_handoff_data', $data);
         }
     }
 
@@ -485,6 +515,18 @@ class TripMovementChecklists extends BaseController
     private function factTarget(string $target): ?string
     {
         return in_array($target, ['pickup', 'return'], true) ? $target : null;
+    }
+
+    private function tripMovementHrefForCompany(int $companyId, int $tripId): string
+    {
+        $trip = Services::operationalFactsRepository()->trip($tripId);
+        if ($trip === null || (int) ($trip['company_id'] ?? 0) !== $companyId) {
+            return '/';
+        }
+
+        return Services::operationalFactsRepository()->movementChecklistHref($tripId, 'return')
+            ?? Services::operationalFactsRepository()->movementChecklistHref($tripId)
+            ?? '/';
     }
 
     /** @return array<string, mixed> */

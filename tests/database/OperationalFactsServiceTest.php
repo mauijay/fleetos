@@ -1436,6 +1436,146 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
         $this->assertNull($scoped['return']);
     }
 
+    public function testRetroactiveHandoffCreatesEventOnlyTruthAndSupersedesPriorPosition(): void
+    {
+        $this->prepareActiveTrip(100, 10);
+        $this->events->record(10, null, 'vehicle_positioned', null, '2026-09-17 12:00:00', 'home', 'Garage', 'checklist_operator', 7);
+        $service = new MovementOperationalFactService($this->connection, $this->events, $this->assessments);
+
+        $eventId = $service->recordRetroactiveHandoff(1, 100, [
+            'occurred_at' => '2026-09-18T17:00',
+            'note' => 'Historical pickup confirmed by operator.',
+        ], 7);
+
+        $event = $this->repository->event($eventId);
+        $this->assertSame('actual_handoff', $event['event_code']);
+        $this->assertSame('pickup', $event['movement_type']);
+        $this->assertSame('2026-09-18 17:00:00', $event['occurred_at']);
+        $this->assertGreaterThan($event['occurred_at'], $event['created_at']);
+        $this->assertNull($event['location_class']);
+        $this->assertSame('retroactive_trip_operator', $event['source']);
+        $this->assertSame(7, (int) $event['actor_user_id']);
+        $this->assertSame(0, $this->connection->table('movement_assessments')->where('trip_movement_event_id', $eventId)->countAllResults());
+
+        $facts = (new MovementOperationalFactPresentationService($this->repository))->tripFacts(100)['pickup'];
+        $this->assertSame('Guest handoff recorded', $facts['event_title']);
+        $this->assertSame('Sep 18, 2026 5:00 PM', $facts['occurred_at_label']);
+        $this->assertSame('Unknown', $facts['location_class_label']);
+        $this->assertSame('Not captured', $facts['cleanliness_label']);
+        $this->assertSame('Not captured', $facts['energy_value']);
+
+        $location = (new CurrentVehicleLocationService($this->repository))->resolve(10, new DateTimeImmutable('2026-09-18 18:00:00'));
+        $this->assertSame($eventId, (int) $location['event_id']);
+        $this->assertSame(100, (int) $location['trip_id']);
+        $this->assertSame('rented', $location['operational_state']);
+        $this->assertSame('unknown', $location['location_class']);
+    }
+
+    public function testRetroactiveHandoffCreatesLinkedAssessmentOnlyWhenReadinessWasObserved(): void
+    {
+        $this->prepareActiveTrip(100, 10);
+        $service = new MovementOperationalFactService($this->connection, $this->events, $this->assessments);
+
+        $eventId = $service->recordRetroactiveHandoff(1, 100, [
+            'occurred_at' => '2026-09-18T17:00',
+            'location_class' => 'waikiki_hotel',
+            'location_detail' => 'Front drive',
+            'cleanliness' => 'clean',
+            'energy_percent' => '82',
+        ], 7);
+
+        $assessment = $this->repository->assessmentForEventOrTrip($eventId, 100);
+        $this->assertNotNull($assessment);
+        $this->assertSame($eventId, (int) $assessment['trip_movement_event_id']);
+        $this->assertSame('clean', $assessment['cleanliness']);
+        $this->assertSame(82, (int) $assessment['energy_percent']);
+        $this->assertSame('retroactive_trip_operator', $assessment['source']);
+        $this->assertSame('waikiki_hotel', $this->repository->event($eventId)['location_class']);
+    }
+
+    public function testEventOnlyRetroactiveHandoffUsesExistingCorrectionWorkflowWithoutFabricatingAssessment(): void
+    {
+        $this->prepareActiveTrip(100, 10);
+        $service = new MovementOperationalFactService($this->connection, $this->events, $this->assessments);
+        $eventId = $service->recordRetroactiveHandoff(1, 100, ['occurred_at' => '2026-09-18T17:00'], 7);
+        $checklist = ['exists' => true, 'fleet_vehicle_id' => 10, 'turo_trip_normalized_id' => 100, 'movement_type' => 'return'];
+
+        $this->assertTrue($service->correctForChecklist($checklist, [
+            'event_id' => $eventId,
+            'assessment_id' => 0,
+            'occurred_at' => '2026-09-18T17:05',
+            'note' => 'Corrected operator-confirmed handoff time.',
+            'correction_reason' => 'Corrected the historical pickup time.',
+        ], 8));
+
+        $replacement = $this->events->activeForTrip(100, ['actual_handoff']);
+        $this->assertNotNull($replacement);
+        $this->assertNotSame($eventId, (int) $replacement['id']);
+        $this->assertSame('2026-09-18 17:05:00', $replacement['occurred_at']);
+        $this->assertSame('operator_correction', $replacement['source']);
+        $this->assertSame(0, $this->connection->table('movement_assessments')->countAllResults());
+    }
+
+    public function testRetroactiveHandoffRejectsDuplicatesReturnConflictsAndWrongCompany(): void
+    {
+        $this->prepareActiveTrip(100, 10);
+        $service = new MovementOperationalFactService($this->connection, $this->events, $this->assessments);
+        $data = ['occurred_at' => '2026-09-18T17:00'];
+        $service->recordRetroactiveHandoff(1, 100, $data, 7);
+
+        try {
+            $service->recordRetroactiveHandoff(1, 100, $data, 7);
+            $this->fail('A duplicate handoff must be rejected.');
+        } catch (InvalidArgumentException $exception) {
+            $this->assertStringContainsString('already recorded', $exception->getMessage());
+        }
+
+        $this->connection->table('turo_trips_normalized')->insertBatch([
+            ['id' => 101, 'fleet_vehicle_id' => 10, 'trip_status_lookup_value_id' => 90, 'starts_at' => '2026-09-18 10:00:00', 'ends_at' => '2026-09-19 04:00:00'],
+            ['id' => 102, 'fleet_vehicle_id' => 10, 'trip_status_lookup_value_id' => 90, 'starts_at' => '2026-09-18 10:00:00', 'ends_at' => '2026-09-19 04:00:00'],
+        ]);
+        foreach ([[101, 'actual_return'], [102, 'vehicle_recovered']] as [$tripId, $eventCode]) {
+            $this->events->record(10, $tripId, $eventCode, 'return', '2026-09-18 20:00:00', 'home', null, 'checklist_operator', 7);
+            try {
+                $service->recordRetroactiveHandoff(1, $tripId, $data, 7);
+                $this->fail($eventCode . ' must block retroactive handoff.');
+            } catch (InvalidArgumentException $exception) {
+                $this->assertStringContainsString('return or recovery fact', $exception->getMessage());
+            }
+        }
+
+        $this->prepareActiveTrip(200, 20);
+        try {
+            $service->recordRetroactiveHandoff(1, 200, $data, 7);
+            $this->fail('A cross-company handoff must be rejected.');
+        } catch (InvalidArgumentException $exception) {
+            $this->assertStringContainsString('active fleet company', $exception->getMessage());
+        }
+    }
+
+    public function testRetroactiveHandoffRejectsInvalidTimeLocationAndEnergyWithoutWriting(): void
+    {
+        $this->prepareActiveTrip(100, 10);
+        $service = new MovementOperationalFactService($this->connection, $this->events, $this->assessments);
+        $invalidPayloads = [
+            [['occurred_at' => 'not-a-date'], 'valid Honolulu pickup'],
+            [['occurred_at' => '2026-09-18T17:00', 'location_class' => 'invented_place'], 'valid handoff location'],
+            [['occurred_at' => '2026-09-18T17:00', 'energy_percent' => '101'], 'between 0 and 100'],
+        ];
+
+        foreach ($invalidPayloads as [$payload, $message]) {
+            try {
+                $service->recordRetroactiveHandoff(1, 100, $payload, 7);
+                $this->fail('Invalid handoff input must be rejected.');
+            } catch (InvalidArgumentException $exception) {
+                $this->assertStringContainsString($message, $exception->getMessage());
+            }
+        }
+
+        $this->assertSame(0, $this->connection->table('trip_movement_events')->countAllResults());
+        $this->assertSame(0, $this->connection->table('movement_assessments')->countAllResults());
+    }
+
     public function testLatestReturnFactsUseReturnLocationAndFuelOrMissingEnergy(): void
     {
         $this->connection->table('vehicle_operational_profiles')->insert(['fleet_vehicle_id' => 10, 'energy_kind' => 'gasoline', 'created_by' => 7, 'updated_by' => 7]);
@@ -1615,6 +1755,19 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
     private function table(string $table): string
     {
         return $this->connection->getPrefix() . $table;
+    }
+
+    private function prepareActiveTrip(int $tripId, int $vehicleId): void
+    {
+        if ($this->connection->table('lookup_values')->where('id', 90)->countAllResults() === 0) {
+            $this->connection->table('lookup_values')->insert(['id' => 90, 'code' => 'in_progress']);
+        }
+        $this->connection->table('turo_trips_normalized')->where('id', $tripId)->update([
+            'fleet_vehicle_id' => $vehicleId,
+            'trip_status_lookup_value_id' => 90,
+            'starts_at' => '2026-09-17 19:00:00',
+            'ends_at' => '2026-09-19 04:00:00',
+        ]);
     }
 
     /** @return array{MovementOperationalFactService, array<string, mixed>, array<string, mixed>, array<string, mixed>} */

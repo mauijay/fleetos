@@ -108,6 +108,27 @@ final class TripMovementChecklistPositionControllerTest extends CIUnitTestCase
         $this->assertSame('Pickup photos could not be completed.', CoreServices::session()->getFlashdata('movement_checklist_error'));
     }
 
+    public function testRetroactiveHandoffPostUsesServerCompanyActorAndTripScopedRedirect(): void
+    {
+        $repository = $this->getMockBuilder(OperationalFactsRepository::class)
+            ->disableOriginalConstructor()->onlyMethods(['activeFleetCompanyIds', 'trip', 'movementChecklistHref'])->getMock();
+        $repository->method('activeFleetCompanyIds')->willReturn([1]);
+        $repository->expects($this->once())->method('trip')->with(280)->willReturn(['id' => 280, 'fleet_vehicle_id' => 13, 'company_id' => 1]);
+        $repository->expects($this->once())->method('movementChecklistHref')->with(280, 'return')->willReturn('/operations/checklists/623');
+        Services::injectMock('operationalFactsRepository', $repository);
+        $submitted = ['occurred_at' => '2026-09-18T17:00', 'location_class' => '', 'cleanliness' => '', 'energy_percent' => ''];
+
+        $response = $this->controller($submitted)->recordRetroactiveHandoff(280);
+
+        $this->assertStringEndsWith('/operations/checklists/623#pickup-fact-heading', $response->getHeaderLine('Location'));
+        $this->assertSame('Guest handoff recorded.', CoreServices::session()->getFlashdata('movement_checklist_notice'));
+        $this->assertSame(1, $this->facts->retroactiveCalls);
+        $this->assertSame(1, $this->facts->companyId);
+        $this->assertSame(280, $this->facts->tripId);
+        $this->assertSame(42, $this->facts->actorUserId);
+        $this->assertSame($submitted, $this->facts->received);
+    }
+
     /** @param array<string, string> $post */
     private function controller(array $post): TripMovementChecklists
     {
@@ -123,6 +144,9 @@ final class TripMovementChecklistPositionControllerTest extends CIUnitTestCase
 final class TripMovementChecklistPositionControllerTestService extends MovementOperationalFactService
 {
     public int $calls = 0;
+    public int $retroactiveCalls = 0;
+    public int $companyId = 0;
+    public int $tripId = 0;
     /** @var array<string, mixed> */
     public array $received = [];
     public int $actorUserId = 0;
@@ -138,6 +162,20 @@ final class TripMovementChecklistPositionControllerTestService extends MovementO
         }
 
         return true;
+    }
+
+    public function recordRetroactiveHandoff(int $companyId, int $tripId, array $data, int $actorUserId): int
+    {
+        ++$this->retroactiveCalls;
+        $this->companyId = $companyId;
+        $this->tripId = $tripId;
+        $this->received = $data;
+        $this->actorUserId = $actorUserId;
+        if ($this->exception !== null) {
+            throw $this->exception;
+        }
+
+        return 99;
     }
 }
 

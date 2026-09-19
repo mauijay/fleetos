@@ -47,6 +47,7 @@ $routes->group('', ['filter' => 'session'], static function (RouteCollection $ro
     });
     $routes->get('operations/checklists/(:num)', 'TripMovementChecklists::show/$1', ['filter' => 'permission:admin.access']);
     $routes->get('operations/vehicles/(:num)/trip-history', 'TripMovementChecklists::vehicleTripHistory/$1', ['filter' => 'permission:admin.access']);
+    $routes->post('operations/trips/(:num)/actual-handoff', 'TripMovementChecklists::recordRetroactiveHandoff/$1', ['filter' => 'permission:admin.access']);
     $routes->post('operations/checklists/(:num)/facts', 'TripMovementChecklists::recordFacts/$1', ['filter' => 'permission:admin.access']);
     $routes->post('operations/checklists/(:num)/guest-return-staged', 'TripMovementChecklists::stageGuestReturn/$1', ['filter' => 'permission:admin.access']);
     $routes->post('operations/checklists/(:num)/guest-return-staged/correct', 'TripMovementChecklists::correctGuestReturn/$1', ['filter' => 'permission:admin.access']);
