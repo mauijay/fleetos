@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.14.2 — Retroactive Guest Handoff Recording
+
+Release date: 2026-09-19
+
+### Historical Pickup Facts
+
+- Add **Record pickup / handoff** to Trip Facts when Pickup is not recorded, including active trips without a pickup checklist.
+- Allow an operator to enter the known historical actual pickup time explicitly. FleetOS preserves that `occurred_at` separately from the later recording time and creates exactly one authoritative `actual_handoff` event.
+- Keep handoff location, cleanliness, charge/fuel percentage, and note optional. When readiness facts are omitted, FleetOS does not fabricate an assessment and continues to show missing facts as Unknown or Not captured.
+
+### Custody, Conflict & Security Integrity
+
+- Make guest custody authoritative after the recorded handoff so a stale prior-trip vehicle position no longer presents as the current operational state.
+- Reject duplicate handoffs and unsafe insertion when a conflicting later return or recovery fact already exists.
+- Enforce company, trip, and vehicle ownership server-side with the existing session, CSRF, and `admin.access` protections. Existing pickup-checklist handoff behavior remains unchanged.
+- Record only the operator-supplied fact; FleetOS does not reconstruct missing pickup data automatically, infer location, cleanliness, or energy, create return/recovery facts, or perform a Turo API action.
+
+### Release Boundaries
+
+- Make no migration or schema change, frontend asset change, dependency change, or financial behavior change in this release.
+
 ## v0.14.1 — Readiness Filtering & Test Stability
 
 Release date: 2026-09-18
