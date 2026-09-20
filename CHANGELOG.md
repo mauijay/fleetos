@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.15.1 — Recovery Location Prefill & Progressive Disclosure
+
+Release date: 2026-09-20
+
+### Planned Return Prefill
+
+- Prefill Recover Vehicle from the selected trip's structured planned return location. Home defaults to **Home**, Airport HNL defaults to **Airport HNL**, and Waikiki Hotel or Other use the existing supported location vocabulary.
+- Leave unknown, missing, or unsupported planned return locations at **Choose recovery location** rather than defaulting to HNL.
+- Keep the prefill operator-editable. Planned return remains a UI prefill only and never establishes physical location, records recovery, or creates an operational fact.
+
+### Progressive Recovery Details
+
+- Keep recovery details hidden until the operator selects a location. Home and other non-HNL recovery locations show only their relevant ordinary fields.
+- Keep HNL recovery structured as Level → Row → Garage → optional detail, with exactly one location-detail field presented at a time.
+- Make the mobile workflow more compact by ensuring hidden fields reserve no empty space.
+
+### Validation & Release Boundaries
+
+- Keep recovery confirmation and server-side validation authoritative. Changing the location selector does not create a movement event or infer HNL from an unknown location.
+- Make no migration, schema, dependency, or financial behavior change in this release.
+- Include frontend CSS and JavaScript changes; production Vite assets must be transferred during deployment.
+
 ## v0.15.0 — Operator Actionability & Guided Turnaround
 
 Release date: 2026-09-19
