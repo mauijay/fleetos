@@ -101,6 +101,7 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
         ];
         $html = $this->render('return', $this->facts(), false, [], [
             'guestReturn' => $report, 'guestReturnActive' => true, 'canRecover' => true,
+            'recoveryLocationPrefill' => 'airport_hnl',
         ]);
 
         $this->assertStringContainsString('id="recover-vehicle-entry"', $html);
@@ -124,6 +125,91 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
         $this->assertStringNotContainsString('Correct guest report', $completed);
         $this->assertStringNotContainsString('/guest-return-staged/void', $completed);
         $this->assertStringNotContainsString('Mark Awaiting Recovery', $completed);
+    }
+
+    public function testRecoverVehicleUsesSelectedTripHomePrefillInsteadOfCurrentPosition(): void
+    {
+        $html = $this->render('return', $this->facts(), false, [], [
+            'canRecover' => true,
+            'recoveryLocationPrefill' => 'home',
+            'currentLocation' => [
+                'location_class' => 'airport_hnl',
+                'location_detail' => 'Prior trip airport position',
+                'operational_state' => 'parked',
+                'observed_at' => '2026-09-01 08:00:00',
+            ],
+        ]);
+
+        $this->assertStringContainsString('value="home" selected', $html);
+        $this->assertStringNotContainsString('value="airport_hnl" selected', $html);
+        $this->assertMatchesRegularExpression('/<fieldset class="recovery-form-details"[^>]*data-recovery-details >/', $html);
+        $this->assertMatchesRegularExpression('/<fieldset class="hnl-parking-fields"[^>]*hidden disabled>/', $html);
+        $this->assertSame(1, substr_count($html, 'data-recovery-location-detail>Location detail (optional)'));
+        $this->assertMatchesRegularExpression('/name="location_detail"[^>]*data-standard-recovery-location-detail >/', $html);
+        $this->assertMatchesRegularExpression('/name="recovery_location_note"[^>]*data-hnl-recovery-location-detail hidden disabled>/', $html);
+        $this->assertStringNotContainsString('Recovery location detail (optional)', $html);
+        $this->assertStringContainsString('Prior trip airport position', $html);
+    }
+
+    public function testRecoverVehicleUsesHnlPrefillAndApplicableParkingControls(): void
+    {
+        $html = $this->render('return', $this->facts(), false, [], [
+            'canRecover' => true,
+            'recoveryLocationPrefill' => 'airport_hnl',
+        ]);
+
+        $this->assertStringContainsString('value="airport_hnl" selected', $html);
+        $this->assertMatchesRegularExpression('/<fieldset class="recovery-form-details"[^>]*data-recovery-details >/', $html);
+        $this->assertMatchesRegularExpression('/<fieldset class="hnl-parking-fields"[^>]*data-location-select="recovery-location-class" >/', $html);
+        $this->assertSame(1, substr_count($html, 'data-recovery-location-detail>Location detail (optional)'));
+        $this->assertMatchesRegularExpression('/name="location_detail"[^>]*data-standard-recovery-location-detail hidden disabled>/', $html);
+        $this->assertMatchesRegularExpression('/name="recovery_location_note"[^>]*data-hnl-recovery-location-detail >/', $html);
+        $this->assertStringContainsString('Verified HNL parking', $html);
+    }
+
+    public function testUnknownRecoveryLocationRendersSafeCompactChoiceOnly(): void
+    {
+        $html = $this->render('return', $this->facts(), false, [], [
+            'canRecover' => true,
+            'recoveryLocationPrefill' => null,
+        ]);
+
+        $this->assertStringContainsString('<option value="" selected>Choose recovery location</option>', $html);
+        $this->assertStringContainsString('aria-expanded="false"', $html);
+        $this->assertMatchesRegularExpression('/<fieldset class="recovery-form-details"[^>]*data-recovery-details hidden disabled>.*?Vehicle Recovered.*?<\/fieldset>/s', $html);
+        $this->assertStringNotContainsString('value="airport_hnl" selected', $html);
+        $this->assertStringContainsString('Recovery time (Honolulu)', $html);
+    }
+
+    public function testSubmittedRecoveryLocationOverridesPrefillForProgressiveDisclosure(): void
+    {
+        $homeToHnl = $this->render('return', $this->facts(), false, [], [
+            'canRecover' => true,
+            'recoveryLocationPrefill' => 'home',
+            'recoveryFormData' => ['location_class' => 'airport_hnl'],
+        ]);
+        $this->assertStringContainsString('value="airport_hnl" selected', $homeToHnl);
+        $this->assertMatchesRegularExpression('/<fieldset class="hnl-parking-fields"[^>]*data-location-select="recovery-location-class" >/', $homeToHnl);
+
+        $hnlToHome = $this->render('return', $this->facts(), false, [], [
+            'canRecover' => true,
+            'recoveryLocationPrefill' => 'airport_hnl',
+            'recoveryFormData' => ['location_class' => 'home'],
+        ]);
+        $this->assertStringContainsString('value="home" selected', $hnlToHome);
+        $this->assertMatchesRegularExpression('/<fieldset class="hnl-parking-fields"[^>]*hidden disabled>/', $hnlToHome);
+    }
+
+    public function testUnmappedRecoveryPrefillNeverFallsBackToHnl(): void
+    {
+        $html = $this->render('return', $this->facts(), false, [], [
+            'canRecover' => true,
+            'recoveryLocationPrefill' => 'unmapped_location',
+        ]);
+
+        $this->assertStringContainsString('<option value="" selected>Choose recovery location</option>', $html);
+        $this->assertStringNotContainsString('value="airport_hnl" selected', $html);
+        $this->assertStringContainsString('value="waikiki_hotel"', $html);
     }
 
     public function testCurrentVehiclePositionUsesCanonicalHnlOrderAndOptionalDetail(): void

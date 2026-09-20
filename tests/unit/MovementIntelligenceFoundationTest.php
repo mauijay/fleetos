@@ -31,6 +31,26 @@ final class MovementIntelligenceFoundationTest extends TestCase
         $this->assertSame('pending', $ambiguous['classification_status']);
     }
 
+    public function testRecoveryPrefillUsesOnlyExistingStructuredLocationVocabulary(): void
+    {
+        $classifier = new LocationClassificationService();
+
+        $this->assertSame([
+            'home' => 'Home',
+            'airport_hnl' => 'Airport HNL',
+            'waikiki_hotel' => 'Waikiki Hotel',
+            'other_delivery' => 'Other',
+        ], $classifier->recoveryLocationOptions());
+        foreach (['home', 'airport_hnl', 'waikiki_hotel', 'other_delivery'] as $locationClass) {
+            $this->assertSame($locationClass, $classifier->recoveryLocationFromPlannedReturn($locationClass));
+            $this->assertTrue($classifier->isRecoveryLocation($locationClass));
+        }
+        foreach ([null, '', 'unknown', 'Airport HNL', 'previous_trip_home'] as $unmappable) {
+            $this->assertNull($classifier->recoveryLocationFromPlannedReturn($unmappable));
+            $this->assertFalse($classifier->isRecoveryLocation($unmappable));
+        }
+    }
+
     public function testPlanningHorizonUsesConfiguredBoundaryPolicy(): void
     {
         $config = new MovementIntelligence();

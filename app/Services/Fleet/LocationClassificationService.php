@@ -8,6 +8,14 @@ class LocationClassificationService
 {
     public const CLASSES = ['home', 'airport_hnl', 'waikiki_hotel', 'other_delivery', 'unknown'];
 
+    /** @var array<string, string> */
+    private const RECOVERY_LOCATION_OPTIONS = [
+        'home' => 'Home',
+        'airport_hnl' => 'Airport HNL',
+        'waikiki_hotel' => 'Waikiki Hotel',
+        'other_delivery' => 'Other',
+    ];
+
     public function __construct(private readonly ?MovementIntelligence $config = null)
     {
     }
@@ -33,6 +41,22 @@ class LocationClassificationService
             throw new \InvalidArgumentException('Choose a valid operational location.');
         }
         return $this->result($locationClass, trim((string) $detail) ?: null, 'operator', 'classified', null, null);
+    }
+
+    /** @return array<string, string> */
+    public function recoveryLocationOptions(): array
+    {
+        return self::RECOVERY_LOCATION_OPTIONS;
+    }
+
+    public function recoveryLocationFromPlannedReturn(?string $locationClass): ?string
+    {
+        return $this->isRecoveryLocation($locationClass) ? $locationClass : null;
+    }
+
+    public function isRecoveryLocation(?string $locationClass): bool
+    {
+        return $locationClass !== null && array_key_exists($locationClass, self::RECOVERY_LOCATION_OPTIONS);
     }
 
     private function normalize(string $value): string

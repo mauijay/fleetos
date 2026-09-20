@@ -2599,6 +2599,23 @@ h3 {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.recovery-form-details {
+  border: 0;
+  display: grid;
+  gap: 12px;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0;
+  width: 100%;
+}
+
+.recovery-form-details[hidden] {
+  display: none;
+}
+
 .hnl-parking-fields {
   display: grid;
   grid-column: 1 / -1;
@@ -3734,6 +3751,7 @@ h3 {
   .compact-financial-grid,
   .import-result-grid,
   .issue-filters,
+  .recovery-form-details,
   .hnl-parking-fields,
   .issue-facts,
   .issue-detail-grid,
@@ -4733,6 +4751,7 @@ h3 {
   .compact-financial-grid,
   .import-result-grid,
   .issue-filters,
+  .recovery-form-details,
   .hnl-parking-fields,
   .issue-facts,
   .issue-detail-grid,

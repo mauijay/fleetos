@@ -208,6 +208,9 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
         $checklist['company_id'] = 1;
         foreach ([
             ['location_class' => 'airport_hnl', 'airport_garage_code' => 'international', 'airport_parking_level' => '7', 'airport_parking_row' => 'A'],
+            ['location_class' => ''],
+            ['location_class' => 'unknown'],
+            ['location_class' => 'unmapped_location'],
             ['energy_percent' => '101'],
             ['confirm_recovery_location' => ''],
         ] as $invalid) {
@@ -228,6 +231,26 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
             $this->assertSame('Assessment write failed.', $exception->getMessage());
         }
         $this->assertNull($this->events->activeForTrip(100, ['vehicle_recovered']));
+    }
+
+    public function testRecoveryAcceptsExistingWaikikiLocationVocabulary(): void
+    {
+        $this->events->record(10, 100, 'actual_handoff', 'pickup', '2026-09-16 09:00:00', 'home', null, 'operator', 7);
+        $service = new MovementOperationalFactService($this->connection, $this->events, $this->assessments);
+        $checklist = ['exists' => true, 'movement_type' => 'return', 'company_id' => 1, 'fleet_vehicle_id' => 10, 'turo_trip_normalized_id' => 100];
+
+        $recoveryId = $service->recoverVehicle($checklist, [
+            'occurred_at' => '2026-09-16 11:00:00',
+            'location_class' => 'waikiki_hotel',
+            'location_detail' => 'Hotel porte cochere',
+            'energy_percent' => '82',
+            'confirm_recovery_location' => '1',
+        ], 7);
+        $recovery = $this->repository->event($recoveryId);
+
+        $this->assertSame('vehicle_recovered', $recovery['event_code']);
+        $this->assertSame('waikiki_hotel', $recovery['location_class']);
+        $this->assertSame('Hotel porte cochere', $recovery['location_detail']);
     }
 
     public function testCurrentLocationUsesLatestNonVoidedEventAtOrBeforeAsOf(): void

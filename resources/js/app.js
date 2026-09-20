@@ -5,6 +5,7 @@ import { resolveHnlParkingState } from "./hnl-parking-state.js";
 import { combineLocalDateTime } from "./local-datetime.js";
 import { initializeCopyField } from "./copy-field.js";
 import { focusChecklistAnchor } from "./checklist-focus.js";
+import { initializeRecoveryLocationDisclosure } from "./recovery-location-disclosure.js";
 
 const postSubmissionGuard = createPostSubmissionGuard(document.documentElement);
 document.addEventListener("submit", postSubmissionGuard.handleSubmit);
@@ -25,6 +26,15 @@ const initializeHnlParking = (group) => {
     .closest("form")
     ?.querySelector("[data-location-detail]");
   const locationDetailInput = locationDetail?.querySelector("input");
+  const recoveryLocationDetail = group
+    .closest("form")
+    ?.querySelector("[data-recovery-location-detail]");
+  const standardRecoveryLocationDetail = recoveryLocationDetail?.querySelector(
+    "[data-standard-recovery-location-detail]",
+  );
+  const hnlRecoveryLocationDetail = recoveryLocationDetail?.querySelector(
+    "[data-hnl-recovery-location-detail]",
+  );
 
   if (!garage || !level || !row) return;
   const rowGarages = Object.fromEntries(
@@ -71,8 +81,17 @@ const initializeHnlParking = (group) => {
   const toggle = () => {
     const active = !location || location.value === "airport_hnl";
     group.hidden = !active;
+    group.disabled = !active;
     if (locationDetail) locationDetail.hidden = active;
     if (locationDetailInput) locationDetailInput.disabled = active;
+    if (standardRecoveryLocationDetail) {
+      standardRecoveryLocationDetail.hidden = active;
+      standardRecoveryLocationDetail.disabled = active;
+    }
+    if (hnlRecoveryLocationDetail) {
+      hnlRecoveryLocationDetail.hidden = !active;
+      hnlRecoveryLocationDetail.disabled = !active;
+    }
     for (const field of [garage, level, row]) {
       field.disabled = !active;
       field.required = active;
@@ -87,6 +106,9 @@ const initializeHnlParking = (group) => {
 };
 
 document.querySelectorAll("[data-hnl-parking]").forEach(initializeHnlParking);
+document
+  .querySelectorAll("[data-recovery-location-form]")
+  .forEach(initializeRecoveryLocationDisclosure);
 
 document.querySelectorAll("[data-local-datetime]").forEach((group) => {
   const date = group.querySelector('[name="occurred_on"]');

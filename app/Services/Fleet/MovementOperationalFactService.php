@@ -214,7 +214,7 @@ class MovementOperationalFactService
         }
         $occurredAt = $this->requiredPastTimestamp($data, 'Recovery time');
         $locationClass = trim((string) ($data['location_class'] ?? ''));
-        if (! in_array($locationClass, ['airport_hnl', 'home', 'other_delivery'], true)) {
+        if (! (new LocationClassificationService())->isRecoveryLocation($locationClass)) {
             throw new \InvalidArgumentException('Choose the actual recovery location.');
         }
         $parking = [];

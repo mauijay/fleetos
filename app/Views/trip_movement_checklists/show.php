@@ -29,6 +29,8 @@
 /** @var bool $correctGuestReturn */
 /** @var bool $canRecover */
 /** @var array<string, mixed> $recoveryFormData */
+/** @var array<string, string> $recoveryLocationOptions */
+/** @var string|null $recoveryLocationPrefill */
 $hnlGarages ??= (new \App\Services\Fleet\HnlGarageCatalog())->definitions();
 $guestReturn ??= null;
 $guestReturnActive ??= false;
@@ -37,6 +39,8 @@ $returnCompleted ??= false;
 $correctGuestReturn ??= false;
 $canRecover ??= false;
 $recoveryFormData ??= [];
+$recoveryLocationOptions ??= (new \App\Services\Fleet\LocationClassificationService())->recoveryLocationOptions();
+$recoveryLocationPrefill ??= null;
 $recoveryExceptions ??= [];
 $turnaroundWork ??= ['cleaning' => null, 'energy' => null];
 $navigation ??= [];
@@ -101,7 +105,14 @@ $tripFacts ??= [
                 <?php if ($canRecover): ?>
                     <?php
                     $recoveryReport = $guestReturnActive ? $guestReturn : null;
-                    $recoveryLocation = (string) ($recoveryFormData['location_class'] ?? 'airport_hnl');
+                    $recoveryLocationCandidate = array_key_exists('location_class', $recoveryFormData)
+                        ? (string) $recoveryFormData['location_class']
+                        : (string) ($recoveryLocationPrefill ?? '');
+                    $recoveryLocation = array_key_exists($recoveryLocationCandidate, $recoveryLocationOptions)
+                        ? $recoveryLocationCandidate
+                        : '';
+                    $hasRecoveryLocation = $recoveryLocation !== '';
+                    $isHnlRecovery = $recoveryLocation === 'airport_hnl';
                     $recoveryGarage = (string) ($recoveryFormData['airport_garage_code'] ?? ($recoveryReport['airport_garage_code'] ?? ''));
                     $recoveryLevel = (string) ($recoveryFormData['airport_parking_level'] ?? ($recoveryReport['airport_parking_level'] ?? ''));
                     $recoveryRow = (string) ($recoveryFormData['airport_parking_row'] ?? ($recoveryReport['airport_parking_row'] ?? ''));
@@ -120,17 +131,20 @@ $tripFacts ??= [
                         <div class="section-heading"><div><p class="eyebrow">Operator recovery</p><h2>Recover Vehicle</h2></div></div>
                         <p class="muted">Confirm where and when you physically recovered the vehicle. Turo's return-photo and inspection workflow remains separate.</p>
                         <?php if ($recoveryReport !== null): ?><p class="import-message tone-warning">Guest reported — unverified. The location below is a prefill only; verify or correct it before recording recovery.</p><?php endif; ?>
-                        <form class="issue-filters" action="/operations/checklists/<?= (int) $checklist['id'] ?>/recover-vehicle" method="post">
+                        <form class="issue-filters" action="/operations/checklists/<?= (int) $checklist['id'] ?>/recover-vehicle" method="post" data-recovery-location-form>
                             <?= csrf_field() ?>
                             <label>Recovery time (Honolulu)<input type="datetime-local" name="occurred_at" required value="<?= esc((string) ($recoveryFormData['occurred_at'] ?? date('Y-m-d\TH:i')), 'attr') ?>"></label>
-                            <label>Actual recovery location<select id="recovery-location-class" name="location_class" required><?php foreach (['airport_hnl' => 'Airport HNL', 'home' => 'Home', 'other_delivery' => 'Other'] as $code => $label): ?><option value="<?= esc($code, 'attr') ?>" <?= $recoveryLocation === $code ? 'selected' : '' ?>><?= esc($label) ?></option><?php endforeach; ?></select></label>
-                            <label data-location-detail <?= $recoveryLocation === 'airport_hnl' ? 'hidden' : '' ?>>Location detail<input name="location_detail" maxlength="500" value="<?= esc((string) ($recoveryFormData['location_detail'] ?? ''), 'attr') ?>" <?= $recoveryLocation === 'airport_hnl' ? 'disabled' : '' ?>></label>
-                            <fieldset class="hnl-parking-fields" data-hnl-parking data-location-select="recovery-location-class"><legend>Verified HNL parking</legend>
+                            <label>Actual recovery location<select id="recovery-location-class" name="location_class" required data-recovery-location aria-controls="recovery-form-details" aria-expanded="<?= $hasRecoveryLocation ? 'true' : 'false' ?>"><option value="" <?= $recoveryLocation === '' ? 'selected' : '' ?>>Choose recovery location</option><?php foreach ($recoveryLocationOptions as $code => $label): ?><option value="<?= esc($code, 'attr') ?>" <?= $recoveryLocation === $code ? 'selected' : '' ?>><?= esc($label) ?></option><?php endforeach; ?></select></label>
+                            <fieldset class="recovery-form-details" id="recovery-form-details" data-recovery-details <?= $hasRecoveryLocation ? '' : 'hidden disabled' ?>>
+                            <fieldset class="hnl-parking-fields" data-hnl-parking data-location-select="recovery-location-class" <?= $isHnlRecovery ? '' : 'hidden disabled' ?>><legend>Verified HNL parking</legend>
                                 <label>Level<select name="airport_parking_level" data-hnl-level><option value="">Choose level</option><?php for ($level = 1; $level <= 8; $level++): ?><option value="<?= $level ?>" <?= $recoveryLevel === (string) $level ? 'selected' : '' ?>><?= $level ?></option><?php endfor; ?></select></label>
                                 <label>Row<select name="airport_parking_row" data-hnl-row><option value="">Choose row</option><?php foreach ($hnlGarages as $code => $garage): ?><?php foreach ($garage['rows'] as $row): ?><option value="<?= esc($row, 'attr') ?>" data-garage="<?= esc($code, 'attr') ?>" <?= $recoveryRow === $row ? 'selected' : '' ?>><?= esc($row) ?></option><?php endforeach; ?><?php endforeach; ?></select></label>
                                 <label>Garage<select name="airport_garage_code" data-hnl-garage><option value="">Derived from row</option><?php foreach ($hnlGarages as $code => $garage): ?><option value="<?= esc($code, 'attr') ?>" data-max-level="<?= (int) $garage['levels'] ?>" <?= $recoveryGarage === $code ? 'selected' : '' ?>><?= esc($garage['name']) ?></option><?php endforeach; ?></select></label>
                             </fieldset>
-                            <label>Recovery location detail (optional)<input name="recovery_location_note" maxlength="500" value="<?= esc((string) ($recoveryFormData['recovery_location_note'] ?? $guestLocationNote), 'attr') ?>"></label>
+                            <label data-recovery-location-detail>Location detail (optional)
+                                <input name="location_detail" maxlength="500" value="<?= esc((string) ($recoveryFormData['location_detail'] ?? ''), 'attr') ?>" data-standard-recovery-location-detail <?= $isHnlRecovery ? 'hidden disabled' : '' ?>>
+                                <input name="recovery_location_note" maxlength="500" value="<?= esc((string) ($recoveryFormData['recovery_location_note'] ?? $guestLocationNote), 'attr') ?>" data-hnl-recovery-location-detail <?= $isHnlRecovery ? '' : 'hidden disabled' ?>>
+                            </label>
                             <label>Measured battery/fuel percent<input name="energy_percent" type="number" min="0" max="100" value="<?= esc((string) ($recoveryFormData['energy_percent'] ?? ''), 'attr') ?>"></label>
                             <label class="checkbox-row"><input type="checkbox" name="energy_unknown" value="1" <?= ($recoveryFormData['energy_unknown'] ?? null) === '1' ? 'checked' : '' ?>><span>Energy unknown — I could not get a measurement</span></label>
                             <label>Reason if energy unknown<input name="energy_unknown_reason" maxlength="500" value="<?= esc((string) ($recoveryFormData['energy_unknown_reason'] ?? ''), 'attr') ?>"></label>
@@ -144,6 +158,7 @@ $tripFacts ??= [
                             <label>Operational note (optional)<textarea name="note" rows="2"><?= esc((string) ($recoveryFormData['note'] ?? '')) ?></textarea></label>
                             <label class="checkbox-row"><input type="checkbox" name="confirm_recovery_location" value="1" required><span>I verified the actual recovery location; guest-reported details alone are not proof.</span></label>
                             <button class="primary-action" type="submit">Vehicle Recovered</button>
+                            </fieldset>
                         </form>
                     </section>
                 <?php endif; ?>

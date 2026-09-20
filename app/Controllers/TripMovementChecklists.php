@@ -5,6 +5,7 @@ namespace App\Controllers;
 use App\Exceptions\EarlyHandoffConfirmationRequired;
 use App\Repositories\VehicleRecoveryExceptionRepository;
 use App\Services\Fleet\ChecklistActionFocusService;
+use App\Services\Fleet\LocationClassificationService;
 use App\Services\Fleet\OperationalMovementWorkService;
 use CodeIgniter\Config\Services as CoreServices;
 use CodeIgniter\HTTP\RedirectResponse;
@@ -70,6 +71,11 @@ class TripMovementChecklists extends BaseController
         $tripSchedule = ($checklist['exists'] ?? false)
             ? Services::operationalFactsRepository()->tripSchedule((int) $checklist['turo_trip_normalized_id'])
             : null;
+        $locationClassifier = new LocationClassificationService();
+        $recoveryLocationOptions = $locationClassifier->recoveryLocationOptions();
+        $recoveryLocationPrefill = ($checklist['movement_type'] ?? null) === 'return'
+            ? $locationClassifier->recoveryLocationFromPlannedReturn($tripSchedule['return_location_class'] ?? null)
+            : null;
         $canRecordRetroactiveHandoff = ($checklist['exists'] ?? false)
             && $tripFacts['pickup'] === null
             && $tripFacts['return'] === null
@@ -96,6 +102,8 @@ class TripMovementChecklists extends BaseController
             'correctGuestReturn' => $this->request->getGet('correct_guest_return') === '1',
             'guestReturnFormData' => CoreServices::session()->getFlashdata('guest_return_data') ?: [],
             'recoveryFormData' => is_array($recoveryFormData) ? $recoveryFormData : [],
+            'recoveryLocationOptions' => $recoveryLocationOptions,
+            'recoveryLocationPrefill' => $recoveryLocationPrefill,
             'isStagedPickup' => $isStagedPickup,
             'isPickupConfirmed' => $isPickupConfirmed,
             'pickupConfirmedAt' => $handoffRequirement['basis_at'] ?? null,
