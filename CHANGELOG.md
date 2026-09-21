@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.16.1 — Future Trip Guest Commitment Navigation
+
+Release date: 2026-09-21
+
+### Guest Commitment Navigation
+
+- Make Guest Commitments directly reachable from Vehicle Trip History even when no movement checklist exists.
+- Allow future booked trips to receive commitments months before operational checklists are generated; Guest Commitments remain owned by the normalized trip and do not depend on checklist creation.
+- Show **Guest commitments** independently from **Open movement** in Vehicle Trip History.
+- Apply the same rule to Previous, Selected, and Next Reservation Context cards: trips with an existing checklist show **Open movement** and **Guest commitments**, while trips without a checklist show **Guest commitments** only.
+- Keep the selected trip's own **Open movement** link visible when its exact checklist relationship exists.
+
+### Contextual Back Navigation
+
+- Link the canonical Guest Commitments page back to the exact movement workflow when a checklist exists.
+- Link back to Vehicle Trip History focused on the normalized trip when no checklist exists.
+- Keep canceled trips historically reachable and read-only without restoring active operational work.
+
+### Read-Only and Identity Guarantees
+
+- Resolve navigation through exact normalized-trip and existing checklist relationships rather than vehicle, schedule, or guest-name matching.
+- Keep navigation read-only: viewing these pages creates no checklist, commitment, event, assessment, positioning row, or audit record and does not change trip status or operational state.
+
+### Release Boundaries
+
+- Make no migration, schema, dependency, CSS, JavaScript, financial-behavior, or Extras-behavior changes.
+
 ## v0.16.0 — Guest Commitments & Trip Overrides
 
 Release date: 2026-09-20
