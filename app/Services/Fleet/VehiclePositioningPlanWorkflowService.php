@@ -3,6 +3,7 @@
 namespace App\Services\Fleet;
 
 use App\Repositories\OperationalFactsRepository;
+use Config\Services;
 
 class VehiclePositioningPlanWorkflowService
 {
@@ -12,6 +13,7 @@ class VehiclePositioningPlanWorkflowService
         private readonly ?ImportFreshnessService $freshnessService = null,
         private readonly ?VehiclePositioningRecommendationService $recommendationService = null,
         private readonly ?VehiclePositioningPlanService $planService = null,
+        private readonly ?TripEnergyRuleResolver $energyRuleResolver = null,
     ) {
     }
 
@@ -32,6 +34,14 @@ class VehiclePositioningPlanWorkflowService
         $assessment = $this->repo()->assessmentForEventOrTrip(isset($lifecycleEvent['id']) ? (int) $lifecycleEvent['id'] : null, $tripId);
         $profile = $this->repo()->profile($vehicleId) ?? ['energy_kind' => 'unknown', 'ready_energy_target_percent' => null, 'capabilities' => []];
         $nextTrip = $this->nextTrips()->forVehicle($vehicleId, $asOf);
+        $nextTripId = (int) ($nextTrip['id'] ?? 0);
+        $energyRule = $nextTripId > 0
+            ? $this->energyRules()->forTrip((int) $vehicle['company_id'], $nextTripId, $profile)
+            : $this->energyRules()->forProfile($profile);
+        $energyEvaluation = $this->energyRules()->evaluate(
+            $energyRule,
+            isset($assessment['energy_percent']) ? (int) $assessment['energy_percent'] : null,
+        );
         $freshness = $this->freshness()->assess($nextTrip['import_completed_at'] ?? $schedule['import_completed_at'] ?? null, $asOf);
         $basis = $this->positionBasis($lifecycleEvent, $schedule);
         $plan = $this->plans()->active($vehicleId, $event, $nextTrip, $asOf);
@@ -42,11 +52,12 @@ class VehiclePositioningPlanWorkflowService
             'freshness' => $freshness,
             'assessment' => $assessment,
             'profile' => $profile,
+            'energy_condition' => $energyEvaluation['condition'],
             'transportation_state' => $plan['transportation_state'] ?? 'unknown',
             'active_override' => $plan,
         ]);
 
-        return compact('vehicle', 'event', 'nextTrip', 'freshness', 'basis', 'plan', 'recommendation');
+        return compact('vehicle', 'event', 'nextTrip', 'freshness', 'basis', 'plan', 'recommendation', 'energyRule');
     }
 
     public function create(int $vehicleId, array $data, int $actorUserId): int
@@ -108,5 +119,10 @@ class VehiclePositioningPlanWorkflowService
     private function plans(): VehiclePositioningPlanService
     {
         return $this->planService ?? new VehiclePositioningPlanService($this->repo());
+    }
+
+    private function energyRules(): TripEnergyRuleResolver
+    {
+        return $this->energyRuleResolver ?? Services::tripEnergyRuleResolver();
     }
 }

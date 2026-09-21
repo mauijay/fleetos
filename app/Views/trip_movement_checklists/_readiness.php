@@ -65,13 +65,15 @@ $factDetail = static function (array $requirement) use ($activeFacts): ?string {
                         $item = $itemsByCode[$requirement['code']] ?? null;
                         $itemId = (int) ($item['id'] ?? $requirement['action']['item_id'] ?? 0);
                         $actionType = (string) ($requirement['action']['type'] ?? '');
-                        $isSpecialAction = in_array($actionType, ['photos_composite', 'charging_adapter'], true);
+                        $isSpecialAction = in_array($actionType, ['photos_composite', 'charging_adapter', 'guest_commitment_complete', 'guest_commitment_acknowledge'], true);
                         ?>
                         <li id="checklist-action-<?= esc((string) $requirement['code'], 'attr') ?>" tabindex="-1" class="is-pending readiness-action-row<?= $isSpecialAction ? ' readiness-compound-action' : '' ?>"><span aria-hidden="true">○</span><div class="readiness-action-label"><strong><?= esc((string) ($pendingLabels[$requirement['code']] ?? $requirement['action']['label'] ?? $requirement['label'])) ?></strong></div>
                             <?php if (! $closed && $actionType === 'photos_composite'): ?>
                                 <div class="readiness-action-controls"><form action="/operations/checklists/<?= (int) $checklist['id'] ?>/photos-complete" method="post"><?= csrf_field() ?><button class="primary-action" type="submit">Confirm</button></form></div>
                             <?php elseif (! $closed && $actionType === 'charging_adapter'): ?>
                                 <div class="readiness-action-controls"><form action="/operations/checklists/<?= (int) $checklist['id'] ?>/charging-adapter-present" method="post"><?= csrf_field() ?><button class="primary-action" type="submit">Confirm</button></form></div>
+                            <?php elseif (! $closed && in_array($actionType, ['guest_commitment_complete', 'guest_commitment_acknowledge'], true)): ?>
+                                <div class="readiness-action-controls"><form action="/operations/trips/<?= (int) $requirement['action']['trip_id'] ?>/commitments/<?= (int) $requirement['action']['commitment_id'] ?>/<?= $actionType === 'guest_commitment_complete' ? 'complete' : 'acknowledge' ?>" method="post"><?= csrf_field() ?><button class="primary-action" type="submit"><?= $actionType === 'guest_commitment_complete' ? 'Complete' : 'Acknowledge' ?></button></form></div>
                             <?php elseif (! $closed && $itemId > 0): ?>
                                 <div class="readiness-action-controls"><form action="/operations/checklist-items/<?= $itemId ?>/complete" method="post"><?= csrf_field() ?><button class="primary-action" type="submit">Confirm</button></form><?php if ($requirement['allows_na'] ?? false): ?><form action="/operations/checklist-items/<?= $itemId ?>/not-applicable" method="post"><?= csrf_field() ?><button class="action-link" type="submit">Not applicable</button></form><?php endif; ?></div>
                             <?php elseif (! $closed): ?><div class="readiness-action-controls"><a class="action-link" href="#handoff-entry">Record facts</a></div><?php endif; ?>
@@ -81,7 +83,7 @@ $factDetail = static function (array $requirement) use ($activeFacts): ?string {
             <?php endforeach; ?>
             <?php if ($nextPickupPending !== []): ?>
                 <div class="readiness-subgroup"><p class="eyebrow"><?= ($readiness['is_same_day_turnaround'] ?? false) ? 'Same-day turnaround' : 'Preparation for next pickup' ?></p>
-                    <ul class="readiness-list"><?php foreach ($nextPickupPending as $requirement): ?><li id="checklist-action-<?= esc((string) $requirement['code'], 'attr') ?>" tabindex="-1" class="is-pending"><span aria-hidden="true">○</span><div><strong><?= esc((string) $requirement['label']) ?></strong><small><?= esc((string) ($requirement['action']['label'] ?? 'Attention required')) ?></small></div></li><?php endforeach; ?></ul>
+                    <ul class="readiness-list"><?php foreach ($nextPickupPending as $requirement): ?><li id="checklist-action-<?= esc((string) $requirement['code'], 'attr') ?>" tabindex="-1" class="is-pending"><span aria-hidden="true">○</span><div><strong><?= esc((string) $requirement['label']) ?></strong><small><?= esc((string) ($requirement['action']['label'] ?? 'Attention required')) ?></small></div><?php if (str_starts_with((string) $requirement['code'], 'guest_commitment_')): ?><a class="action-link" href="/operations/trips/<?= (int) $requirement['target_trip_id'] ?>/commitments#commitment-<?= (int) $requirement['action']['commitment_id'] ?>">Review</a><?php endif; ?></li><?php endforeach; ?></ul>
                 </div>
             <?php endif; ?>
         </div>

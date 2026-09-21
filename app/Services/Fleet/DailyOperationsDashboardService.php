@@ -314,6 +314,7 @@ class DailyOperationsDashboardService
             $turnaroundRemaining = 0;
             $energyMissing = false;
             $energyBelowTarget = false;
+            $energyAboveMaximum = false;
             foreach ($vehicleChecklists as $summary) {
                 $projection = $summary['readiness_projection'];
                 foreach ($projection['requirements'] as $requirement) {
@@ -321,7 +322,10 @@ class DailyOperationsDashboardService
                         && ($requirement['status'] ?? null) === MovementReadinessProjectionService::STATUS_UNSATISFIED
                         && ($requirement['actionable'] ?? true)) {
                         $energyMissing = $energyMissing || ($requirement['code'] ?? null) === 'energy_known';
-                        $energyBelowTarget = $energyBelowTarget || ($requirement['code'] ?? null) === 'energy_ready';
+                        $energyBelowTarget = $energyBelowTarget || (($requirement['code'] ?? null) === 'energy_ready'
+                            && in_array($requirement['energy_condition'] ?? null, [null, 'charge_required'], true));
+                        $energyAboveMaximum = $energyAboveMaximum || (($requirement['code'] ?? null) === 'energy_ready'
+                            && ($requirement['energy_condition'] ?? null) === 'above_maximum');
                     }
                     if (($requirement['phase'] ?? null) === ($projection['readiness_phase'] ?? null)
                         && ($requirement['blocking'] ?? false)
@@ -340,8 +344,9 @@ class DailyOperationsDashboardService
                 }
             }
             $first = $vehicleChecklists[0] ?? null;
-            $flags = array_values(array_unique(array_merge($vehicle['flags'] ?? [], $energyMissing ? ['energy_check_required'] : ($energyBelowTarget ? ['charging_required'] : []))));
-            $chargeAction = $energyMissing ? 'Record Charge/Fuel percentage' : ($energyBelowTarget ? 'Charge/Fuel to pickup target' : null);
+            $energyFlags = $energyMissing ? ['energy_check_required'] : ($energyBelowTarget ? ['charging_required'] : ($energyAboveMaximum ? ['energy_attention_required'] : []));
+            $flags = array_values(array_unique(array_merge($vehicle['flags'] ?? [], $energyFlags)));
+            $chargeAction = $energyMissing ? 'Record Charge/Fuel percentage' : ($energyBelowTarget ? 'Charge/Fuel to pickup target' : ($energyAboveMaximum ? 'Review guest charge limit' : null));
             $actions = $vehicle['actions'] ?? [];
             if ($chargeAction !== null) {
                 $actions = array_values(array_filter($actions, static fn (string $action): bool => $action !== 'No action due'));
@@ -351,7 +356,7 @@ class DailyOperationsDashboardService
             return array_merge($vehicle, [
                 'flags' => $flags,
                 'actions' => $actions,
-                'charging_status_label' => $energyMissing ? 'Charge/Fuel not captured' : ($energyBelowTarget ? 'Below pickup target' : 'No actionable Charge/Fuel preparation recorded'),
+                'charging_status_label' => $energyMissing ? 'Charge/Fuel not captured' : ($energyBelowTarget ? 'Below pickup target' : ($energyAboveMaximum ? 'Above guest-requested maximum' : 'No actionable Charge/Fuel preparation recorded')),
                 'checklists' => $vehicleChecklists,
                 'checklist_progress_label' => $vehicleChecklists === [] ? 'No movement workflow today' : ($remaining === 0 ? 'Ready' : $remaining . ' action' . ($remaining === 1 ? '' : 's') . ' across today\'s movements'),
                 'checklist_ready' => $vehicleChecklists !== [] && $remaining === 0,

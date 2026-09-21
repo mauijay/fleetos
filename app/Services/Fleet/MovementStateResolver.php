@@ -39,6 +39,7 @@ class MovementStateResolver
 
         if (in_array($event['event_code'] ?? null, ['actual_return', 'vehicle_recovered'], true)) {
             $target = isset($profile['ready_energy_target_percent']) ? (int) $profile['ready_energy_target_percent'] : null;
+            $effectiveTarget = isset($context['energy_target_percent']) ? (int) $context['energy_target_percent'] : $target;
             $needsCleaning = (bool) ($context['cleaning_required'] ?? (($assessment['cleanliness'] ?? null) !== 'clean'));
             $energyCondition = array_key_exists('energy_condition', $context) ? $context['energy_condition'] : ($target === null ? 'target_needed' : (($assessment['energy_percent'] ?? null) === null ? 'measurement_needed' : ((int) $assessment['energy_percent'] < $target ? 'charge_required' : null)));
             $hasPickupPreparation = $this->hasCriticalBlockers($context, $blockers);
@@ -47,13 +48,15 @@ class MovementStateResolver
                     $blockers[] = ['code' => 'cleaning_required', 'label' => 'Cleaning required', 'severity' => 'meaningful'];
                 }
                 if ($energyCondition === 'charge_required') {
-                    $blockers[] = ['code' => 'energy_below_target', 'label' => 'Charge/Fuel to ' . $target . '%', 'severity' => 'meaningful'];
+                    $blockers[] = ['code' => 'energy_below_target', 'label' => 'Charge/Fuel to ' . $effectiveTarget . '%', 'severity' => 'meaningful'];
                 } elseif ($energyCondition === 'measurement_needed') {
                     $missing[] = 'return_energy_percent';
                     $blockers[] = ['code' => 'energy_measurement_needed', 'label' => 'Record charge/fuel level', 'severity' => 'meaningful'];
                 } elseif ($energyCondition === 'target_needed') {
                     $missing[] = 'ready_energy_target_percent';
                     $blockers[] = ['code' => 'energy_target_needed', 'label' => $this->energyTargetLabel($profile) . ' not configured', 'severity' => 'meaningful'];
+                } elseif ($energyCondition === 'above_maximum') {
+                    $blockers[] = ['code' => 'energy_above_guest_maximum', 'label' => 'Above guest-requested maximum — review before handoff', 'severity' => 'critical'];
                 }
                 $recovered = ($event['event_code'] ?? null) === 'vehicle_recovered';
                 $prefix = $recovered ? 'Vehicle recovered; ' : 'Vehicle returned; ';
@@ -61,12 +64,14 @@ class MovementStateResolver
                     'charge_required' => $this->energyWorkLabel($profile) . ' remains.',
                     'measurement_needed' => 'record the ' . $this->energyLevelLabel($profile) . '.',
                     'target_needed' => $this->energyTargetLabel($profile) . ' configuration is missing.',
+                    'above_maximum' => 'guest-requested charge limit needs review.',
                     default => null,
                 };
                 $primary = match (true) {
                     $needsCleaning && $energyCondition === 'charge_required' => $prefix . 'cleaning and ' . $this->energyWorkLabel($profile) . ' remain.',
                     $needsCleaning && $energyCondition === 'measurement_needed' => $prefix . 'cleaning remains; record the ' . $this->energyLevelLabel($profile) . '.',
                     $needsCleaning && $energyCondition === 'target_needed' => $prefix . 'cleaning remains; ' . $this->energyTargetLabel($profile) . ' configuration is missing.',
+                    $needsCleaning && $energyCondition === 'above_maximum' => $prefix . 'cleaning remains; guest-requested charge limit needs review.',
                     $needsCleaning => $prefix . 'cleaning remains.',
                     $energyWork !== null => $prefix . $energyWork,
                     default => $prefix . 'pickup preparation remains.',

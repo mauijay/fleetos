@@ -4715,7 +4715,233 @@ h3 {
   }
 }
 
+.guest-commitments-frame {
+  width: min(100%, 1440px);
+  margin-inline: auto;
+}
+
+.guest-commitments-main,
+.guest-commitment-grid,
+.guest-commitment-card,
+.workflow-guest-commitments,
+.workflow-commitment,
+.movement-card__guest-commitments {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.commitment-trip-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.commitment-trip-facts > div,
+.guest-commitment-card,
+.workflow-commitment,
+.movement-card__guest-commitments {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface-2) 94%, transparent);
+}
+
+.commitment-trip-facts > div {
+  display: grid;
+  gap: 5px;
+  padding: 14px;
+}
+
+.commitment-trip-facts dd,
+.commitment-trip-facts dd span,
+.workflow-commitment > div,
+.guest-commitment-card__heading > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.commitment-trip-facts dd {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+
+.guest-commitment-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: 14px;
+}
+
+.guest-commitment-card {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 16px;
+}
+
+.guest-commitment-card.is-blocking,
+.workflow-commitment.is-blocking,
+.movement-card__guest-commitments.is-required {
+  border-color: color-mix(in srgb, var(--warning) 65%, var(--line));
+}
+
+.guest-commitment-card__heading,
+.workflow-commitment,
+.movement-card__guest-commitments .movement-card__subheading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.guest-commitment-card__heading h3,
+.workflow-commitment strong,
+.movement-card__guest-commitments li {
+  overflow-wrap: anywhere;
+}
+
+.commitment-special-instruction,
+.commitment-time-arrangement {
+  display: grid;
+  gap: 4px;
+  border-left: 3px solid var(--accent);
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.commitment-actions,
+.commitment-actions form,
+.form-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.commitment-cancel-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.guest-commitment-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.guest-commitment-form > label,
+.guest-commitment-form fieldset,
+.commitment-cancel-form label {
+  min-width: 0;
+}
+
+.guest-commitment-form select,
+.guest-commitment-form input,
+.guest-commitment-form textarea,
+.commitment-cancel-form textarea {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.guest-commitment-form .wide-field {
+  grid-column: 1 / -1;
+}
+
+.commitment-conditional {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(110px, 1fr);
+  gap: 12px;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px;
+}
+
+.commitment-conditional[hidden] {
+  display: none;
+}
+
+.commitment-conditional legend,
+.commitment-conditional p {
+  grid-column: 1 / -1;
+}
+
+.workflow-commitment-list {
+  display: grid;
+  gap: 10px;
+}
+
+.workflow-commitment {
+  padding: 14px;
+}
+
+.workflow-commitment > div {
+  display: grid;
+  gap: 4px;
+}
+
+.workflow-commitment form {
+  flex: 0 0 auto;
+}
+
+.commitment-arranged-time,
+.commitment-energy-rule {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.commitment-energy-rule {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.movement-card__guest-commitments {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.movement-card__guest-commitments ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.movement-card__guest-commitments small {
+  display: block;
+  color: var(--muted);
+}
+
 @media (max-width: 560px) {
+  .commitment-trip-facts,
+  .guest-commitment-form,
+  .commitment-conditional {
+    grid-template-columns: 1fr;
+  }
+
+  .commitment-conditional legend,
+  .commitment-conditional p,
+  .guest-commitment-form .wide-field {
+    grid-column: auto;
+  }
+
+  .guest-commitment-card__heading,
+  .workflow-commitment {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .workflow-commitment form,
+  .workflow-commitment button,
+  .commitment-actions form,
+  .commitment-actions button {
+    width: 100%;
+  }
+
   .movement-filter-status {
     align-items: flex-start;
     flex-direction: column;

@@ -51,6 +51,9 @@ class VehiclePositioningRecommendationService
         $transport = (string) ($context['transportation_state'] ?? 'unknown');
         $profile = $context['profile'] ?? [];
         $assessment = $context['assessment'] ?? [];
+        $energyCondition = array_key_exists('energy_condition', $context)
+            ? $context['energy_condition']
+            : $this->legacyEnergyCondition($profile, $assessment);
         $missing = [];
         $reasons = [];
         $dependency = null;
@@ -64,9 +67,9 @@ class VehiclePositioningRecommendationService
                 [$code, $strength, $reasons] = ['relocate_to_international', $horizon === 'medium_term' ? 'Consider' : 'Recommended', ['wrong_airport_garage', 'next_pickup_hnl', $horizon]];
             } elseif ($nextTrip !== null && $pickup === 'airport_hnl' && in_array($horizon, ['immediate', 'near_term'], true)) {
                 [$code, $strength, $reasons] = ['leave_at_airport', 'Recommended', ['already_at_hnl', 'next_pickup_hnl', $horizon]];
-                if ($this->requiresUnsupportedHnlEnergy($profile, $assessment)) {
+                if ($this->requiresUnsupportedHnlEnergy($profile, $energyCondition)) {
                     [$code, $strength, $reasons] = ['retrieve_home', 'Consider', ['hnl_energy_service_unavailable', 'retrieve_for_turnaround']];
-                } elseif ($this->needsHnlTurnaround($profile, $assessment, (bool) ($context['cleaning_required'] ?? false))) {
+                } elseif ($this->needsHnlTurnaround($assessment, $energyCondition, (bool) ($context['cleaning_required'] ?? false))) {
                     $reasons[] = 'hnl_turnaround_supported';
                 }
             } elseif ($nextTrip !== null && $pickup === 'airport_hnl' && $horizon === 'medium_term') {
@@ -115,17 +118,15 @@ class VehiclePositioningRecommendationService
         ];
     }
 
-    private function needsHnlTurnaround(array $profile, array $assessment, bool $cleaningRequired = false): bool
+    private function needsHnlTurnaround(array $assessment, ?string $energyCondition, bool $cleaningRequired = false): bool
     {
-        $target = isset($profile['ready_energy_target_percent']) ? (int) $profile['ready_energy_target_percent'] : null;
         return $cleaningRequired || ($assessment['cleanliness'] ?? null) === 'dirty'
-            || ($target !== null && ($assessment['energy_percent'] ?? null) !== null && (int) $assessment['energy_percent'] < $target);
+            || $energyCondition === 'charge_required';
     }
 
-    private function requiresUnsupportedHnlEnergy(array $profile, array $assessment): bool
+    private function requiresUnsupportedHnlEnergy(array $profile, ?string $energyCondition): bool
     {
-        $target = isset($profile['ready_energy_target_percent']) ? (int) $profile['ready_energy_target_percent'] : null;
-        if ($target === null || ($assessment['energy_percent'] ?? null) === null || (int) $assessment['energy_percent'] >= $target) {
+        if ($energyCondition !== 'charge_required') {
             return false;
         }
         $kind = (string) ($profile['energy_kind'] ?? 'unknown');
@@ -133,6 +134,14 @@ class VehiclePositioningRecommendationService
             return false;
         }
         return ! (bool) ($this->settings()->locationCapabilities['airport_hnl'][$kind . '_refueling'] ?? false);
+    }
+
+    private function legacyEnergyCondition(array $profile, array $assessment): ?string
+    {
+        $target = isset($profile['ready_energy_target_percent']) ? (int) $profile['ready_energy_target_percent'] : null;
+        $energy = isset($assessment['energy_percent']) ? (int) $assessment['energy_percent'] : null;
+
+        return $target !== null && $energy !== null && $energy < $target ? 'charge_required' : null;
     }
 
     private function explanation(string $code, string $strength): string

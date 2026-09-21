@@ -6,6 +6,7 @@ import { combineLocalDateTime } from "./local-datetime.js";
 import { initializeCopyField } from "./copy-field.js";
 import { focusChecklistAnchor } from "./checklist-focus.js";
 import { initializeRecoveryLocationDisclosure } from "./recovery-location-disclosure.js";
+import { initializeGuestCommitmentForm } from "./guest-commitment-form.js";
 
 const postSubmissionGuard = createPostSubmissionGuard(document.documentElement);
 document.addEventListener("submit", postSubmissionGuard.handleSubmit);
@@ -109,6 +110,9 @@ document.querySelectorAll("[data-hnl-parking]").forEach(initializeHnlParking);
 document
   .querySelectorAll("[data-recovery-location-form]")
   .forEach(initializeRecoveryLocationDisclosure);
+document
+  .querySelectorAll("[data-commitment-form]")
+  .forEach(initializeGuestCommitmentForm);
 
 document.querySelectorAll("[data-local-datetime]").forEach((group) => {
   const date = group.querySelector('[name="occurred_on"]');

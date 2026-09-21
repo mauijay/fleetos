@@ -15,6 +15,7 @@ use App\Repositories\MovementChecklistRepository;
 use App\Repositories\MovementReadinessReadModelRepository;
 use App\Repositories\OperatingExpenseRepository;
 use App\Repositories\OperationalFactsRepository;
+use App\Repositories\TripCommitmentRepository;
 use App\Repositories\TripIncidentalReviewRepository;
 use App\Repositories\TripMonthAllocationRepository;
 use App\Repositories\TuroAccessReimbursementRepository;
@@ -67,6 +68,8 @@ use App\Services\Fleet\ScheduledLocationBackfillService;
 use App\Services\Fleet\ScheduledMovementLocationService;
 use App\Services\Fleet\TaskService;
 use App\Services\Fleet\TripAnalyticsService;
+use App\Services\Fleet\TripCommitmentService;
+use App\Services\Fleet\TripEnergyRuleResolver;
 use App\Services\Fleet\TripIncidentalReviewService;
 use App\Services\Fleet\TripMovementChecklistService;
 use App\Services\Fleet\TuroAccessReimbursementService;
@@ -103,6 +106,36 @@ use CodeIgniter\Config\BaseService;
  */
 class Services extends BaseService
 {
+    public static function tripCommitmentRepository(bool $getShared = true): TripCommitmentRepository
+    {
+        if ($getShared) {
+            return static::getSharedInstance('tripCommitmentRepository');
+        }
+
+        return new TripCommitmentRepository();
+    }
+
+    public static function tripCommitmentService(bool $getShared = true): TripCommitmentService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('tripCommitmentService');
+        }
+
+        return new TripCommitmentService(
+            static::tripCommitmentRepository(),
+            static::tripEnergyRuleResolver(),
+        );
+    }
+
+    public static function tripEnergyRuleResolver(bool $getShared = true): TripEnergyRuleResolver
+    {
+        if ($getShared) {
+            return static::getSharedInstance('tripEnergyRuleResolver');
+        }
+
+        return new TripEnergyRuleResolver(static::tripCommitmentRepository());
+    }
+
     public static function fleetExtraRepository(bool $getShared = true): FleetExtraRepository
     {
         if ($getShared) {
@@ -346,6 +379,8 @@ class Services extends BaseService
         return new MovementReadinessReadService(
             static::movementReadinessReadModelRepository(),
             static::movementReadinessProjectionService(),
+            static::tripCommitmentService(),
+            static::tripEnergyRuleResolver(),
         );
     }
 
@@ -514,6 +549,7 @@ class Services extends BaseService
             static::importFreshnessService(),
             static::vehiclePositioningRecommendationService(),
             static::vehiclePositioningPlanService(),
+            static::tripEnergyRuleResolver(),
         );
     }
 
@@ -530,6 +566,8 @@ class Services extends BaseService
             static::movementStateResolver(),
             static::vehiclePositioningRecommendationService(),
             static::vehiclePositioningPlanService(),
+            tripCommitmentService: static::tripCommitmentService(),
+            energyRuleResolver: static::tripEnergyRuleResolver(),
         );
     }
 

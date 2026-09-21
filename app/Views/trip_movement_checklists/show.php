@@ -31,6 +31,8 @@
 /** @var array<string, mixed> $recoveryFormData */
 /** @var array<string, string> $recoveryLocationOptions */
 /** @var string|null $recoveryLocationPrefill */
+$tripIsOperational ??= true;
+$tripStatusCode ??= null;
 $hnlGarages ??= (new \App\Services\Fleet\HnlGarageCatalog())->definitions();
 $guestReturn ??= null;
 $guestReturnActive ??= false;
@@ -95,11 +97,15 @@ $tripFacts ??= [
         <?php if (! ($checklist['exists'] ?? false)): ?>
             <section class="section"><div class="empty-state">Checklist not found.</div></section>
         <?php else: ?>
+            <?php if (! $tripIsOperational): ?>
+                <?= view('trip_movement_checklists/_inactive', ['checklist' => $checklist, 'tripStatusCode' => $tripStatusCode]) ?>
+            <?php else: ?>
             <?php if (($checklist['movement_type'] ?? null) === 'return'): ?>
                 <?= view('trip_movement_checklists/_return_workflow', ['checklist' => $checklist, 'readiness' => $readiness, 'guestReturn' => $guestReturn, 'guestReturnActive' => $guestReturnActive, 'returnCompleted' => $returnCompleted, 'canRecover' => $canRecover, 'turnaroundWork' => $turnaroundWork, 'recoveryExceptions' => $recoveryExceptions]) ?>
             <?php else: ?>
                 <?= view('trip_movement_checklists/_readiness', ['checklist' => $checklist, 'readiness' => $readiness, 'tripFacts' => $tripFacts]) ?>
             <?php endif; ?>
+            <?= view('trip_movement_checklists/_guest_commitments', ['checklist' => $checklist, 'guestCommitments' => $guestCommitments ?? []]) ?>
 
             <?php if (($checklist['movement_type'] ?? null) === 'return'): ?>
                 <?php if ($canRecover): ?>
@@ -216,6 +222,7 @@ $tripFacts ??= [
                 </section>
                 <?php endif; ?>
             <?php endif; ?>
+            <?php endif; ?>
 
             <?php if ($tripContext !== null): ?>
                 <section class="section trip-context">
@@ -259,14 +266,14 @@ $tripFacts ??= [
                         <article class="trip-fact<?= $factTarget === $factType ? ' is-selected' : '' ?>" aria-labelledby="<?= esc($factType, 'attr') ?>-fact-heading">
                             <div class="trip-fact__header">
                                 <div><p class="eyebrow"><?= esc($factLabel) ?></p><h3 id="<?= esc($factType, 'attr') ?>-fact-heading"><?= $fact === null ? 'Not recorded' : esc((string) $fact['event_title']) ?></h3></div>
-                                <?php if ($fact !== null && ! $correctingFacts && ! $repairingFacts): ?>
+                                <?php if ($tripIsOperational && $fact !== null && ! $correctingFacts && ! $repairingFacts): ?>
                                     <div class="fact-actions">
                                         <a class="action-link" href="/operations/checklists/<?= (int) $checklist['id'] ?>?correct=1&amp;fact=<?= esc($factType, 'attr') ?>">Correct <?= esc(strtolower($factLabel)) ?></a>
                                         <a class="action-link" href="/operations/checklists/<?= (int) $checklist['id'] ?>?repair=1&amp;fact=<?= esc($factType, 'attr') ?>">Recorded on wrong trip</a>
                                     </div>
                                 <?php endif; ?>
                             </div>
-                            <?php if ($factType === 'pickup' && $fact === null && $canRecordRetroactiveHandoff): ?>
+                            <?php if ($tripIsOperational && $factType === 'pickup' && $fact === null && $canRecordRetroactiveHandoff): ?>
                                 <?php if (! $showRetroactiveHandoffForm): ?>
                                     <a class="action-link" href="?action=record-handoff#pickup-fact-heading">Record pickup / handoff</a>
                                 <?php else: ?>
@@ -290,7 +297,7 @@ $tripFacts ??= [
                                     <div><dt><?= esc((string) $fact['energy_label']) ?></dt><dd><?= esc((string) $fact['energy_value']) ?></dd></div>
                                     <div><dt>Provenance</dt><dd><?= esc((string) $fact['source_label']) ?> · <?= esc((string) $fact['actor_label']) ?></dd></div>
                                 </dl>
-                                <?php if ($factType === 'return' && ($fact['event_code'] ?? null) === 'vehicle_recovered'): ?>
+                                <?php if ($tripIsOperational && $factType === 'return' && ($fact['event_code'] ?? null) === 'vehicle_recovered'): ?>
                                     <details class="secondary-disclosure"><summary>Void recovery</summary>
                                         <form class="issue-filters" action="/operations/checklists/<?= (int) $checklist['id'] ?>/recover-vehicle/void" method="post">
                                             <?= csrf_field() ?>
@@ -307,6 +314,7 @@ $tripFacts ??= [
                 <?php if ($tripFacts['pickup'] === null && $tripFacts['return'] === null && $currentLocation !== null): ?>
                     <p class="muted"><?= esc((string) ($currentLocation['location_label'] ?? 'Last known location')) ?>: <?= esc(ucwords(str_replace('_', ' ', (string) ($currentLocation['location_class'] ?? 'unknown')))) ?></p>
                 <?php endif; ?>
+                <?php if ($tripIsOperational): ?>
                 <?php
 $movementType = (string) (($correctingFacts || $repairingFacts) ? ($latestFacts['movement_type'] ?? $factTarget ?? $checklist['movement_type'] ?? 'movement') : ($checklist['movement_type'] ?? 'movement'));
 $formAction = $correctingFacts ? '/operations/checklists/' . (int) $checklist['id'] . '/facts/correct' : '/operations/checklists/' . (int) $checklist['id'] . '/facts';
@@ -406,8 +414,9 @@ $energyPercent = $factFormData['energy_percent'] ?? '';
                     <?php if ($correctingFacts): ?><a class="action-link" href="/operations/checklists/<?= (int) $checklist['id'] ?>">Cancel correction</a><?php endif; ?>
                 </form>
                 <?php endif; ?>
+                <?php endif; ?>
             </section>
-            <?= view('trip_movement_checklists/_position', ['checklist' => $checklist, 'currentLocation' => $currentLocation, 'tripContext' => $tripContext, 'showPositionForm' => $showPositionForm, 'positionFormData' => $positionFormData, 'hnlGarages' => $hnlGarages]) ?>
+            <?= view('trip_movement_checklists/_position', ['checklist' => $checklist, 'currentLocation' => $currentLocation, 'tripContext' => $tripContext, 'showPositionForm' => $showPositionForm, 'positionFormData' => $positionFormData, 'hnlGarages' => $hnlGarages, 'readOnly' => ! $tripIsOperational]) ?>
         <?php endif; ?>
 
         <?= view('fleet_command_center/components/footer') ?>

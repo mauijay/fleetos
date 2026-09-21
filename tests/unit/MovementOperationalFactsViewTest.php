@@ -907,6 +907,75 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
         $this->assertStringContainsString('Turo Access instructions confirmed', $html);
     }
 
+    public function testCanceledMovementRendersHistoricalReadOnlyAndReactivationRestoresWorkflow(): void
+    {
+        $items = [
+            ['id' => 91, 'item_code' => 'vehicle_inspected', 'label' => 'Vehicle inspected', 'completion_state' => 'complete', 'applicability' => 'applicable', 'completion_source' => 'manual', 'completed_at' => '2026-09-20 08:00:00', 'note' => 'Recorded before cancellation'],
+            ['id' => 92, 'item_code' => 'guest_pickup_instructions_confirmed', 'label' => 'Guest pickup instructions confirmed', 'completion_state' => 'open', 'applicability' => 'applicable', 'completion_source' => null, 'completed_at' => null, 'note' => null],
+        ];
+        $trip = ['id' => 100, 'turo_trip_id' => 900100, 'guest_name' => 'Canceled Guest', 'starts_at' => '2026-09-20 09:00:00', 'ends_at' => '2026-09-21 09:00:00', 'pickup_location_class' => 'home', 'return_location_class' => 'home', 'trip_status_code' => 'canceled_zero_payout'];
+        $readiness = [
+            'ready' => true,
+            'blocking_remaining_count' => 0,
+            'readiness_phase' => 'pickup_preparation',
+            'requirements' => [
+                ['code' => 'guest_handoff', 'label' => 'Guest handoff', 'phase' => 'pickup_lifecycle', 'kind' => 'derived', 'status' => 'unsatisfied', 'blocking' => false, 'satisfied_by' => null, 'basis_at' => null, 'action' => ['type' => 'record_fact', 'label' => 'Record actual guest handoff'], 'allows_na' => false],
+            ],
+            'workflow_history' => ['historically_completed' => false, 'completed_at' => null, 'legacy_items' => $items],
+        ];
+        $data = [
+            'tripIsOperational' => false,
+            'tripStatusCode' => 'canceled_zero_payout',
+            'checklist' => ['items' => $items, 'audits' => [['action' => 'item_completed', 'created_at' => '2026-09-20 08:00:00', 'trip_movement_checklist_item_id' => 91]], 'vehicle_disposition' => null],
+            'readiness' => $readiness,
+            'tripContext' => ['previous' => null, 'current' => $trip, 'next' => null],
+            'tripFacts' => ['pickup' => null, 'return' => null],
+            'currentLocation' => ['operational_state' => 'operator_held', 'location_class' => 'home', 'location_detail' => 'Fleet driveway', 'observed_at' => '2026-09-20 08:30:00'],
+            'canRecordRetroactiveHandoff' => true,
+            'showRetroactiveHandoffForm' => true,
+            'showPositionForm' => true,
+        ];
+        $html = $this->render('pickup', [], false, [], $data);
+
+        $this->assertStringContainsString('Trip canceled', $html);
+        $this->assertStringContainsString('No operational work is required.', $html);
+        $this->assertStringContainsString('This movement is preserved for history and audit. Preparation and handoff actions are no longer applicable.', $html);
+        $this->assertStringContainsString('Checklist history', $html);
+        $this->assertStringContainsString('Vehicle inspected', $html);
+        $this->assertStringContainsString('Guest pickup instructions confirmed', $html);
+        $this->assertStringContainsString('Checklist audit: item_completed', $html);
+        $this->assertStringContainsString('Reservation context', $html);
+        $this->assertStringContainsString('Canceled Zero Payout', $html);
+        $this->assertStringContainsString('Trip facts', $html);
+        $this->assertStringContainsString('Review preserved Guest Commitments', $html);
+        $this->assertStringNotContainsString('id="readiness-heading" tabindex="-1">Ready', $html);
+        $this->assertStringNotContainsString('Action required', $html);
+        $this->assertStringNotContainsString('Close Movement Workflow', $html);
+        $this->assertStringNotContainsString('Completion note', $html);
+        $this->assertStringNotContainsString('Record Guest Handoff', $html);
+        $this->assertStringNotContainsString('Confirm Guest Pickup', $html);
+        $this->assertStringNotContainsString('/operations/checklist-items/91/', $html);
+        $this->assertStringNotContainsString('/operations/checklist-items/92/', $html);
+        $this->assertStringNotContainsString('Record vehicle position', $html);
+        $this->assertStringContainsString('Current vehicle position', $html);
+        $this->assertStringContainsString('id="position-heading">Home', $html);
+        $this->assertStringContainsString('Fleet driveway', $html);
+        $this->assertStringNotContainsString('Positioning plan', $html);
+
+        $trip['trip_status_code'] = 'booked';
+        $data['tripIsOperational'] = true;
+        $data['tripStatusCode'] = 'booked';
+        $data['tripContext']['current'] = $trip;
+        $data['showRetroactiveHandoffForm'] = false;
+        $data['showPositionForm'] = false;
+        $reactivated = $this->render('pickup', [], false, [], $data);
+
+        $this->assertStringContainsString('Pickup preparation', $reactivated);
+        $this->assertStringContainsString('id="readiness-heading" tabindex="-1">Ready', $reactivated);
+        $this->assertStringContainsString('Close Movement Workflow', $reactivated);
+        $this->assertStringContainsString('Positioning plan', $reactivated);
+    }
+
     /** @param array<string, mixed> $latestFacts @param array<string, mixed> $formData */
     private function render(string $movementType, array $latestFacts, bool $correcting = false, array $formData = [], array $extra = []): string
     {

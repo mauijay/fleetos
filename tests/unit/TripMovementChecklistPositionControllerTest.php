@@ -17,13 +17,16 @@ use Config\Services;
 final class TripMovementChecklistPositionControllerTest extends CIUnitTestCase
 {
     private TripMovementChecklistPositionControllerTestService $facts;
+    private TripMovementChecklistPositionControllerTestRepository $repository;
 
     protected function setUp(): void
     {
         parent::setUp();
         $_SESSION = [];
         $this->facts = new TripMovementChecklistPositionControllerTestService();
+        $this->repository = new TripMovementChecklistPositionControllerTestRepository();
         Services::injectMock('movementOperationalFactService', $this->facts);
+        Services::injectMock('operationalFactsRepository', $this->repository);
         Services::injectMock('tripMovementChecklistService', new TripMovementChecklistPositionControllerTestChecklistService());
         $readiness = $this->createStub(MovementReadinessReadService::class);
         $readiness->method('forCompany')->willReturn([]);
@@ -98,14 +101,39 @@ final class TripMovementChecklistPositionControllerTest extends CIUnitTestCase
     public function testFailedChecklistPostKeepsAttemptedFocusableActionAnchor(): void
     {
         $repository = $this->getMockBuilder(OperationalFactsRepository::class)
-            ->disableOriginalConstructor()->onlyMethods(['activeFleetCompanyIds'])->getMock();
-        $repository->expects($this->once())->method('activeFleetCompanyIds')->willReturn([1]);
+            ->disableOriginalConstructor()->onlyMethods(['activeFleetCompanyIds', 'tripSchedule'])->getMock();
+        $repository->expects($this->exactly(2))->method('activeFleetCompanyIds')->willReturn([1]);
+        $repository->expects($this->once())->method('tripSchedule')->with(280)->willReturn(['id' => 280, 'trip_status_code' => 'booked', 'canceled_at' => null]);
         Services::injectMock('operationalFactsRepository', $repository);
 
         $response = $this->controller([])->completePhotos(623);
 
         $this->assertStringEndsWith('/operations/checklists/623#checklist-action-photos_complete', $response->getHeaderLine('Location'));
         $this->assertSame('Pickup photos could not be completed.', CoreServices::session()->getFlashdata('movement_checklist_error'));
+    }
+
+    public function testCanceledTripRejectsOperationalMutationBeforeWriting(): void
+    {
+        $this->repository->schedule = ['id' => 280, 'trip_status_code' => 'canceled_zero_payout', 'canceled_at' => '2026-09-20 08:00:00'];
+
+        $response = $this->controller([
+            'occurred_at' => '2026-09-20T09:00',
+            'location_class' => 'home',
+        ])->recordVehiclePosition(623);
+
+        $this->assertStringEndsWith('/operations/checklists/623#historical-workflow', $response->getHeaderLine('Location'));
+        $this->assertSame('This trip is canceled or invalid. Operational movement changes are not applicable.', CoreServices::session()->getFlashdata('movement_checklist_error'));
+        $this->assertSame(0, $this->facts->calls);
+    }
+
+    public function testMissingNormalizedTripRejectsOperationalMutationBeforeWriting(): void
+    {
+        $this->repository->schedule = null;
+
+        $response = $this->controller([])->completePhotos(623);
+
+        $this->assertStringEndsWith('/operations/checklists/623#checklist-action-photos_complete', $response->getHeaderLine('Location'));
+        $this->assertSame('This trip is canceled or invalid. Operational movement changes are not applicable.', CoreServices::session()->getFlashdata('movement_checklist_error'));
     }
 
     public function testRetroactiveHandoffPostUsesServerCompanyActorAndTripScopedRedirect(): void
@@ -193,9 +221,34 @@ final class TripMovementChecklistPositionControllerTestChecklistService extends 
         ];
     }
 
+    public function checklistForCompany(int $companyId, int $id): ?array
+    {
+        return $companyId === 1 ? $this->checklist($id) : null;
+    }
+
     public function completePickupPhotos(int $checklistId, int $companyId, int $actorUserId): bool
     {
         return false;
+    }
+}
+
+final class TripMovementChecklistPositionControllerTestRepository extends OperationalFactsRepository
+{
+    /** @var array<string, mixed>|null */
+    public ?array $schedule = ['id' => 280, 'trip_status_code' => 'booked', 'canceled_at' => null];
+
+    public function __construct()
+    {
+    }
+
+    public function activeFleetCompanyIds(?string $asOfDate = null): array
+    {
+        return [1];
+    }
+
+    public function tripSchedule(int $tripId): ?array
+    {
+        return $tripId === 280 ? $this->schedule : null;
     }
 }
 

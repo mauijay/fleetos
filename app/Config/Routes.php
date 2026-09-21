@@ -47,6 +47,12 @@ $routes->group('', ['filter' => 'session'], static function (RouteCollection $ro
     });
     $routes->get('operations/checklists/(:num)', 'TripMovementChecklists::show/$1', ['filter' => 'permission:admin.access']);
     $routes->get('operations/vehicles/(:num)/trip-history', 'TripMovementChecklists::vehicleTripHistory/$1', ['filter' => 'permission:admin.access']);
+    $routes->get('operations/trips/(:num)/commitments', 'TripCommitments::index/$1', ['filter' => 'permission:admin.access']);
+    $routes->post('operations/trips/(:num)/commitments', 'TripCommitments::create/$1', ['filter' => 'permission:admin.access']);
+    $routes->post('operations/trips/(:num)/commitments/(:num)/edit', 'TripCommitments::edit/$1/$2', ['filter' => 'permission:admin.access']);
+    $routes->post('operations/trips/(:num)/commitments/(:num)/acknowledge', 'TripCommitments::acknowledge/$1/$2', ['filter' => 'permission:admin.access']);
+    $routes->post('operations/trips/(:num)/commitments/(:num)/complete', 'TripCommitments::complete/$1/$2', ['filter' => 'permission:admin.access']);
+    $routes->post('operations/trips/(:num)/commitments/(:num)/cancel', 'TripCommitments::cancel/$1/$2', ['filter' => 'permission:admin.access']);
     $routes->post('operations/trips/(:num)/actual-handoff', 'TripMovementChecklists::recordRetroactiveHandoff/$1', ['filter' => 'permission:admin.access']);
     $routes->post('operations/checklists/(:num)/facts', 'TripMovementChecklists::recordFacts/$1', ['filter' => 'permission:admin.access']);
     $routes->post('operations/checklists/(:num)/guest-return-staged', 'TripMovementChecklists::stageGuestReturn/$1', ['filter' => 'permission:admin.access']);

@@ -71,6 +71,7 @@ class MovementReadinessProjectionService
             'is_same_day_turnaround' => ($context['next_trip']['is_same_day_turnaround'] ?? false) === true,
             'positioning_plan' => $context['positioning_plan'],
             'preparation_assessment' => $preparationAssessment,
+            'energy_rule' => $context['energy_rule'] ?? null,
             'exceptional_dispositions' => self::EXCEPTIONAL_DISPOSITIONS,
             'workflow_history' => [
                 'historically_completed' => $context['completed_at'] !== null,
@@ -92,7 +93,7 @@ class MovementReadinessProjectionService
         $assessment = $this->preparationAssessment($context, false);
         $assessmentAuthority = $assessment['_authority'] ?? 'movement_assessment';
         $profile = $context['profile'] ?? [];
-        $target = isset($profile['ready_energy_target_percent']) ? (int) $profile['ready_energy_target_percent'] : null;
+        $energyRule = $context['energy_rule'] ?? $this->profileEnergyRule($profile);
         $energy = isset($assessment['energy_percent']) ? (int) $assessment['energy_percent'] : null;
         $clean = ($assessment['cleanliness'] ?? null) === 'clean';
         $workflow = $context['airport_workflow'];
@@ -105,9 +106,7 @@ class MovementReadinessProjectionService
             $this->photosRequirement($context),
             $this->derivedRequirement('vehicle_clean', 'Vehicle clean', self::PHASE_PICKUP_PREPARATION, $clean, true, $clean ? $assessmentAuthority : null, $assessment['captured_at'] ?? null, 'Record clean pickup condition'),
             $this->derivedRequirement('energy_known', 'Energy known', self::PHASE_PICKUP_PREPARATION, $energy !== null, true, $energy !== null ? $assessmentAuthority : null, $assessment['captured_at'] ?? null, 'Record Charge/Fuel percentage'),
-            $target === null
-                ? $this->notApplicableRequirement('energy_ready', 'Energy ready', self::PHASE_PICKUP_PREPARATION)
-                : $this->derivedRequirement('energy_ready', 'Energy ready', self::PHASE_PICKUP_PREPARATION, $energy !== null && $energy >= $target, true, $energy !== null ? $assessmentAuthority . '_and_profile' : null, $assessment['captured_at'] ?? null, 'Charge/Fuel to ' . $target . '%'),
+            $this->energyRequirement('energy_ready', 'Energy ready', self::PHASE_PICKUP_PREPARATION, $energyRule, $energy, $assessmentAuthority, $assessment['captured_at'] ?? null),
             $this->locationRequirement($context, $actualLocation),
             $this->keyRequirement($context, $workflow),
             $this->chargingAdapterRequirement($context),
@@ -115,6 +114,7 @@ class MovementReadinessProjectionService
             $this->airportMilestoneRequirement('parking_location_recorded', 'Parking location recorded', $staged, $workflow, $isAirport, $this->hasStructuredParking($staged) || $this->hasWorkflowParking($workflow), 'Record parking location'),
             $this->derivedRequirement('guest_handoff', 'Guest handoff', self::PHASE_PICKUP_LIFECYCLE, $handoff !== null, false, $handoff !== null ? 'movement_event' : null, $handoff['occurred_at'] ?? null, 'Record actual guest handoff'),
         ];
+        $requirements = array_merge($requirements, $this->commitmentRequirements($context['active_commitments'] ?? [], self::PHASE_PICKUP_PREPARATION));
 
         if ($handoff !== null) {
             $requirements = $this->suppressCompletedMovementPreparation($requirements, self::PHASE_PICKUP_PREPARATION);
@@ -130,9 +130,8 @@ class MovementReadinessProjectionService
         $return = $events['actual_return'] ?? null;
         $recovery = $events['vehicle_recovered'] ?? null;
         $received = $return ?? $recovery;
-        $profile = $context['profile'] ?? [];
-        $target = isset($profile['ready_energy_target_percent']) ? (int) $profile['ready_energy_target_percent'] : null;
         $nextTrip = $context['next_trip'] ?? null;
+        $energyRule = $context['next_trip_energy_rule'] ?? ($nextTrip === null ? null : $this->profileEnergyRule($context['profile'] ?? []));
         $nextPickupAssessment = $this->preparationAssessment($context, true);
         $nextPickupAuthority = $nextPickupAssessment['_authority'] ?? 'movement_assessment';
         $receivedAt = (string) ($received['occurred_at'] ?? '');
@@ -147,6 +146,10 @@ class MovementReadinessProjectionService
         $requirements = [
             $this->derivedRequirement('vehicle_recovery', 'Vehicle recovery', self::PHASE_RETURN_INTAKE, $received !== null, true, $received !== null ? 'movement_event' : null, $received['occurred_at'] ?? null, 'Recover Vehicle'),
         ];
+        $requirements = array_merge(
+            $requirements,
+            $this->commitmentRequirements($context['active_commitments'] ?? [], self::PHASE_RETURN_INTAKE),
+        );
 
         if ($nextTrip !== null) {
             $requirements[] = $this->nextPickupRequirement(
@@ -154,11 +157,12 @@ class MovementReadinessProjectionService
                 $nextTrip,
             );
             $requirements[] = $this->nextPickupRequirement(
-                $target === null
-                    ? $this->notApplicableRequirement('energy_ready', 'Energy ready for next pickup', self::PHASE_NEXT_PICKUP_PREPARATION)
-                    : $this->derivedRequirement('energy_ready', 'Energy ready for next pickup', self::PHASE_NEXT_PICKUP_PREPARATION, $nextPickupEnergy !== null && $nextPickupEnergy >= $target, true, $nextPickupEnergy !== null ? ($nextPickupAssessment['_energy_percent_authority'] ?? $nextPickupAuthority) . '_and_profile' : null, $energyAt ?: null, 'Charge/Fuel to ' . $target . '%'),
+                $this->energyRequirement('energy_ready', 'Energy ready for next pickup', self::PHASE_NEXT_PICKUP_PREPARATION, $energyRule ?? $this->profileEnergyRule([]), $nextPickupEnergy, $nextPickupAssessment['_energy_percent_authority'] ?? $nextPickupAuthority, $energyAt ?: null),
                 $nextTrip,
             );
+            foreach ($this->commitmentRequirements($context['next_trip_commitments'] ?? [], self::PHASE_NEXT_PICKUP_PREPARATION) as $requirement) {
+                $requirements[] = $this->nextPickupRequirement($requirement, $nextTrip);
+            }
         }
 
         if (($context['next_pickup_handoff'] ?? null) !== null) {
@@ -442,6 +446,79 @@ class MovementReadinessProjectionService
             $satisfied ? $basisAt : null,
             $satisfied ? null : ['type' => 'record_fact', 'label' => $actionLabel],
         );
+    }
+
+    /** @param array<string, mixed> $rule @return array<string, mixed> */
+    private function energyRequirement(string $code, string $label, string $phase, array $rule, ?int $energy, string $authority, mixed $basisAt): array
+    {
+        if (($rule['percent'] ?? null) === null) {
+            return $this->notApplicableRequirement($code, $label, $phase);
+        }
+        $evaluation = (new TripEnergyRuleResolver())->evaluate($rule, $energy);
+        $ruleAuthority = ($rule['source'] ?? null) === 'trip_commitment' ? 'trip_commitment' : 'profile';
+        $requirement = $this->derivedRequirement(
+            $code,
+            $label,
+            $phase,
+            (bool) $evaluation['ready'],
+            (bool) ($rule['required'] ?? true),
+            $evaluation['ready'] ? $authority . '_and_' . $ruleAuthority : null,
+            $basisAt,
+            (string) ($evaluation['action_label'] ?? 'Review energy'),
+        );
+        $requirement['energy_rule'] = $rule;
+        $requirement['energy_condition'] = $evaluation['condition'];
+        $requirement['attention_label'] = $evaluation['attention_label'];
+
+        return $requirement;
+    }
+
+    /** @param list<array<string, mixed>> $commitments @return list<array<string, mixed>> */
+    private function commitmentRequirements(array $commitments, string $phase): array
+    {
+        $requirements = [];
+        foreach ($commitments as $commitment) {
+            if (! (bool) ($commitment['required_before_dispatch'] ?? false)
+                || ! in_array($commitment['handling_mode'], ['task', 'acknowledgment'], true)) {
+                continue;
+            }
+            $satisfied = $commitment['handling_mode'] === 'acknowledgment'
+                && ($commitment['acknowledged_at'] ?? null) !== null;
+            $id = (int) $commitment['id'];
+            $requirements[] = $this->requirement(
+                'guest_commitment_' . $id,
+                (string) $commitment['instruction'],
+                $phase,
+                self::KIND_HUMAN,
+                $satisfied ? self::STATUS_SATISFIED : self::STATUS_UNSATISFIED,
+                true,
+                $satisfied ? 'guest_commitment_acknowledgment' : null,
+                $satisfied ? $commitment['acknowledged_at'] : null,
+                $satisfied ? null : [
+                    'type' => $commitment['handling_mode'] === 'task' ? 'guest_commitment_complete' : 'guest_commitment_acknowledge',
+                    'commitment_id' => $id,
+                    'trip_id' => (int) $commitment['turo_trip_normalized_id'],
+                    'label' => (string) $commitment['instruction'],
+                ],
+            );
+        }
+
+        return $requirements;
+    }
+
+    /** @param array<string, mixed> $profile @return array<string, mixed> */
+    private function profileEnergyRule(array $profile): array
+    {
+        $target = isset($profile['ready_energy_target_percent']) ? (int) $profile['ready_energy_target_percent'] : null;
+
+        return [
+            'source' => $target === null ? 'unconfigured' : 'vehicle_profile',
+            'comparison' => $target === null ? null : 'minimum',
+            'percent' => $target,
+            'normal_vehicle_target' => $target,
+            'commitment_id' => null,
+            'required' => true,
+        ];
     }
 
     /** @return array<string, mixed> */

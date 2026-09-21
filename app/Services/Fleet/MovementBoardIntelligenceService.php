@@ -4,6 +4,7 @@ namespace App\Services\Fleet;
 
 use App\Repositories\OperationalFactsRepository;
 use App\Repositories\VehicleRecoveryExceptionRepository;
+use Config\Services;
 
 class MovementBoardIntelligenceService
 {
@@ -15,6 +16,8 @@ class MovementBoardIntelligenceService
         private readonly ?VehiclePositioningRecommendationService $positioningService = null,
         private readonly ?VehiclePositioningPlanService $positioningPlanService = null,
         private readonly HnlGarageCatalog $hnlGarages = new HnlGarageCatalog(),
+        private readonly ?TripCommitmentService $tripCommitmentService = null,
+        private readonly ?TripEnergyRuleResolver $energyRuleResolver = null,
     ) {
     }
 
@@ -29,7 +32,7 @@ class MovementBoardIntelligenceService
         $energy = $companyId !== null && $companyId > 0
             ? $this->repo()->latestEnergyForCompany($companyId, $vehicleIds, $asOf->format('Y-m-d H:i:s'))
             : [];
-        $work = new OperationalMovementWorkService($this->repo());
+        $work = new OperationalMovementWorkService($this->repo(), $this->nextTrips(), $this->energyRules());
         $cleaningNeeds = $companyId !== null && $companyId > 0
             ? array_column($work->cleaningNeedsForCompany($companyId, $asOf), null, 'fleet_vehicle_id')
             : [];
@@ -102,6 +105,7 @@ class MovementBoardIntelligenceService
             'assessment' => $assessment,
             'cleaning_required' => $cleaningRequired,
             ...($companyId !== null ? ['energy_condition' => $energyNeed['condition_code'] ?? null] : []),
+            ...($companyId !== null ? ['energy_target_percent' => $energyNeed['target_percent'] ?? null] : []),
             'profile' => $profile,
             'next_trip' => $nextTrip,
             'blockers' => $blockers,
@@ -120,13 +124,14 @@ class MovementBoardIntelligenceService
             'assessment' => $assessment,
             'cleaning_required' => $cleaningRequired,
             'profile' => $profile,
+            'energy_condition' => $energyNeed['condition_code'] ?? null,
             'capabilities' => $profile['capabilities'] ?? [],
             'blockers' => $state['blockers'],
             'transportation_state' => $card['transportation_state'] ?? $usablePlan['transportation_state'] ?? 'unknown',
             'active_override' => $activePlan,
         ]);
         $energyKind = (string) ($profile['energy_kind'] ?? 'unknown');
-        $recommendation = $this->presentRecommendation($recommendation, $assessment, $profile, $cleaningRequired);
+        $recommendation = $this->presentRecommendation($recommendation, $assessment, $profile, $cleaningRequired, $energyNeed);
         $currentTrip = $this->presentCurrentTrip($schedule, (string) $state['code']);
         $currentMovementHref = $currentTrip === null ? null : $this->movementHref($state, $card, $schedule);
         $readinessRemaining = (int) ($card['readiness_blocking_remaining'] ?? 0);
@@ -139,6 +144,22 @@ class MovementBoardIntelligenceService
             $readinessRemaining = 0;
         }
         $lifecycleCode = (string) ($lifecycleEvent['event_code'] ?? '');
+        $commitmentTripId = match (true) {
+            in_array($lifecycleCode, ['actual_handoff', 'guest_return_staged'], true) => (int) ($tripId ?? 0),
+            ($nextTrip['planning_horizon'] ?? 'distant') !== 'distant' => (int) ($nextTrip['id'] ?? 0),
+            in_array($lifecycleCode, ['actual_return', 'vehicle_recovered'], true) => 0,
+            default => (int) ($tripId ?? 0),
+        };
+        $commitmentPhases = in_array($lifecycleCode, ['actual_handoff', 'guest_return_staged'], true)
+            ? ['return', 'entire_trip']
+            : ['preparation', 'pickup', 'entire_trip'];
+        $commitmentEnergyRule = $companyId !== null && $companyId > 0 && $commitmentTripId > 0
+            ? $this->energyRules()->forTrip($companyId, $commitmentTripId, $profile)
+            : null;
+        $guestCommitments = $companyId !== null && $companyId > 0 && $commitmentTripId > 0 && $this->tripCommitmentService !== null
+            ? $this->tripCommitmentService->activeForTrip($companyId, $commitmentTripId, $commitmentPhases, $commitmentEnergyRule)
+            : [];
+        $guestCommitmentPreview = array_slice($guestCommitments, 0, 2);
         $hasCustodyFact = in_array($lifecycleCode, ['actual_handoff', 'guest_return_staged', 'actual_return', 'vehicle_recovered'], true);
         $usesResolvedState = $hasCustodyFact || in_array($state['code'], ['pickup_confirmation_overdue', 'return_confirmation_overdue'], true);
         $primaryStatus = $usesResolvedState ? match ($state['code']) {
@@ -164,6 +185,8 @@ class MovementBoardIntelligenceService
                 $flags[] = 'charging_required';
             } elseif (($energyNeed['condition_code'] ?? null) === 'measurement_needed') {
                 $flags[] = 'energy_check_required';
+            } elseif (($energyNeed['condition_code'] ?? null) === 'above_maximum') {
+                $flags[] = 'energy_attention_required';
             }
         }
 
@@ -208,6 +231,13 @@ class MovementBoardIntelligenceService
             'positioning_plan_href' => '/fleet/vehicles/' . $vehicleId . '/positioning-plan',
             'freshness' => $freshness,
             'action' => $this->presentAction($state, $card, $vehicleId, $schedule),
+            'guest_commitments' => [
+                'trip_id' => $commitmentTripId > 0 ? $commitmentTripId : null,
+                'count' => count($guestCommitments),
+                'preview' => $guestCommitmentPreview,
+                'required' => array_any($guestCommitments, static fn (array $row): bool => (bool) ($row['is_blocking'] ?? false)),
+                'href' => $commitmentTripId > 0 ? '/operations/trips/' . $commitmentTripId . '/commitments' : null,
+            ],
         ]);
     }
 
@@ -455,7 +485,7 @@ class MovementBoardIntelligenceService
     }
 
     /** @return array<string, mixed> */
-    private function presentRecommendation(array $recommendation, ?array $assessment, array $profile, bool $cleaningRequired = false): array
+    private function presentRecommendation(array $recommendation, ?array $assessment, array $profile, bool $cleaningRequired = false, ?array $energyNeed = null): array
     {
         $actionLabels = [
             'await_recovery' => 'Recover Vehicle before preparation',
@@ -491,10 +521,9 @@ class MovementBoardIntelligenceService
             'wrong_airport_garage' => 'Wrong airport garage.',
         ];
         $reasonCodes = $recommendation['reason_codes'] ?? [];
-        $target = isset($profile['ready_energy_target_percent']) ? (int) $profile['ready_energy_target_percent'] : null;
         $isElectric = ($profile['energy_kind'] ?? null) === 'electric';
         $isDirty = $cleaningRequired || ($assessment['cleanliness'] ?? null) === 'dirty';
-        $isBelowTarget = $target !== null && isset($assessment['energy_percent']) && (int) $assessment['energy_percent'] < $target;
+        $isBelowTarget = ($energyNeed['condition_code'] ?? null) === 'charge_required';
         $needsTurnaround = $isElectric && ($isDirty || $isBelowTarget);
         $reasons = [];
         foreach ($reasonCodes as $code) {
@@ -628,5 +657,9 @@ class MovementBoardIntelligenceService
     private function plans(): VehiclePositioningPlanService
     {
         return $this->positioningPlanService ?? new VehiclePositioningPlanService($this->repo());
+    }
+    private function energyRules(): TripEnergyRuleResolver
+    {
+        return $this->energyRuleResolver ?? Services::tripEnergyRuleResolver();
     }
 }

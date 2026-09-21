@@ -18,6 +18,11 @@ class TripMovementChecklists extends BaseController
     {
         $checklist = Services::tripMovementChecklistService()->checklistForCompany($this->activeCompanyId(), $id) ?? ['exists' => false];
         $companyId = (int) ($checklist['company_id'] ?? 0);
+        $tripSchedule = ($checklist['exists'] ?? false)
+            ? Services::operationalFactsRepository()->tripSchedule((int) $checklist['turo_trip_normalized_id'])
+            : null;
+        $tripIsOperational = ! ($checklist['exists'] ?? false)
+            || ($tripSchedule !== null && Services::tripCommitmentService()->tripIsOperational($tripSchedule));
         $readiness = ($checklist['exists'] ?? false) && $companyId > 0
             ? (Services::movementReadinessReadService()->forCompany($companyId, [$id])[$id] ?? null)
             : null;
@@ -33,7 +38,7 @@ class TripMovementChecklists extends BaseController
         $returnCompleted = ($checklist['exists'] ?? false) && ($checklist['movement_type'] ?? null) === 'return'
             && Services::movementEventService()->activeForTrip((int) $checklist['turo_trip_normalized_id'], ['actual_return', 'vehicle_recovered']) !== null;
         $custody = ($checklist['exists'] ?? false) ? Services::operationalFactsRepository()->latestActiveLifecycleEvent((int) $checklist['fleet_vehicle_id']) : null;
-        $canRecover = ($checklist['movement_type'] ?? null) === 'return' && ! $returnCompleted
+        $canRecover = $tripIsOperational && ($checklist['movement_type'] ?? null) === 'return' && ! $returnCompleted
             && (int) ($custody['turo_trip_normalized_id'] ?? 0) === (int) ($checklist['turo_trip_normalized_id'] ?? 0)
             && in_array($custody['event_code'] ?? null, ['actual_handoff', 'guest_return_staged'], true);
         $recoveryExceptions = ($checklist['movement_type'] ?? null) === 'return' && $companyId > 0
@@ -68,15 +73,23 @@ class TripMovementChecklists extends BaseController
             ? $factsPresenter->mergeCorrectionFormData($selectedFacts['form_data'], $flashedFormData)
             : ($correctingFacts ? $selectedFacts['form_data'] : (is_array($flashedFormData) ? $flashedFormData : []));
         $retroactiveHandoffData = CoreServices::session()->getFlashdata('retroactive_handoff_data');
-        $tripSchedule = ($checklist['exists'] ?? false)
-            ? Services::operationalFactsRepository()->tripSchedule((int) $checklist['turo_trip_normalized_id'])
-            : null;
+        $commitmentPhases = ($checklist['movement_type'] ?? null) === 'return'
+            ? ['return', 'entire_trip']
+            : ['preparation', 'pickup', 'entire_trip'];
+        $guestCommitments = ($checklist['exists'] ?? false) && $companyId > 0
+            ? Services::tripCommitmentService()->activeForTrip(
+                $companyId,
+                (int) $checklist['turo_trip_normalized_id'],
+                $commitmentPhases,
+                $readiness['energy_rule'] ?? null,
+            )
+            : [];
         $locationClassifier = new LocationClassificationService();
         $recoveryLocationOptions = $locationClassifier->recoveryLocationOptions();
         $recoveryLocationPrefill = ($checklist['movement_type'] ?? null) === 'return'
             ? $locationClassifier->recoveryLocationFromPlannedReturn($tripSchedule['return_location_class'] ?? null)
             : null;
-        $canRecordRetroactiveHandoff = ($checklist['exists'] ?? false)
+        $canRecordRetroactiveHandoff = $tripIsOperational && ($checklist['exists'] ?? false)
             && $tripFacts['pickup'] === null
             && $tripFacts['return'] === null
             && in_array($tripSchedule['trip_status_code'] ?? null, ['booked', 'in_progress'], true);
@@ -91,6 +104,9 @@ class TripMovementChecklists extends BaseController
             'tripContext' => ($checklist['exists'] ?? false) ? Services::operationalFactsRepository()->tripContext((int) $checklist['turo_trip_normalized_id']) : null,
             'latestFacts' => $selectedFacts,
             'tripFacts' => $tripFacts,
+            'tripIsOperational' => $tripIsOperational,
+            'tripStatusCode' => $tripSchedule['trip_status_code'] ?? null,
+            'guestCommitments' => $guestCommitments,
             'factTarget' => $factTarget,
             'latestEvent' => $latestEvent,
             'guestReturn' => $guestReturn,
@@ -150,6 +166,9 @@ class TripMovementChecklists extends BaseController
         if ($item === null) {
             return CoreServices::redirectresponse()->to('/')->with('movement_checklist_error', 'Checklist item not found.');
         }
+        if (($inactive = $this->inactiveMovementRedirect((int) $item['trip_movement_checklist_id'], (new ChecklistActionFocusService())->actionAnchor((string) $item['item_code']))) !== null) {
+            return $inactive;
+        }
         return $this->back((int) $item['trip_movement_checklist_id'], Services::tripMovementChecklistService()->completeItemForCompany($this->activeCompanyId(), $id, $this->request->getPost('note'), $this->actorUserId()), 'Item completed.', 'That checklist item could not be completed.', (new ChecklistActionFocusService())->actionAnchor((string) $item['item_code']));
     }
 
@@ -158,6 +177,9 @@ class TripMovementChecklists extends BaseController
         $item = Services::movementChecklistRepository()->itemForCompany($this->activeCompanyId(), $id);
         if ($item === null) {
             return CoreServices::redirectresponse()->to('/')->with('movement_checklist_error', 'Checklist item not found.');
+        }
+        if (($inactive = $this->inactiveMovementRedirect((int) $item['trip_movement_checklist_id'], (new ChecklistActionFocusService())->actionAnchor((string) $item['item_code']))) !== null) {
+            return $inactive;
         }
         return $this->back((int) $item['trip_movement_checklist_id'], Services::tripMovementChecklistService()->undoItem($id, $this->actorUserId()), 'Item reopened.', 'That checklist item could not be reopened.', (new ChecklistActionFocusService())->actionAnchor((string) $item['item_code']));
     }
@@ -168,36 +190,57 @@ class TripMovementChecklists extends BaseController
         if ($item === null) {
             return CoreServices::redirectresponse()->to('/')->with('movement_checklist_error', 'Checklist item not found.');
         }
+        if (($inactive = $this->inactiveMovementRedirect((int) $item['trip_movement_checklist_id'], (new ChecklistActionFocusService())->actionAnchor((string) $item['item_code']))) !== null) {
+            return $inactive;
+        }
         return $this->back((int) $item['trip_movement_checklist_id'], Services::tripMovementChecklistService()->markNotApplicable($id, $this->request->getPost('note'), $this->actorUserId()), 'Item marked not applicable.', 'That checklist item could not be changed.', (new ChecklistActionFocusService())->actionAnchor((string) $item['item_code']));
     }
 
     public function completePhotos(int $id): RedirectResponse
     {
+        if (($inactive = $this->inactiveMovementRedirect($id, 'checklist-action-photos_complete')) !== null) {
+            return $inactive;
+        }
         return $this->back($id, Services::tripMovementChecklistService()->completePickupPhotos($id, $this->activeCompanyId(), $this->actorUserId()), 'Photos marked complete.', 'Pickup photos could not be completed.', 'checklist-action-photos_complete');
     }
 
     public function undoPhotos(int $id): RedirectResponse
     {
+        if (($inactive = $this->inactiveMovementRedirect($id, 'checklist-action-photos_complete')) !== null) {
+            return $inactive;
+        }
         return $this->back($id, Services::tripMovementChecklistService()->undoPickupPhotos($id, $this->activeCompanyId(), $this->actorUserId()), 'Photos reopened.', 'Pickup photos could not be reopened.', 'checklist-action-photos_complete');
     }
 
     public function confirmChargingAdapter(int $id): RedirectResponse
     {
+        if (($inactive = $this->inactiveMovementRedirect($id, 'checklist-action-charging_adapter_confirmed')) !== null) {
+            return $inactive;
+        }
         return $this->back($id, Services::tripMovementChecklistService()->confirmChargingAdapter($id, $this->activeCompanyId(), $this->actorUserId()), 'Charging adapter confirmed.', 'Charging adapter could not be confirmed.', 'checklist-action-charging_adapter_confirmed');
     }
 
     public function undoChargingAdapter(int $id): RedirectResponse
     {
+        if (($inactive = $this->inactiveMovementRedirect($id, 'checklist-action-charging_adapter_confirmed')) !== null) {
+            return $inactive;
+        }
         return $this->back($id, Services::tripMovementChecklistService()->undoChargingAdapter($id, $this->activeCompanyId(), $this->actorUserId()), 'Charging adapter reopened.', 'Charging adapter could not be reopened.', 'checklist-action-charging_adapter_confirmed');
     }
 
     public function setDisposition(int $id): RedirectResponse
     {
+        if (($inactive = $this->inactiveMovementRedirect($id)) !== null) {
+            return $inactive;
+        }
         return $this->back($id, Services::tripMovementChecklistService()->setDisposition($id, (string) $this->request->getPost('vehicle_disposition'), $this->actorUserId()), 'Exceptional hold saved.', 'Choose a valid exceptional hold.', 'exceptional-disposition');
     }
 
     public function complete(int $id): RedirectResponse
     {
+        if (($inactive = $this->inactiveMovementRedirect($id)) !== null) {
+            return $inactive;
+        }
         $checklist = Services::tripMovementChecklistService()->checklist($id);
         $companyId = (int) ($checklist['company_id'] ?? 0);
         $readiness = ($checklist['exists'] ?? false) && $companyId > 0
@@ -209,12 +252,18 @@ class TripMovementChecklists extends BaseController
 
     public function reopen(int $id): RedirectResponse
     {
+        if (($inactive = $this->inactiveMovementRedirect($id)) !== null) {
+            return $inactive;
+        }
         $confirmed = $this->request->getPost('confirm_reopen') === '1';
         return $this->back($id, $confirmed && Services::tripMovementChecklistService()->reopenChecklist($id, $this->actorUserId()), 'Movement workflow reopened.', 'Confirm before reopening a completed workflow.');
     }
 
     public function recordFacts(int $id): RedirectResponse
     {
+        if (($inactive = $this->inactiveMovementRedirect($id)) !== null) {
+            return $inactive;
+        }
         $data = $this->movementFactData();
         try {
             $ok = Services::movementOperationalFactService()->recordForChecklist(Services::tripMovementChecklistService()->checklist($id), $data, $this->actorUserId());
@@ -249,6 +298,9 @@ class TripMovementChecklists extends BaseController
 
     public function stageGuestReturn(int $id): RedirectResponse
     {
+        if (($inactive = $this->inactiveMovementRedirect($id)) !== null) {
+            return $inactive;
+        }
         $data = $this->request->getPost();
         try {
             $checklist = Services::tripMovementChecklistService()->checklistForCompany($this->activeCompanyId(), $id);
@@ -265,6 +317,9 @@ class TripMovementChecklists extends BaseController
 
     public function recoverVehicle(int $id): RedirectResponse
     {
+        if (($inactive = $this->inactiveMovementRedirect($id)) !== null) {
+            return $inactive;
+        }
         $data = $this->request->getPost();
         try {
             $checklist = Services::tripMovementChecklistService()->checklistForCompany($this->activeCompanyId(), $id);
@@ -391,6 +446,9 @@ class TripMovementChecklists extends BaseController
 
     public function stageAtHnl(int $id): RedirectResponse
     {
+        if (($inactive = $this->inactiveMovementRedirect($id)) !== null) {
+            return $inactive;
+        }
         $data = $this->movementFactData();
         try {
             $ok = Services::movementOperationalFactService()->stageForChecklist(Services::tripMovementChecklistService()->checklist($id), $data, $this->actorUserId());
@@ -402,6 +460,9 @@ class TripMovementChecklists extends BaseController
 
     public function confirmGuestPickup(int $id): RedirectResponse
     {
+        if (($inactive = $this->inactiveMovementRedirect($id)) !== null) {
+            return $inactive;
+        }
         $data = $this->movementFactData();
         try {
             $ok = Services::movementOperationalFactService()->confirmGuestPickup(Services::tripMovementChecklistService()->checklist($id), $data, $this->actorUserId());
@@ -418,6 +479,9 @@ class TripMovementChecklists extends BaseController
 
     public function recordVehiclePosition(int $id): RedirectResponse
     {
+        if (($inactive = $this->inactiveMovementRedirect($id)) !== null) {
+            return $inactive;
+        }
         $data = $this->movementFactData();
         try {
             $ok = Services::movementOperationalFactService()->recordVehiclePosition(Services::tripMovementChecklistService()->checklist($id), $data, $this->actorUserId());
@@ -471,6 +535,21 @@ class TripMovementChecklists extends BaseController
         } catch (\InvalidArgumentException $exception) {
             return CoreServices::redirectresponse()->to($repairHref . '#handoff-entry')->with('movement_checklist_error', $exception->getMessage());
         }
+    }
+
+    private function inactiveMovementRedirect(int $checklistId, string $anchor = 'historical-workflow'): ?RedirectResponse
+    {
+        $checklist = Services::tripMovementChecklistService()->checklistForCompany($this->activeCompanyId(), $checklistId);
+        if ($checklist === null) {
+            return null;
+        }
+        $trip = Services::operationalFactsRepository()->tripSchedule((int) $checklist['turo_trip_normalized_id']);
+        if ($trip !== null && Services::tripCommitmentService()->tripIsOperational($trip)) {
+            return null;
+        }
+
+        return CoreServices::redirectresponse()->to('/operations/checklists/' . $checklistId . '#' . $anchor)
+            ->with('movement_checklist_error', 'This trip is canceled or invalid. Operational movement changes are not applicable.');
     }
 
     private function back(int $checklistId, bool $ok, string $notice, string $error, string $attemptedAnchor = 'readiness-heading'): RedirectResponse

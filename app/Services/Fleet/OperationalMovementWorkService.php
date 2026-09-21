@@ -10,8 +10,11 @@ use RuntimeException;
 /** Shared, company-scoped movement completion and physical-work read model. */
 class OperationalMovementWorkService
 {
-    public function __construct(private readonly ?OperationalFactsRepository $repository = null)
-    {
+    public function __construct(
+        private readonly ?OperationalFactsRepository $repository = null,
+        private readonly ?NextConfirmedTripService $nextTripService = null,
+        private readonly ?TripEnergyRuleResolver $energyRuleResolver = null,
+    ) {
     }
 
     public function singleActiveCompanyId(DateTimeImmutable $asOf): int
@@ -124,12 +127,18 @@ class OperationalMovementWorkService
                 continue;
             }
             $profile = $this->repo()->profile($id);
-            $target = isset($profile['ready_energy_target_percent']) ? (int) $profile['ready_energy_target_percent'] : null;
+            $nextTrip = $this->nextTrips()->forVehicle($id, $asOf);
+            $targetTripId = (int) ($nextTrip['id'] ?? 0);
+            $rule = $targetTripId > 0
+                ? $this->energyRules()->forTrip($companyId, $targetTripId, $profile)
+                : $this->energyRules()->forProfile($profile);
+            $target = isset($rule['percent']) ? (int) $rule['percent'] : null;
             $measurement = $measurements[$id] ?? null;
             $isCurrent = $measurement !== null && ((int) ($measurement['trip_movement_event_id'] ?? 0) === (int) $event['id']
                 || (string) $measurement['captured_at'] > (string) $event['occurred_at']);
             $energy = $isCurrent ? (int) $measurement['energy_percent'] : null;
-            $condition = $target === null ? 'target_needed' : ($energy === null ? 'measurement_needed' : ($energy < $target ? 'charge_required' : null));
+            $evaluation = $this->energyRules()->evaluate($rule, $energy);
+            $condition = $evaluation['condition'];
             if ($condition === null) {
                 continue;
             }
@@ -139,15 +148,18 @@ class OperationalMovementWorkService
             $needs[] = array_merge($vehicle, [
                 'fleet_vehicle_id' => $id,
                 'turo_trip_normalized_id' => $tripId,
+                'target_trip_id' => $targetTripId > 0 ? $targetTripId : null,
                 'condition_code' => $condition,
                 'label' => match ($condition) {
-                    'charge_required' => $noun . ' Needed — ' . $energy . '%, target ' . $target . '%',
+                    'charge_required' => $noun . ' Needed — ' . $energy . '%, ' . (($rule['comparison'] ?? null) === 'target' ? 'trip target ' : 'minimum ') . $target . '%',
                     'measurement_needed' => $noun . ' level unknown',
+                    'above_maximum' => 'Above guest-requested maximum — ' . $energy . '%, limit ' . $target . '%',
                     default => $noun . ' target not configured',
                 },
-                'action_label' => $condition === 'target_needed' ? 'Configure Vehicle' : 'Record ' . $noun . ' Level',
+                'action_label' => $condition === 'target_needed' ? 'Configure Vehicle' : ($condition === 'above_maximum' ? 'Review guest charge limit' : 'Record ' . $noun . ' Level'),
                 'energy_percent' => $energy,
                 'target_percent' => $target,
+                'energy_rule' => $rule,
                 'energy_kind' => $energyKind,
                 'configuration_required' => $condition === 'target_needed',
                 'href' => $condition === 'target_needed'
@@ -162,5 +174,15 @@ class OperationalMovementWorkService
     private function repo(): OperationalFactsRepository
     {
         return $this->repository ?? Services::operationalFactsRepository();
+    }
+
+    private function nextTrips(): NextConfirmedTripService
+    {
+        return $this->nextTripService ?? Services::nextConfirmedTripService();
+    }
+
+    private function energyRules(): TripEnergyRuleResolver
+    {
+        return $this->energyRuleResolver ?? Services::tripEnergyRuleResolver();
     }
 }
