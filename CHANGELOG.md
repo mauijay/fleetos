@@ -1,5 +1,56 @@
 # Changelog
 
+## v0.16.0 — Guest Commitments & Trip Overrides
+
+Release date: 2026-09-20
+
+### Guest Commitments
+
+- Add first-class Guest Commitments attached to the normalized Turo trip rather than vehicle or checklist state.
+- Support pickup/meeting instructions, return instructions, vehicle setup, guest amenities, child-seat setup, energy overrides, timing arrangements, and other trip-specific commitments.
+- Support informational, acknowledgment, task, and automatic-override handling. Required-before-dispatch tasks contribute exactly one readiness blocker.
+- Record actor and time for completion, acknowledgment, and cancellation, with append-only commitment audit history.
+
+### Trip Energy Overrides
+
+- Add a centralized exact-trip energy-rule resolver with active trip override → vehicle profile → unconfigured precedence.
+- Support Target, Minimum, and Maximum rules without modifying vehicle profile defaults or leaking overrides to surrounding trips.
+- Treat Maximum 50% as Ready at 40% or 50%, and as above the guest-requested maximum requiring operator attention at 60%; never direct the operator to charge further.
+- Treat Target 50% as charge-toward-target at 40%, Ready at 50%, and Ready with no further charging at 60%. Minimum retains conventional lower-bound behavior.
+- Show the normal vehicle target alongside the guest-specific override when configured.
+
+### Timing & Special Instructions
+
+- Preserve the official Turo schedule while presenting guest-arranged times separately.
+- Keep informational instructions visible without creating readiness blockers.
+
+### Workflow & Command Center
+
+- Surface Guest Commitments directly in movement workflows and compact special-instruction previews on the Movement Board.
+- Integrate required commitment work into existing readiness and queue projections without inflating actionable counts for informational commitments.
+
+### Canceled & Invalid Trips
+
+- Preserve commitment records and audit history while suppressing active work for canceled or otherwise invalid trips.
+- Present canceled-trip commitments and movement workflows as read-only historical state, and fail closed at routine movement mutation endpoints.
+- Restore applicability from persisted state if the same normalized trip becomes operationally eligible again.
+
+### Extras & Financial Firewall
+
+- Keep Extras as commercial truth while allowing Guest Commitments to supplement fulfillment instructions.
+- Do not change Extra quantities or pricing, create financial postings, or alter realized revenue.
+
+### UX
+
+- Add the canonical Guest Commitments page with responsive behavior at 390px, 440px, desktop, and wide desktop while preserving FleetOS dark-mode styling.
+
+### Migration & Release Boundaries
+
+- Add migration `2026-09-20-000023_CreateFleetTripCommitments`, creating only `fleet_trip_commitments` and `fleet_trip_commitment_audits`.
+- Keep the schema additive with no backfill or modification of existing business rows.
+- This release requires migration 000023. It makes no dependency, financial-formula, or Extras commercial-behavior changes.
+- Include frontend CSS and JavaScript changes; production Vite assets must be transferred during deployment.
+
 ## v0.15.1 — Recovery Location Prefill & Progressive Disclosure
 
 Release date: 2026-09-20
