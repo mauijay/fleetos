@@ -4,6 +4,7 @@ use App\Repositories\OperationalFactsRepository;
 use App\Services\Fleet\CurrentVehicleLocationService;
 use App\Services\Fleet\MovementEventService;
 use App\Services\Fleet\MovementOperationalFactPresentationService;
+use App\Services\Fleet\TripCommitmentService;
 use App\Services\Fleet\TripMovementChecklistService;
 use App\Services\View\AssetManifestService;
 use CodeIgniter\Config\Services as CoreServices;
@@ -13,6 +14,7 @@ use CodeIgniter\Test\FeatureTestTrait;
 use CodeIgniter\View\View;
 use Config\Database;
 use Config\Services;
+use PHPUnit\Framework\MockObject\MockObject;
 
 /** @internal */
 final class MovementHandoffNavigationReadOnlyTest extends CIUnitTestCase
@@ -20,6 +22,9 @@ final class MovementHandoffNavigationReadOnlyTest extends CIUnitTestCase
     use FeatureTestTrait;
 
     private BaseConnection $connection;
+    private OperationalFactsRepository&MockObject $repository;
+    /** @var array<string, mixed> */
+    private array $renderData = [];
 
     protected function setUp(): void
     {
@@ -66,21 +71,32 @@ final class MovementHandoffNavigationReadOnlyTest extends CIUnitTestCase
         ]);
         Services::injectMock('currentVehicleLocationService', $location);
 
-        $repository = $this->createMock(OperationalFactsRepository::class);
-        $repository->method('tripContext')->willReturn(['previous' => null, 'current' => null, 'next' => null]);
-        $repository->method('activeFleetCompanyIds')->willReturn([1]);
-        $repository->method('vehicleForCompany')->willReturn(['id' => 9, 'company_id' => 1, 'fleet_code' => 'Test Vehicle 09']);
-        $repository->method('vehicleTripHistory')->willReturn([
+        $this->repository = $this->createMock(OperationalFactsRepository::class);
+        $this->repository->method('tripContext')->willReturn(['previous' => null, 'current' => null, 'next' => null]);
+        $this->repository->method('activeFleetCompanyIds')->willReturn([1]);
+        $this->repository->method('vehicleForCompany')->willReturn(['id' => 9, 'company_id' => 1, 'fleet_code' => 'Test Vehicle 09']);
+        $this->repository->method('vehicleTripHistory')->willReturn([
             ['id' => 101, 'fleet_vehicle_id' => 9, 'guest_name' => 'Test Guest', 'starts_at' => '2026-10-06 21:30:00', 'ends_at' => '2026-10-12 06:00:00', 'movement_href' => '/operations/checklists/41'],
         ]);
-        Services::injectMock('operationalFactsRepository', $repository);
+        Services::injectMock('operationalFactsRepository', $this->repository);
+
+        $commitments = $this->createMock(TripCommitmentService::class);
+        $commitments->method('workspace')->willReturn([
+            'trip' => ['id' => 101, 'fleet_vehicle_id' => 9],
+            'active' => [],
+        ]);
+        Services::injectMock('tripCommitmentService', $commitments);
 
         $assets = $this->createMock(AssetManifestService::class);
         $assets->method('appAssets')->willReturn(['css' => null, 'js' => null]);
         Services::injectMock('assetManifestService', $assets);
 
         $renderer = $this->createMock(View::class);
-        $renderer->method('setData')->willReturnSelf();
+        $renderer->method('setData')->willReturnCallback(function (array $data) use ($renderer): View {
+            $this->renderData = $data;
+
+            return $renderer;
+        });
         $renderer->method('render')->willReturn('<!doctype html><title>Movement Checklist</title>');
         CoreServices::injectMock('renderer', $renderer);
     }
@@ -109,14 +125,33 @@ final class MovementHandoffNavigationReadOnlyTest extends CIUnitTestCase
         $this->withRoutes([
             ['GET', 'operations/vehicles/(:num)/trip-history', 'TripMovementChecklists::vehicleTripHistory/$1'],
             ['GET', 'operations/checklists/(:num)', 'TripMovementChecklists::show/$1'],
+            ['GET', 'operations/trips/(:num)/commitments', 'TripCommitments::index/$1'],
         ]);
         $before = $this->factCounts();
 
         $this->call('GET', '/operations/vehicles/9/trip-history?trip=101')->assertOK();
         $this->call('GET', '/operations/checklists/40')->assertOK();
         $this->call('GET', '/operations/checklists/41')->assertOK();
+        $this->call('GET', '/operations/trips/101/commitments')->assertOK();
 
         $this->assertSame($before, $this->factCounts());
+        $this->assertSame([
+            'label' => 'Back to vehicle trip history',
+            'href' => '/operations/vehicles/9/trip-history?trip=101',
+        ], $this->renderData['backLink']);
+    }
+
+    public function testCommitmentsControllerUsesExactMovementBackLinkWhenChecklistExists(): void
+    {
+        $this->repository->method('movementChecklistHref')->willReturn('/operations/checklists/41');
+        $this->withRoutes([['GET', 'operations/trips/(:num)/commitments', 'TripCommitments::index/$1']]);
+
+        $this->call('GET', '/operations/trips/101/commitments')->assertOK();
+
+        $this->assertSame([
+            'label' => 'Back to movement workflow',
+            'href' => '/operations/checklists/41',
+        ], $this->renderData['backLink']);
     }
 
     /** @return array<string, int> */
@@ -141,6 +176,8 @@ final class MovementHandoffNavigationReadOnlyTest extends CIUnitTestCase
             'operational_fact_audits',
             'vehicle_positioning_plans',
             'airport_movement_workflows',
+            'fleet_trip_commitments',
+            'fleet_trip_commitment_audits',
         ];
     }
 }

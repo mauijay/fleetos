@@ -236,10 +236,10 @@ $tripFacts ??= [
                             <?php
                             $isCurrentTrip = $position === 'current';
                             $isCanceledTrip = $trip !== null && str_starts_with((string) ($trip['trip_status_code'] ?? ''), 'canceled');
-                            $contextHref = ! $isCurrentTrip && $trip !== null ? ($trip['movement_href'] ?? null) : null;
-                            $contextTag = $contextHref === null ? 'div' : 'a';
+                            $contextHref = $trip !== null ? ($trip['movement_href'] ?? null) : null;
+                            $commitmentsHref = $trip === null ? null : '/operations/trips/' . (int) $trip['id'] . '/commitments';
                             ?>
-                            <<?= $contextTag ?> class="trip-context-item<?= $isCurrentTrip ? ' is-current' : '' ?><?= $isCanceledTrip ? ' is-canceled' : '' ?><?= $contextHref !== null ? ' is-linked' : '' ?>"<?= $contextHref === null ? '' : ' href="' . esc((string) $contextHref, 'attr') . '" aria-label="Open ' . esc(strtolower($label), 'attr') . ' movement"' ?>>
+                            <article class="trip-context-item<?= $isCurrentTrip ? ' is-current' : '' ?><?= $isCanceledTrip ? ' is-canceled' : '' ?>">
                                 <p class="eyebrow"><?= esc($label) ?></p>
                                 <?php if ($trip === null): ?>
                                     <p class="muted">None</p>
@@ -250,9 +250,10 @@ $tripFacts ??= [
                                     <?php if (($trip['pickup_location_class'] ?? null) !== null): ?><span>Pickup: <?= esc(ucwords(str_replace('_', ' ', (string) $trip['pickup_location_class']))) ?></span><?php endif; ?>
                                     <?php if (($trip['return_location_class'] ?? null) !== null): ?><span>Return: <?= esc(ucwords(str_replace('_', ' ', (string) $trip['return_location_class']))) ?></span><?php endif; ?>
                                     <span><?= esc(ucwords(str_replace('_', ' ', (string) ($trip['trip_status_code'] ?? 'status unknown')))) ?></span>
-                                    <?php if ($contextHref !== null): ?><span class="trip-context-action">Open movement</span><?php endif; ?>
+                                    <?php if ($contextHref !== null): ?><a class="action-link trip-context-action" href="<?= esc((string) $contextHref, 'attr') ?>" aria-label="Open <?= esc(strtolower($label), 'attr') ?> movement">Open movement</a><?php endif; ?>
+                                    <a class="action-link trip-context-action" href="<?= esc((string) $commitmentsHref, 'attr') ?>" aria-label="Guest commitments for <?= esc(strtolower($label), 'attr') ?>">Guest commitments</a>
                                 <?php endif; ?>
-                            </<?= $contextTag ?>>
+                            </article>
                         <?php endforeach; ?>
                     </div>
                 </section>

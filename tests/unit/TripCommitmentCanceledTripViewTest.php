@@ -28,6 +28,10 @@ final class TripCommitmentCanceledTripViewTest extends CIUnitTestCase
             'assets' => ['css' => null, 'js' => null],
             'navigation' => [],
             'workspace' => $this->workspace(),
+            'backLink' => [
+                'label' => 'Back to vehicle trip history',
+                'href' => '/operations/vehicles/40/trip-history?trip=324',
+            ],
             'editing' => null,
             'formData' => [],
             'success' => null,
@@ -49,6 +53,8 @@ final class TripCommitmentCanceledTripViewTest extends CIUnitTestCase
         $this->assertStringNotContainsString('data-commitment-form', $html);
         $this->assertStringNotContainsString('>Edit</a>', $html);
         $this->assertStringNotContainsString('Mark not applicable', $html);
+        $this->assertStringContainsString('Back to vehicle trip history', $html);
+        $this->assertStringContainsString('href="&#x2F;operations&#x2F;vehicles&#x2F;40&#x2F;trip-history&#x3F;trip&#x3D;324"', $html);
     }
 
     /** @return array<string, mixed> */

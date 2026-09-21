@@ -51,6 +51,13 @@ final class TripCommitmentsTest extends CIUnitTestCase
         $this->assertCount(2, $this->connection->getForeignKeyData('fleet_trip_commitments'));
     }
 
+    public function testWrongCompanyCannotAccessTripWorkspace(): void
+    {
+        $this->expectException(RuntimeException::class);
+
+        $this->service->workspace(2, 101);
+    }
+
     public function testCrudLifecycleScopingAndAppendOnlyAudit(): void
     {
         $information = $this->service->create(1, 101, $this->input('pickup_instruction', 'Meet at hotel valet entrance', 'informational'), 7);

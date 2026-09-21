@@ -39,14 +39,23 @@ $locationLabel = static fn (?string $code): string => ucwords(str_replace('_', '
                         $isSelected = (int) $trip['id'] === $selectedTripId;
                         $isCanceled = str_starts_with((string) ($trip['trip_status_code'] ?? ''), 'canceled');
                         $movementHref = $trip['movement_href'] ?? null;
-                        $rowTag = $movementHref === null ? 'article' : 'a';
+                        $commitmentsHref = '/operations/trips/' . (int) $trip['id'] . '/commitments';
                         ?>
-                        <<?= $rowTag ?> class="trip-history-row<?= $isSelected ? ' is-selected' : '' ?><?= $isCanceled ? ' is-canceled' : '' ?><?= $movementHref !== null ? ' is-linked' : '' ?>"<?= $movementHref === null ? '' : ' href="' . esc((string) $movementHref, 'attr') . '" aria-label="Open movement for trip ' . esc((string) ($trip['turo_trip_id'] ?? $trip['id']), 'attr') . '"' ?>>
+                        <article class="trip-history-row<?= $isSelected ? ' is-selected' : '' ?><?= $isCanceled ? ' is-canceled' : '' ?>">
                             <div><strong><?= esc((string) ($trip['guest_name'] ?? 'Guest not captured')) ?></strong><span>Trip <?= esc((string) ($trip['turo_trip_id'] ?? $trip['id'])) ?></span></div>
                             <div><span><?= esc((new DateTimeImmutable((string) $trip['starts_at']))->format('M j, Y g:i A')) ?></span><span><?= esc((new DateTimeImmutable((string) $trip['ends_at']))->format('M j, Y g:i A')) ?></span></div>
                             <div><span>Pickup: <?= esc($locationLabel($trip['pickup_location_class'] ?? null)) ?></span><span>Return: <?= esc($locationLabel($trip['return_location_class'] ?? null)) ?></span></div>
-                            <div><?php if ($isSelected): ?><strong>Selected trip</strong><?php endif; ?><span class="trip-history-status"><?= esc(ucwords(str_replace('_', ' ', (string) ($trip['trip_status_code'] ?? 'Status unknown')))) ?></span><span><?= $movementHref === null ? 'No movement record' : 'Open movement' ?></span></div>
-                        </<?= $rowTag ?>>
+                            <div>
+                                <?php if ($isSelected): ?><strong>Selected trip</strong><?php endif; ?>
+                                <span class="trip-history-status"><?= esc(ucwords(str_replace('_', ' ', (string) ($trip['trip_status_code'] ?? 'Status unknown')))) ?></span>
+                                <?php if ($movementHref === null): ?>
+                                    <span>No movement record</span>
+                                <?php else: ?>
+                                    <a class="action-link" href="<?= esc((string) $movementHref, 'attr') ?>" aria-label="Open movement for trip <?= esc((string) ($trip['turo_trip_id'] ?? $trip['id']), 'attr') ?>">Open movement</a>
+                                <?php endif; ?>
+                                <a class="action-link" href="<?= esc($commitmentsHref, 'attr') ?>" aria-label="Guest commitments for trip <?= esc((string) ($trip['turo_trip_id'] ?? $trip['id']), 'attr') ?>">Guest commitments</a>
+                            </div>
+                        </article>
                     <?php endforeach; ?>
                 </div>
             <?php endif; ?>

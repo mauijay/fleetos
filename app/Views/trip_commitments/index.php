@@ -2,6 +2,7 @@
 /** @var array{css:?string,js:?string} $assets */
 /** @var list<array{label:string,href:string,active:string}> $navigation */
 /** @var array<string,mixed> $workspace */
+/** @var array{label:string,href:string} $backLink */
 /** @var array<string,mixed>|null $editing */
 /** @var array<string,mixed> $formData */
 /** @var string|null $success */
@@ -34,7 +35,7 @@ $location = static fn (?string $class, ?string $source): string => trim((string)
     <main id="main-content" class="command-main operator-main guest-commitments-main" tabindex="-1">
         <header class="top-status">
             <div><p class="eyebrow">Trip-specific operator truth</p><h1>Guest Commitments</h1><p class="status-copy">Guest-specific instructions and promises for this trip. Turo reservation facts remain unchanged.</p></div>
-            <a class="action-link" href="<?= isset($trip['pickup_checklist_id']) ? '/operations/checklists/' . (int) $trip['pickup_checklist_id'] : '/operations/vehicles/' . (int) $trip['fleet_vehicle_id'] . '/trip-history?trip=' . (int) $trip['id'] ?>">Back to movement workflow</a>
+            <a class="action-link" href="<?= esc($backLink['href'], 'attr') ?>"><?= esc($backLink['label']) ?></a>
         </header>
 
         <?php if ($success !== null): ?><section class="section import-message tone-success" role="status"><strong><?= esc($success) ?></strong></section><?php endif; ?>

@@ -14,6 +14,14 @@ class TripCommitments extends BaseController
     public function index(int $tripId): string
     {
         $workspace = Services::tripCommitmentService()->workspace($this->activeCompanyId(), $tripId);
+        $movementHref = Services::operationalFactsRepository()->movementChecklistHref($tripId);
+        $trip = $workspace['trip'];
+        $backLink = $movementHref === null
+            ? [
+                'label' => 'Back to vehicle trip history',
+                'href' => '/operations/vehicles/' . (int) $trip['fleet_vehicle_id'] . '/trip-history?trip=' . (int) $trip['id'],
+            ]
+            : ['label' => 'Back to movement workflow', 'href' => $movementHref];
         $editId = (int) $this->request->getGet('edit');
         $editing = null;
         foreach ($workspace['active'] as $commitment) {
@@ -27,6 +35,7 @@ class TripCommitments extends BaseController
             'assets' => Services::assetManifestService()->appAssets(),
             'navigation' => $this->navigation(),
             'workspace' => $workspace,
+            'backLink' => $backLink,
             'editing' => $editing,
             'formData' => CoreServices::session()->getFlashdata('trip_commitment_data') ?: [],
             'success' => CoreServices::session()->getFlashdata('trip_commitment_success'),

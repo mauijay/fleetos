@@ -397,7 +397,7 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
 
     public function testTripContextLabelsAndLinksTheSelectedReservation(): void
     {
-        $trip = ['id' => 100, 'turo_trip_id' => 900100, 'guest_name' => 'Guest', 'starts_at' => '2026-10-06 21:30:00', 'ends_at' => '2026-10-12 06:00:00', 'pickup_location_class' => 'airport_hnl', 'return_location_class' => 'home', 'trip_status_code' => 'booked'];
+        $trip = ['id' => 100, 'turo_trip_id' => 900100, 'guest_name' => 'Guest', 'starts_at' => '2026-10-06 21:30:00', 'ends_at' => '2026-10-12 06:00:00', 'pickup_location_class' => 'airport_hnl', 'return_location_class' => 'home', 'trip_status_code' => 'booked', 'movement_href' => '/operations/checklists/500'];
         $previous = array_merge($trip, ['id' => 90, 'turo_trip_id' => 900090, 'guest_name' => 'Previous Guest', 'starts_at' => '2026-10-01 08:00:00', 'ends_at' => '2026-10-02 08:00:00', 'movement_href' => '/operations/checklists/490']);
         $next = array_merge($trip, ['id' => 110, 'turo_trip_id' => 900110, 'guest_name' => 'Next Guest', 'starts_at' => '2026-10-13 08:00:00', 'ends_at' => '2026-10-14 08:00:00', 'movement_href' => '/operations/checklists/510']);
         $html = $this->render('pickup', $this->facts(), false, [], ['tripContext' => ['previous' => $previous, 'current' => $trip, 'next' => $next]]);
@@ -408,8 +408,33 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
         $this->assertStringContainsString('Return: Home', $html);
         $this->assertStringContainsString('/operations/vehicles/10/trip-history?trip=100', $html);
         $this->assertStringContainsString('href="&#x2F;operations&#x2F;checklists&#x2F;490" aria-label="Open previous&#x20;trip movement"', $html);
+        $this->assertStringContainsString('href="&#x2F;operations&#x2F;checklists&#x2F;500" aria-label="Open selected&#x20;trip movement"', $html);
         $this->assertStringContainsString('href="&#x2F;operations&#x2F;checklists&#x2F;510" aria-label="Open next&#x20;trip movement"', $html);
+        $this->assertStringContainsString('href="&#x2F;operations&#x2F;trips&#x2F;90&#x2F;commitments" aria-label="Guest commitments for previous&#x20;trip"', $html);
+        $this->assertStringContainsString('href="&#x2F;operations&#x2F;trips&#x2F;100&#x2F;commitments" aria-label="Guest commitments for selected&#x20;trip"', $html);
+        $this->assertStringContainsString('href="&#x2F;operations&#x2F;trips&#x2F;110&#x2F;commitments" aria-label="Guest commitments for next&#x20;trip"', $html);
         $this->assertStringContainsString('trip-context-item is-current', $html);
+    }
+
+    public function testSelectedTripWithoutChecklistShowsOnlyGuestCommitmentsNavigation(): void
+    {
+        $trip = [
+            'id' => 100,
+            'turo_trip_id' => 900100,
+            'guest_name' => 'Guest',
+            'starts_at' => '2026-11-11 17:00:00',
+            'ends_at' => '2026-11-15 22:00:00',
+            'pickup_location_class' => 'home',
+            'return_location_class' => 'home',
+            'trip_status_code' => 'booked',
+            'movement_href' => null,
+        ];
+        $html = $this->render('pickup', $this->facts(), false, [], [
+            'tripContext' => ['previous' => null, 'current' => $trip, 'next' => null],
+        ]);
+
+        $this->assertStringContainsString('href="&#x2F;operations&#x2F;trips&#x2F;100&#x2F;commitments" aria-label="Guest commitments for selected&#x20;trip"', $html);
+        $this->assertStringNotContainsString('aria-label="Open selected&#x20;trip movement"', $html);
     }
 
     public function testDirectHandoffDefaultsEditableTimeWithoutWritingOrPrematureConfirmation(): void
@@ -498,12 +523,17 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
             'selectedTripId' => 100,
             'trips' => [
                 ['id' => 100, 'turo_trip_id' => 900100, 'guest_name' => 'Guest', 'starts_at' => '2026-10-06 21:30:00', 'ends_at' => '2026-10-12 06:00:00', 'pickup_location_class' => 'airport_hnl', 'return_location_class' => 'home', 'trip_status_code' => 'booked', 'movement_href' => '/operations/checklists/500'],
+                ['id' => 110, 'turo_trip_id' => 900110, 'guest_name' => 'Future Guest', 'starts_at' => '2026-11-11 17:00:00', 'ends_at' => '2026-11-15 22:00:00', 'pickup_location_class' => 'home', 'return_location_class' => 'home', 'trip_status_code' => 'booked', 'movement_href' => null],
                 ['id' => 90, 'turo_trip_id' => 900090, 'guest_name' => 'Canceled Guest', 'starts_at' => '2026-10-01 08:00:00', 'ends_at' => '2026-10-02 08:00:00', 'pickup_location_class' => 'home', 'return_location_class' => 'home', 'trip_status_code' => 'canceled_zero_payout', 'movement_href' => null],
             ],
         ])->render('trip_movement_checklists/history');
 
-        $this->assertStringContainsString('trip-history-row is-selected is-linked', $html);
+        $this->assertStringContainsString('trip-history-row is-selected', $html);
         $this->assertStringContainsString('href="&#x2F;operations&#x2F;checklists&#x2F;500" aria-label="Open movement for trip 900100"', $html);
+        $this->assertStringContainsString('href="&#x2F;operations&#x2F;trips&#x2F;100&#x2F;commitments" aria-label="Guest commitments for trip 900100"', $html);
+        $this->assertStringContainsString('href="&#x2F;operations&#x2F;trips&#x2F;110&#x2F;commitments" aria-label="Guest commitments for trip 900110"', $html);
+        $this->assertStringContainsString('href="&#x2F;operations&#x2F;trips&#x2F;90&#x2F;commitments" aria-label="Guest commitments for trip 900090"', $html);
+        $this->assertStringContainsString('Future Guest', $html);
         $this->assertStringContainsString('<strong>Selected trip</strong>', $html);
         $this->assertStringContainsString('Pickup: Airport Hnl', $html);
         $this->assertStringContainsString('Return: Home', $html);
