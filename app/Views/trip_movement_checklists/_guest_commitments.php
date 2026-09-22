@@ -12,6 +12,7 @@ $tripId = (int) $checklist['turo_trip_normalized_id'];
                 <div><span class="eyebrow"><?= esc((string) $commitment['category_label']) ?></span><strong><?= esc((string) $commitment['instruction']) ?></strong>
                     <small><?= esc((string) $commitment['phase_label']) ?><?= $commitment['is_blocking'] ? ' · Required before dispatch' : ' · Information' ?></small>
                     <?php if ($commitment['arranged_at'] !== null): ?><span class="commitment-arranged-time">Guest arrangement: <?= esc(date('M j, Y · g:i A', strtotime((string) $commitment['arranged_at']))) ?></span><?php endif; ?>
+                    <?php if (($commitment['fleet_extra_name'] ?? null) !== null): ?><span class="commitment-arranged-time">Linked Extra: <?= esc((string) $commitment['fleet_extra_name']) ?></span><?php endif; ?>
                     <?php if ($commitment['category'] === 'energy_override'): ?><?= view('trip_commitments/components/energy_override_context', ['commitment' => $commitment]) ?><?php endif; ?>
                 </div>
                 <?php if ($commitment['handling_mode'] === 'task'): ?><form action="/operations/trips/<?= $tripId ?>/commitments/<?= (int) $commitment['id'] ?>/complete" method="post"><?= csrf_field() ?><button class="primary-action" type="submit">Complete</button></form><?php endif; ?>

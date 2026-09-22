@@ -32,6 +32,17 @@ class FleetExtraRepository
         }
     }
 
+    public function supportsFulfillmentConfiguration(): bool
+    {
+        if ($this->db->DBDriver === 'SQLite3') {
+            $rows = $this->db->query('PRAGMA table_info(' . $this->db->prefixTable('fleet_extras') . ')')->getResultArray();
+
+            return in_array('fulfillment_type', array_column($rows, 'name'), true);
+        }
+
+        return $this->db->fieldExists('fulfillment_type', 'fleet_extras');
+    }
+
     /** @return list<array<string,mixed>> */
     public function catalog(int $companyId): array
     {
@@ -46,6 +57,21 @@ class FleetExtraRepository
             ->orderBy('extras.active', 'DESC')
             ->orderBy('extras.sort_order', 'ASC')
             ->orderBy('extras.display_name', 'ASC')
+            ->get()->getResultArray();
+    }
+
+    /** @return list<array<string, mixed>> */
+    public function options(int $companyId): array
+    {
+        if (! $this->db->tableExists('fleet_extras')) {
+            return [];
+        }
+
+        return $this->db->table('fleet_extras')
+            ->where('company_id', $companyId)
+            ->orderBy('active', 'DESC')
+            ->orderBy('sort_order', 'ASC')
+            ->orderBy('display_name', 'ASC')
             ->get()->getResultArray();
     }
 

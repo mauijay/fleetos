@@ -71,6 +71,56 @@ final class TripCommitmentReadinessTest extends CIUnitTestCase
         );
     }
 
+    public function testPurchasedExtraAddsOneSharedReadinessBlockerAndCompletionClearsIt(): void
+    {
+        $context = $this->context([]);
+        $context['extra_fulfillments'] = [$this->fulfillment(701, false, true)];
+        $pending = (new MovementReadinessProjectionService())->project($context);
+        $requirement = $this->requirement($pending, 'extra_fulfillment_701');
+
+        $this->assertSame(1, $pending['blocking_remaining_count']);
+        $this->assertSame('extra_fulfillment_complete', $requirement['action']['type']);
+        $this->assertSame('Pack 2 beach gear set(s)', $requirement['action']['label']);
+
+        $context['extra_fulfillments'] = [$this->fulfillment(701, true, false)];
+        $completed = (new MovementReadinessProjectionService())->project($context);
+        $this->assertSame(0, $completed['blocking_remaining_count']);
+        $this->assertSame('satisfied', $this->requirement($completed, 'extra_fulfillment_701')['status']);
+    }
+
+    public function testInformationalExtraCreatesNoRequirementAndHandoffSuppressesPhysicalWork(): void
+    {
+        $context = $this->context([]);
+        $context['extra_fulfillments'] = [array_merge($this->fulfillment(702, false, false), [
+            'fulfillment_type' => 'informational', 'requires_operator_confirmation' => false,
+        ])];
+        $informational = (new MovementReadinessProjectionService())->project($context);
+        $this->assertNotContains('extra_fulfillment_702', array_column($informational['requirements'], 'code'));
+
+        $context['extra_fulfillments'] = [$this->fulfillment(703, false, false)];
+        $context['active_events']['actual_handoff'] = ['id' => 91, 'event_code' => 'actual_handoff', 'occurred_at' => '2026-11-11 14:00:00'];
+        $suppressed = (new MovementReadinessProjectionService())->project($context);
+        $requirement = $this->requirement($suppressed, 'extra_fulfillment_703');
+        $this->assertFalse($requirement['actionable']);
+        $this->assertNull($requirement['action']);
+    }
+
+    public function testRemovedFulfillmentCreatesNoRequirementOrBlocker(): void
+    {
+        $context = $this->context([]);
+        $context['active_events']['actual_handoff'] = [
+            'id' => 92, 'event_code' => 'actual_handoff', 'occurred_at' => '2026-11-11 14:00:00',
+        ];
+        $context['extra_fulfillments'] = [array_merge($this->fulfillment(704, true, true), [
+            'removed_at' => '2026-11-11 15:00:00', 'is_removed' => true,
+        ])];
+
+        $removed = (new MovementReadinessProjectionService())->project($context);
+
+        $this->assertNotContains('extra_fulfillment_704', array_column($removed['requirements'], 'code'));
+        $this->assertSame(0, $removed['blocking_remaining_count']);
+    }
+
     /** @param list<array<string, mixed>> $commitments @return array<string, mixed> */
     private function context(array $commitments): array
     {
@@ -108,6 +158,8 @@ final class TripCommitmentReadinessTest extends CIUnitTestCase
             'positioning_plan' => null,
             'active_commitments' => $commitments,
             'next_trip_commitments' => [],
+            'extra_fulfillments' => [],
+            'next_trip_extra_fulfillments' => [],
         ];
     }
 
@@ -121,6 +173,24 @@ final class TripCommitmentReadinessTest extends CIUnitTestCase
             'handling_mode' => $handling,
             'required_before_dispatch' => $required,
             'acknowledged_at' => null,
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function fulfillment(int $id, bool $complete, bool $blocking): array
+    {
+        return [
+            'fulfillment_id' => $id,
+            'turo_trip_normalized_id' => 101,
+            'title' => 'Premium Beach Gear ×2',
+            'action_label' => 'Pack 2 beach gear set(s)',
+            'fulfillment_type' => 'pack',
+            'fulfillment_phase' => 'preparation',
+            'requires_operator_confirmation' => true,
+            'readiness_blocking' => $blocking,
+            'is_completed' => $complete,
+            'is_actionable' => ! $complete,
+            'completed_at' => $complete ? '2026-11-11 12:30:00' : null,
         ];
     }
 

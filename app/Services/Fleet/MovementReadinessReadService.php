@@ -11,6 +11,7 @@ class MovementReadinessReadService
         private readonly MovementReadinessProjectionService $projector,
         private readonly ?TripCommitmentService $commitmentService = null,
         private readonly ?TripEnergyRuleResolver $energyRuleResolver = null,
+        private readonly ?TripExtraFulfillmentService $extraFulfillmentService = null,
     ) {
     }
 
@@ -22,6 +23,14 @@ class MovementReadinessReadService
     {
         $asOf ??= new \DateTimeImmutable();
         $contexts = $this->repository->loadForCompany($companyId, $checklistIds, $asOf);
+        $tripIds = [];
+        foreach ($contexts as $context) {
+            $tripIds[] = (int) $context['turo_trip_normalized_id'];
+            if ((int) ($context['next_trip']['id'] ?? 0) > 0) {
+                $tripIds[] = (int) $context['next_trip']['id'];
+            }
+        }
+        $extrasByTrip = $this->extraFulfillmentService?->forTrips($companyId, array_values(array_unique($tripIds))) ?? [];
 
         foreach ($contexts as &$context) {
             $tripId = (int) $context['turo_trip_normalized_id'];
@@ -30,6 +39,7 @@ class MovementReadinessReadService
             $context['active_commitments'] = $this->commitmentService?->activeForTrip($companyId, $tripId, $phases) ?? [];
             $context['energy_rule'] = $this->energyRuleResolver?->forTrip($companyId, $tripId, $context['profile'] ?? null)
                 ?? (new TripEnergyRuleResolver())->forProfile($context['profile'] ?? null);
+            $context['extra_fulfillments'] = $extrasByTrip[$tripId] ?? [];
             $nextTripId = (int) ($context['next_trip']['id'] ?? 0);
             $context['next_trip_commitments'] = $nextTripId > 0 && $this->commitmentService !== null
                 ? $this->commitmentService->activeForTrip($companyId, $nextTripId, ['preparation', 'pickup', 'entire_trip'])
@@ -37,6 +47,7 @@ class MovementReadinessReadService
             $context['next_trip_energy_rule'] = $nextTripId > 0 && $this->energyRuleResolver !== null
                 ? $this->energyRuleResolver->forTrip($companyId, $nextTripId, $context['profile'] ?? null)
                 : null;
+            $context['next_trip_extra_fulfillments'] = $extrasByTrip[$nextTripId] ?? [];
         }
         unset($context);
 

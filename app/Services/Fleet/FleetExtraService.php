@@ -10,10 +10,14 @@ use InvalidArgumentException;
 
 class FleetExtraService
 {
+    public const FULFILLMENT_TYPES = ['none', 'informational', 'pack', 'install', 'configure', 'logistics'];
+    public const FULFILLMENT_PHASES = ['preparation', 'pickup', 'return', 'entire_trip'];
+
     public function __construct(
         private readonly FleetExtraRepository $extras = new FleetExtraRepository(),
         private readonly AuditLogRepository $audit = new AuditLogRepository(),
         private readonly LookupRepository $lookups = new LookupRepository(),
+        private readonly ?TripExtraFulfillmentService $fulfillments = null,
     ) {
     }
 
@@ -73,6 +77,7 @@ class FleetExtraService
             $this->extras->updateExtra($companyId, $extraId, $data);
             $this->audit->record($actorUserId, $this->lookups->valueId('audit_action', 'updated'), 'fleet_extras', $extraId, $existing, array_merge($existing, $data));
         });
+        $this->fulfillments?->reconcileForExtra($companyId, $extraId, $actorUserId);
     }
 
     public function mapSource(int $companyId, string $sourceExtraId, int $fleetExtraId, ?string $reason, int $actorUserId): int
@@ -103,7 +108,7 @@ class FleetExtraService
             'updated_at' => $now,
         ];
 
-        return $this->extras->transaction(function () use ($companyId, $sourceExtraId, $actorUserId, $observation, $existing, $data, $now): int {
+        $mappingId = $this->extras->transaction(function () use ($companyId, $sourceExtraId, $actorUserId, $observation, $existing, $data, $now): int {
             if ($existing === null) {
                 $id = $this->extras->createMapping(array_merge($data, [
                     'company_id' => $companyId,
@@ -123,6 +128,9 @@ class FleetExtraService
 
             return $id;
         });
+        $this->fulfillments?->reconcileForSource($companyId, $sourceExtraId, $actorUserId);
+
+        return $mappingId;
     }
 
     /** @return array{extra_id:int,mapping_id:int} */
@@ -140,7 +148,7 @@ class FleetExtraService
         });
     }
 
-    /** @return array{code:string,display_name:string,active:int,sort_order:int,notes:?string} */
+    /** @return array<string, mixed> */
     private function extraData(array $input): array
     {
         $code = strtolower(trim((string) ($input['code'] ?? '')));
@@ -159,14 +167,62 @@ class FleetExtraService
         if (mb_strlen($notes) > 4000) {
             throw new InvalidArgumentException('Notes must be 4000 characters or fewer.');
         }
+        $fulfillmentType = strtolower(trim((string) ($input['fulfillment_type'] ?? 'none')));
+        $phase = strtolower(trim((string) ($input['fulfillment_phase'] ?? '')));
+        $actionLabel = trim((string) ($input['default_action_label'] ?? ''));
+        $requiresConfirmation = $this->activeValue($input['requires_operator_confirmation'] ?? null);
+        $readinessBlocking = $this->activeValue($input['readiness_blocking'] ?? null);
+        if (! in_array($fulfillmentType, self::FULFILLMENT_TYPES, true)) {
+            throw new InvalidArgumentException('Choose a valid fulfillment type.');
+        }
+        if ($actionLabel !== '' && mb_strlen($actionLabel) > 190) {
+            throw new InvalidArgumentException('Default action label must be 190 characters or fewer.');
+        }
+        if (in_array($fulfillmentType, TripExtraFulfillmentService::ACTIONABLE_TYPES, true)) {
+            if (! in_array($phase, self::FULFILLMENT_PHASES, true)) {
+                throw new InvalidArgumentException('Actionable Extras require a valid fulfillment phase.');
+            }
+            if ($actionLabel === '') {
+                throw new InvalidArgumentException('Actionable Extras require an operator action label.');
+            }
+            if ($requiresConfirmation !== 1) {
+                throw new InvalidArgumentException('Actionable Extras require operator confirmation.');
+            }
+        } elseif ($fulfillmentType === 'informational') {
+            if ($phase !== '' && ! in_array($phase, self::FULFILLMENT_PHASES, true)) {
+                throw new InvalidArgumentException('Choose a valid fulfillment phase.');
+            }
+            $actionLabel = '';
+            $requiresConfirmation = 0;
+            $readinessBlocking = 0;
+        } else {
+            $phase = '';
+            $actionLabel = '';
+            $requiresConfirmation = 0;
+            $readinessBlocking = 0;
+        }
+        if ($readinessBlocking === 1 && $requiresConfirmation !== 1) {
+            throw new InvalidArgumentException('Readiness-blocking Extras must require operator confirmation.');
+        }
 
-        return [
+        $data = [
             'code' => $code,
             'display_name' => $displayName,
             'active' => $this->activeValue($input['active'] ?? null),
             'sort_order' => $sortOrder,
             'notes' => $notes === '' ? null : $notes,
         ];
+        if ($this->extras->supportsFulfillmentConfiguration()) {
+            $data = array_merge($data, [
+                'fulfillment_type' => $fulfillmentType,
+                'requires_operator_confirmation' => $requiresConfirmation,
+                'readiness_blocking' => $readinessBlocking,
+                'default_action_label' => $actionLabel === '' ? null : $actionLabel,
+                'fulfillment_phase' => $phase === '' ? null : $phase,
+            ]);
+        }
+
+        return $data;
     }
 
     private function requireContext(int $companyId, int $actorUserId): void

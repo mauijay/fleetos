@@ -20,6 +20,17 @@ class TripCommitmentRepository
         return $this->db->tableExists('fleet_trip_commitments');
     }
 
+    public function supportsExtraLink(): bool
+    {
+        if ($this->db->DBDriver === 'SQLite3') {
+            $rows = $this->db->query('PRAGMA table_info(' . $this->db->prefixTable('fleet_trip_commitments') . ')')->getResultArray();
+
+            return in_array('fleet_extra_id', array_column($rows, 'name'), true);
+        }
+
+        return $this->storageExists() && $this->db->fieldExists('fleet_extra_id', 'fleet_trip_commitments');
+    }
+
     /** @return array<string, mixed>|null */
     public function tripForCompany(int $companyId, int $tripId): ?array
     {

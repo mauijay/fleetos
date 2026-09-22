@@ -16,6 +16,7 @@ use App\Repositories\MovementReadinessReadModelRepository;
 use App\Repositories\OperatingExpenseRepository;
 use App\Repositories\OperationalFactsRepository;
 use App\Repositories\TripCommitmentRepository;
+use App\Repositories\TripExtraFulfillmentRepository;
 use App\Repositories\TripIncidentalReviewRepository;
 use App\Repositories\TripMonthAllocationRepository;
 use App\Repositories\TuroAccessReimbursementRepository;
@@ -70,6 +71,7 @@ use App\Services\Fleet\TaskService;
 use App\Services\Fleet\TripAnalyticsService;
 use App\Services\Fleet\TripCommitmentService;
 use App\Services\Fleet\TripEnergyRuleResolver;
+use App\Services\Fleet\TripExtraFulfillmentService;
 use App\Services\Fleet\TripIncidentalReviewService;
 use App\Services\Fleet\TripMovementChecklistService;
 use App\Services\Fleet\TuroAccessReimbursementService;
@@ -124,7 +126,26 @@ class Services extends BaseService
         return new TripCommitmentService(
             static::tripCommitmentRepository(),
             static::tripEnergyRuleResolver(),
+            static::fleetExtraRepository(),
         );
+    }
+
+    public static function tripExtraFulfillmentRepository(bool $getShared = true): TripExtraFulfillmentRepository
+    {
+        if ($getShared) {
+            return static::getSharedInstance('tripExtraFulfillmentRepository');
+        }
+
+        return new TripExtraFulfillmentRepository();
+    }
+
+    public static function tripExtraFulfillmentService(bool $getShared = true): TripExtraFulfillmentService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('tripExtraFulfillmentService');
+        }
+
+        return new TripExtraFulfillmentService(static::tripExtraFulfillmentRepository());
     }
 
     public static function tripEnergyRuleResolver(bool $getShared = true): TripEnergyRuleResolver
@@ -151,7 +172,12 @@ class Services extends BaseService
             return static::getSharedInstance('fleetExtraService');
         }
 
-        return new FleetExtraService(static::fleetExtraRepository());
+        return new FleetExtraService(
+            static::fleetExtraRepository(),
+            new AuditLogRepository(),
+            new LookupRepository(),
+            static::tripExtraFulfillmentService(),
+        );
     }
 
     public static function turoExtrasImportService(bool $getShared = true): TuroExtrasImportService
@@ -160,7 +186,15 @@ class Services extends BaseService
             return static::getSharedInstance('turoExtrasImportService');
         }
 
-        return new TuroExtrasImportService(static::fleetExtraRepository());
+        return new TuroExtrasImportService(
+            static::fleetExtraRepository(),
+            new \App\Validation\Turo\TuroExtrasPayloadValidator(),
+            new LookupRepository(),
+            new \App\Repositories\TuroImportBatchRepository(),
+            static::turoImportErrorRepository(),
+            new \App\Services\Turo\TuroImportAuditService(),
+            static::tripExtraFulfillmentService(),
+        );
     }
 
     public static function turoNormalizedTransactionRepository(bool $getShared = true): TuroNormalizedTransactionRepository
@@ -381,6 +415,7 @@ class Services extends BaseService
             static::movementReadinessProjectionService(),
             static::tripCommitmentService(),
             static::tripEnergyRuleResolver(),
+            static::tripExtraFulfillmentService(),
         );
     }
 
@@ -734,6 +769,7 @@ class Services extends BaseService
             movementProjection: static::movementProjectionService(),
             positioningPlans: static::vehiclePositioningPlanService(),
             incidentalReviews: static::tripIncidentalReviewService(),
+            extraFulfillments: static::tripExtraFulfillmentService(),
         );
     }
 

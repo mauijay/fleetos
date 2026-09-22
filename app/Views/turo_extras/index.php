@@ -94,6 +94,7 @@ $reservationIds = implode("\n", $workspace['reservation_ids']);
                                 <label>Display name<input name="display_name" type="text" maxlength="190" value="<?= esc((string) $source['source_label'], 'attr') ?>" required></label>
                                 <label>Sort order<input name="sort_order" type="number" min="0" max="100000" value="0" required></label>
                                 <label class="wide-field">Notes<textarea name="notes" rows="2" maxlength="4000"></textarea></label>
+                                <?= view('turo_extras/_fulfillment_fields', ['extra' => []]) ?>
                                 <button class="secondary-action" type="submit">Create and map</button>
                             </form>
                         </details>
@@ -111,6 +112,7 @@ $reservationIds = implode("\n", $workspace['reservation_ids']);
                     <label>Display name<input name="display_name" type="text" maxlength="190" required></label>
                     <label>Sort order<input name="sort_order" type="number" min="0" max="100000" value="0" required></label>
                     <label class="wide-field">Notes<textarea name="notes" rows="2" maxlength="4000"></textarea></label>
+                    <?= view('turo_extras/_fulfillment_fields', ['extra' => []]) ?>
                     <button class="primary-action" type="submit">Create Extra</button>
                 </form>
             </details>
@@ -118,6 +120,7 @@ $reservationIds = implode("\n", $workspace['reservation_ids']);
                 <?php foreach ($workspace['catalog'] as $extra): ?>
                     <article class="mapping-card"><div class="mapping-card-main"><div><h3><?= esc((string) $extra['display_name']) ?></h3><p><code><?= esc((string) $extra['code']) ?></code></p></div><span class="status-badge <?= (int) $extra['active'] === 1 ? 'tone-success' : 'tone-neutral' ?>"><?= (int) $extra['active'] === 1 ? 'Active' : 'Inactive' ?></span></div>
                         <p class="muted"><?= (int) $extra['mapping_count'] ?> source mapping<?= (int) $extra['mapping_count'] === 1 ? '' : 's' ?> · <?= (int) $extra['selection_count'] ?> current selection<?= (int) $extra['selection_count'] === 1 ? '' : 's' ?></p>
+                        <p class="muted">Fulfillment: <strong><?= ($extra['fulfillment_type'] ?? 'none') === 'none' ? 'Not configured' : esc(ucwords(str_replace('_', ' ', (string) $extra['fulfillment_type']))) ?></strong><?php if (($extra['fulfillment_phase'] ?? null) !== null): ?> · <?= esc(ucwords(str_replace('_', ' ', (string) $extra['fulfillment_phase']))) ?><?php endif; ?><?= (int) ($extra['requires_operator_confirmation'] ?? 0) === 1 ? ' · Requires confirmation' : '' ?><?= (int) ($extra['readiness_blocking'] ?? 0) === 1 ? ' · Blocks dispatch' : '' ?></p>
                         <details class="secondary-disclosure"><summary>Edit catalog record</summary><form class="extra-catalog-form" action="/turo/extras/catalog/<?= (int) $extra['id'] ?>" method="post">
                             <?= csrf_field() ?><input type="hidden" name="active" value="0">
                             <label>Stable code<input name="code" value="<?= esc((string) $extra['code'], 'attr') ?>" maxlength="80" pattern="[a-z][a-z0-9_]+" required></label>
@@ -125,6 +128,7 @@ $reservationIds = implode("\n", $workspace['reservation_ids']);
                             <label>Sort order<input name="sort_order" type="number" min="0" max="100000" value="<?= (int) $extra['sort_order'] ?>" required></label>
                             <label class="checkbox-field"><input name="active" type="checkbox" value="1"<?= (int) $extra['active'] === 1 ? ' checked' : '' ?>> Active</label>
                             <label class="wide-field">Notes<textarea name="notes" rows="2" maxlength="4000"><?= esc((string) ($extra['notes'] ?? '')) ?></textarea></label>
+                            <?= view('turo_extras/_fulfillment_fields', ['extra' => $extra]) ?>
                             <button class="secondary-action" type="submit">Save Extra</button>
                         </form></details>
                     </article>

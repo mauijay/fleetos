@@ -1,12 +1,15 @@
 <?php
 
+use App\Database\Migrations\CreateExtraFulfillment;
 use App\Database\Migrations\CreateFleetExtrasFoundation;
 use App\Repositories\AuditLogRepository;
 use App\Repositories\FleetExtraRepository;
 use App\Repositories\LookupRepository;
+use App\Repositories\TripExtraFulfillmentRepository;
 use App\Repositories\TuroImportBatchRepository;
 use App\Repositories\TuroImportErrorRepository;
 use App\Services\Fleet\FleetExtraService;
+use App\Services\Fleet\TripExtraFulfillmentService;
 use App\Services\Turo\TuroExtrasImportService;
 use App\Services\Turo\TuroImportAuditService;
 use App\Validation\Turo\TuroExtrasPayloadValidator;
@@ -16,11 +19,13 @@ use CodeIgniter\Test\CIUnitTestCase;
 use Config\Database;
 
 require_once __DIR__ . '/../../app/Database/Migrations/2026-09-13-000021_CreateFleetExtrasFoundation.php';
+require_once __DIR__ . '/../../app/Database/Migrations/2026-09-21-000024_CreateExtraFulfillment.php';
 
 /** @internal */
 final class TuroExtrasImportIntegrationTest extends CIUnitTestCase
 {
     private const TABLES = [
+        'trip_extra_fulfillment_audits', 'trip_extra_fulfillments', 'trip_movement_events', 'fleet_trip_commitments',
         'turo_extra_selections', 'turo_extra_reservation_snapshots', 'fleet_extra_source_mappings', 'fleet_extras',
         'audit_logs', 'turo_import_errors', 'turo_import_batches', 'turo_trips_normalized', 'fleet_vehicles',
         'lookup_values', 'lookup_types', 'companies',
@@ -41,12 +46,14 @@ final class TuroExtrasImportIntegrationTest extends CIUnitTestCase
         }
         $this->createPrerequisites();
         (new CreateFleetExtrasFoundation(Database::forge($this->connection)))->up();
+        (new CreateExtraFulfillment(Database::forge($this->connection)))->up();
         $this->seedLookups();
         $this->connection->query('PRAGMA foreign_keys = ON');
 
         $this->repository = new FleetExtraRepository($this->connection);
         $lookups = new LookupRepository($this->connection);
         $audit = new AuditLogRepository($this->connection);
+        $fulfillments = new TripExtraFulfillmentService(new TripExtraFulfillmentRepository($this->connection));
         $this->importer = new TuroExtrasImportService(
             $this->repository,
             new TuroExtrasPayloadValidator(),
@@ -54,8 +61,9 @@ final class TuroExtrasImportIntegrationTest extends CIUnitTestCase
             new TuroImportBatchRepository($this->connection),
             new TuroImportErrorRepository($this->connection),
             new TuroImportAuditService($audit, $lookups),
+            $fulfillments,
         );
-        $this->catalog = new FleetExtraService($this->repository, $audit, $lookups);
+        $this->catalog = new FleetExtraService($this->repository, $audit, $lookups, $fulfillments);
     }
 
     protected function tearDown(): void
@@ -153,13 +161,82 @@ final class TuroExtrasImportIntegrationTest extends CIUnitTestCase
         $this->catalog->updateExtra(1, $premiumId, ['code' => 'renamed_code', 'display_name' => 'Premium Beach Gear', 'active' => '1', 'sort_order' => 10], 10);
     }
 
+    public function testImportAndMappingCreateFulfillmentWhilePriceOnlyChangeDoesNotReopen(): void
+    {
+        $payload = json_decode($this->fixture('turo_extras_export_v1.json'), true, 64, JSON_THROW_ON_ERROR);
+        $payload['reservations'] = [$payload['reservations'][0]];
+        $this->importer->import(json_encode($payload, JSON_THROW_ON_ERROR), 1, 10, 'fulfillment.json');
+        $extraId = $this->catalog->createExtra(1, [
+            'code' => 'premium_beach_gear', 'display_name' => 'Premium Beach Gear', 'active' => '1', 'sort_order' => 10,
+            'fulfillment_type' => 'pack', 'requires_operator_confirmation' => '1', 'readiness_blocking' => '1',
+            'default_action_label' => 'Pack {quantity} premium set(s)', 'fulfillment_phase' => 'preparation',
+        ], 10);
+        $this->catalog->mapSource(1, '3154920', $extraId, null, 10);
+        $fulfillment = $this->connection->table('trip_extra_fulfillments')->get()->getRowArray();
+        $this->assertSame('pending', $fulfillment['state']);
+        $service = new TripExtraFulfillmentService(new TripExtraFulfillmentRepository($this->connection));
+        $service->complete(1, 100, (int) $fulfillment['id'], 10);
+
+        $this->importer->import(json_encode($payload, JSON_THROW_ON_ERROR), 1, 10, 'fulfillment-repeat.json');
+        $this->assertSame(1, $this->connection->table('trip_extra_fulfillments')->countAllResults());
+        $this->assertSame('completed', $this->connection->table('trip_extra_fulfillments')->where('id', $fulfillment['id'])->get()->getRow('state'));
+
+        $stale = $payload;
+        $stale['exported_at'] = '2026-09-12T07:00:00-10:00';
+        $stale['reservations'][0]['extras'][0]['quantity'] = 9;
+        $this->importer->import(json_encode($stale, JSON_THROW_ON_ERROR), 1, 10, 'stale-fulfillment.json');
+        $this->assertSame('completed', $this->connection->table('trip_extra_fulfillments')->where('id', $fulfillment['id'])->get()->getRow('state'));
+
+        $partial = $payload;
+        $partial['exported_at'] = '2026-09-15T09:00:00-10:00';
+        $partial['reservations'][0]['snapshot_complete'] = false;
+        $partial['reservations'][0]['extras'] = [];
+        $this->importer->import(json_encode($partial, JSON_THROW_ON_ERROR), 1, 10, 'partial-fulfillment.json');
+        $this->assertSame('completed', $this->connection->table('trip_extra_fulfillments')->where('id', $fulfillment['id'])->get()->getRow('state'));
+
+        $payload['exported_at'] = '2026-09-15T10:00:00-10:00';
+        $payload['reservations'][0]['extras'][0]['price'] = '49.00';
+        $this->importer->import(json_encode($payload, JSON_THROW_ON_ERROR), 1, 10, 'price-change.json');
+        $this->assertSame('completed', $this->connection->table('trip_extra_fulfillments')->where('id', $fulfillment['id'])->get()->getRow('state'));
+
+        $payload['exported_at'] = '2026-09-15T11:00:00-10:00';
+        $payload['reservations'][0]['extras'][0]['quantity'] = 2;
+        $this->importer->import(json_encode($payload, JSON_THROW_ON_ERROR), 1, 10, 'quantity-change.json');
+        $this->assertSame('pending', $this->connection->table('trip_extra_fulfillments')->where('id', $fulfillment['id'])->get()->getRow('state'));
+    }
+
+    public function testInformationalConfigurationKeepsOptionalEntireTripContextWithoutCreatingWork(): void
+    {
+        $extraId = $this->catalog->createExtra(1, [
+            'code' => 'prepaid_ev_recharge',
+            'display_name' => 'Prepaid EV Recharge',
+            'active' => '1',
+            'sort_order' => 10,
+            'fulfillment_type' => 'informational',
+            'fulfillment_phase' => 'entire_trip',
+            'requires_operator_confirmation' => '1',
+            'readiness_blocking' => '1',
+            'default_action_label' => 'Must be discarded',
+        ], 10);
+        $extra = $this->repository->extra(1, $extraId);
+
+        $this->assertSame('informational', $extra['fulfillment_type']);
+        $this->assertSame('entire_trip', $extra['fulfillment_phase']);
+        $this->assertSame(0, (int) $extra['requires_operator_confirmation']);
+        $this->assertSame(0, (int) $extra['readiness_blocking']);
+        $this->assertNull($extra['default_action_label']);
+        $this->assertSame(0, $this->connection->table('trip_extra_fulfillments')->countAllResults());
+    }
+
     private function createPrerequisites(): void
     {
         $this->connection->query('CREATE TABLE ' . $this->table('companies') . ' (id INTEGER PRIMARY KEY, name VARCHAR(80))');
         $this->connection->query('CREATE TABLE ' . $this->table('lookup_types') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, code VARCHAR(80) UNIQUE, name VARCHAR(190), created_at DATETIME, updated_at DATETIME)');
         $this->connection->query('CREATE TABLE ' . $this->table('lookup_values') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, lookup_type_id INTEGER, code VARCHAR(80), name VARCHAR(190), sort_order INTEGER DEFAULT 0, is_active BOOLEAN DEFAULT 1, created_at DATETIME, updated_at DATETIME)');
         $this->connection->query('CREATE TABLE ' . $this->table('fleet_vehicles') . ' (id INTEGER PRIMARY KEY, company_id INTEGER NOT NULL)');
-        $this->connection->query('CREATE TABLE ' . $this->table('turo_trips_normalized') . ' (id INTEGER PRIMARY KEY, fleet_vehicle_id INTEGER NULL, turo_trip_id VARCHAR(80), turo_reservation_id VARCHAR(80), starts_at DATETIME, deleted_at DATETIME NULL)');
+        $this->connection->query('CREATE TABLE ' . $this->table('turo_trips_normalized') . ' (id INTEGER PRIMARY KEY, fleet_vehicle_id INTEGER NULL, trip_status_lookup_value_id INTEGER NULL, turo_trip_id VARCHAR(80), turo_reservation_id VARCHAR(80), starts_at DATETIME, canceled_at DATETIME NULL, deleted_at DATETIME NULL)');
+        $this->connection->query('CREATE TABLE ' . $this->table('fleet_trip_commitments') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, company_id INTEGER, turo_trip_normalized_id INTEGER, state VARCHAR(20), instruction TEXT)');
+        $this->connection->query('CREATE TABLE ' . $this->table('trip_movement_events') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, fleet_vehicle_id INTEGER, turo_trip_normalized_id INTEGER, event_code VARCHAR(80), voided_at DATETIME NULL)');
         $this->connection->query('CREATE TABLE ' . $this->table('turo_import_batches') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, import_type_lookup_value_id INTEGER, import_status_lookup_value_id INTEGER, source_filename VARCHAR(190), source_hash VARCHAR(128) UNIQUE, row_count INTEGER DEFAULT 0, started_at DATETIME, completed_at DATETIME, error_message TEXT, created_by INTEGER, created_at DATETIME, updated_at DATETIME)');
         $this->connection->query('CREATE TABLE ' . $this->table('turo_import_errors') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, turo_import_batch_id INTEGER, severity_lookup_value_id INTEGER, raw_table VARCHAR(120), raw_row_id INTEGER, row_number INTEGER, error_code VARCHAR(120), field_name VARCHAR(120), message TEXT, raw_payload TEXT, created_at DATETIME, updated_at DATETIME)');
         $this->connection->query('CREATE TABLE ' . $this->table('audit_logs') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, actor_user_id INTEGER, action_lookup_value_id INTEGER, table_name VARCHAR(120), record_id INTEGER, old_values TEXT, new_values TEXT, created_at DATETIME)');

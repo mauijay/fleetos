@@ -5062,3 +5062,64 @@ h3 {
     font-size: 30px;
   }
 }
+.extra-fulfillment-config {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  gap: 0.8rem;
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--line, #334155);
+  border-radius: 0.75rem;
+}
+
+.extra-fulfillment-config > * {
+  min-width: 0;
+}
+
+.trip-preparation-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.trip-preparation-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 1rem;
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--line, #334155);
+  border-radius: 0.75rem;
+}
+
+.trip-preparation-item > div,
+.trip-preparation-item form,
+.trip-preparation-item label,
+.trip-preparation-item input {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.trip-preparation-item h3,
+.trip-preparation-item p {
+  margin: 0;
+}
+
+.trip-preparation-item form {
+  display: flex;
+  align-items: end;
+  gap: 0.6rem;
+}
+
+@media (max-width: 44rem) {
+  .trip-preparation-item,
+  .trip-preparation-item form {
+    grid-template-columns: 1fr;
+    display: grid;
+    width: 100%;
+  }
+
+  .trip-preparation-item button {
+    width: 100%;
+  }
+}

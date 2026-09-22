@@ -1,6 +1,7 @@
 <?php
 
 use App\Database\Migrations\CreateFleetTripCommitments;
+use App\Repositories\FleetExtraRepository;
 use App\Repositories\TripCommitmentRepository;
 use App\Services\Fleet\TripCommitmentService;
 use App\Services\Fleet\TripEnergyRuleResolver;
@@ -22,14 +23,15 @@ final class TripCommitmentsTest extends CIUnitTestCase
         parent::setUp();
         $this->connection = Database::connect('tests');
         $this->connection->query('PRAGMA foreign_keys = OFF');
-        foreach (['fleet_trip_commitment_audits', 'fleet_trip_commitments', 'financial_activities', 'turo_extra_selections', 'scheduled_movement_locations', 'vehicle_operational_profiles', 'turo_trips_normalized', 'lookup_values', 'fleet_vehicles', 'companies'] as $table) {
+        foreach (['fleet_trip_commitment_audits', 'fleet_trip_commitments', 'fleet_extras', 'financial_activities', 'turo_extra_selections', 'scheduled_movement_locations', 'vehicle_operational_profiles', 'turo_trips_normalized', 'lookup_values', 'fleet_vehicles', 'companies'] as $table) {
             $this->connection->query('DROP TABLE IF EXISTS ' . $this->connection->getPrefix() . $table);
         }
         $this->createPrerequisites();
         $this->connection->query('PRAGMA foreign_keys = ON');
         (new CreateFleetTripCommitments(Database::forge($this->connection)))->up();
+        $this->connection->query('ALTER TABLE ' . $this->connection->getPrefix() . 'fleet_trip_commitments ADD COLUMN fleet_extra_id INTEGER NULL');
         $this->repository = new TripCommitmentRepository($this->connection);
-        $this->service = new TripCommitmentService($this->repository);
+        $this->service = new TripCommitmentService($this->repository, null, new FleetExtraRepository($this->connection));
     }
 
     protected function tearDown(): void
@@ -233,6 +235,21 @@ final class TripCommitmentsTest extends CIUnitTestCase
         $this->assertSame($beforeFinancialCount, $this->connection->table('financial_activities')->countAllResults());
     }
 
+    public function testOptionalCanonicalExtraLinkIsCompanyScopedAndDoesNotDuplicateCommitment(): void
+    {
+        $input = $this->input('child_seat_setup', 'One rear-facing and one forward-facing', 'informational');
+        $input['fleet_extra_id'] = '501';
+        $linked = $this->service->create(1, 101, $input, 7);
+        $this->assertSame(501, (int) $linked['fleet_extra_id']);
+        $this->assertSame('Child Safety Seat', $linked['fleet_extra_name']);
+        $this->assertCount(1, $this->service->activeForTrip(1, 101));
+
+        $input['fleet_extra_id'] = '502';
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('owned by the active company');
+        $this->service->create(1, 101, $input, 7);
+    }
+
     /** @return array<string, mixed> */
     private function input(string $category, string $instruction, string $handling, bool $required = false): array
     {
@@ -259,6 +276,7 @@ final class TripCommitmentsTest extends CIUnitTestCase
         $this->connection->query('CREATE TABLE ' . $prefix . 'vehicle_operational_profiles (id INTEGER PRIMARY KEY, fleet_vehicle_id INTEGER, energy_kind VARCHAR(20), ready_energy_target_percent INTEGER)');
         $this->connection->query('CREATE TABLE ' . $prefix . 'turo_extra_selections (id INTEGER PRIMARY KEY, turo_reservation_id VARCHAR(80), quantity INTEGER NULL, selected_value DECIMAL(10,2))');
         $this->connection->query('CREATE TABLE ' . $prefix . 'financial_activities (id INTEGER PRIMARY KEY, amount DECIMAL(10,2))');
+        $this->connection->query('CREATE TABLE ' . $prefix . 'fleet_extras (id INTEGER PRIMARY KEY, company_id INTEGER, code VARCHAR(80), display_name VARCHAR(190), active BOOLEAN, sort_order INTEGER, notes TEXT)');
         $this->connection->table('companies')->insertBatch([['id' => 1, 'name' => 'Company A'], ['id' => 2, 'name' => 'Company B']]);
         $this->connection->table('fleet_vehicles')->insertBatch([
             ['id' => 11, 'company_id' => 1, 'fleet_code' => 'LOCAL-COMMIT-A', 'display_name' => 'Synthetic A', 'model' => 'Test EV'],
@@ -278,5 +296,9 @@ final class TripCommitmentsTest extends CIUnitTestCase
             ['id' => 201, 'fleet_vehicle_id' => 22, 'trip_status_lookup_value_id' => 1, 'turo_trip_id' => 'LOCAL-COMMIT-201', 'turo_reservation_id' => 'LOCAL-COMMIT-R201', 'starts_at' => '2026-11-11 14:00:00', 'ends_at' => '2026-11-12 14:00:00', 'canceled_at' => null],
         ]);
         $this->connection->table('turo_extra_selections')->insert(['id' => 1, 'turo_reservation_id' => 'LOCAL-COMMIT-R101', 'quantity' => 2, 'selected_value' => '60.00']);
+        $this->connection->table('fleet_extras')->insertBatch([
+            ['id' => 501, 'company_id' => 1, 'code' => 'child_seat', 'display_name' => 'Child Safety Seat', 'active' => 1, 'sort_order' => 1],
+            ['id' => 502, 'company_id' => 2, 'code' => 'other_company_extra', 'display_name' => 'Other Company Extra', 'active' => 1, 'sort_order' => 1],
+        ]);
     }
 }

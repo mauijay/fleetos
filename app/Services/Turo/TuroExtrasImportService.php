@@ -7,6 +7,7 @@ use App\Repositories\FleetExtraRepository;
 use App\Repositories\LookupRepository;
 use App\Repositories\TuroImportBatchRepository;
 use App\Repositories\TuroImportErrorRepository;
+use App\Services\Fleet\TripExtraFulfillmentService;
 use App\Validation\Turo\TuroExtrasPayloadValidator;
 use InvalidArgumentException;
 use Throwable;
@@ -20,6 +21,7 @@ class TuroExtrasImportService
         private readonly TuroImportBatchRepository $batches = new TuroImportBatchRepository(),
         private readonly TuroImportErrorRepository $errors = new TuroImportErrorRepository(),
         private readonly TuroImportAuditService $audit = new TuroImportAuditService(),
+        private readonly ?TripExtraFulfillmentService $fulfillments = null,
     ) {
     }
 
@@ -138,8 +140,9 @@ class TuroExtrasImportService
         $existing = $this->extras->selectionsByIdentity($companyId, $reservationIds);
         $latestSnapshots = $this->extras->latestSnapshotObservations($companyId, $reservationIds);
         $added = $updated = $unchanged = $removed = 0;
+        $reactivatedSelectionIds = [];
 
-        $this->extras->transaction(function () use ($reservations, $observedAt, $batchId, $companyId, $trips, $mappings, $latestSnapshots, &$existing, &$added, &$updated, &$unchanged, &$removed): void {
+        $this->extras->transaction(function () use ($reservations, $observedAt, $batchId, $companyId, $trips, $mappings, $latestSnapshots, &$existing, &$added, &$updated, &$unchanged, &$removed, &$reactivatedSelectionIds): void {
             foreach ($reservations as $reservation) {
                 $reservationId = (string) $reservation['reservation_id'];
                 $trip = $trips[$reservationId] ?? null;
@@ -214,6 +217,9 @@ class TuroExtrasImportService
                             || $current['removed_at'] !== null
                             || (string) ($current['turo_trip_normalized_id'] ?? '') !== (string) ($data['turo_trip_normalized_id'] ?? '');
                         $this->extras->updateSelection($companyId, (int) $current['id'], $data);
+                        if ($current['removed_at'] !== null) {
+                            $reactivatedSelectionIds[] = (int) $current['id'];
+                        }
                         $existing[$key] = array_merge($current, $data);
                         if ($changed) {
                             $updated++;
@@ -230,6 +236,11 @@ class TuroExtrasImportService
                 }
             }
         });
+        $selectionIds = array_values(array_unique(array_map(
+            static fn (array $selection): int => (int) $selection['id'],
+            $existing,
+        )));
+        $this->fulfillments?->reconcileSelectionIds($companyId, $selectionIds, $reactivatedSelectionIds);
 
         return new TuroExtrasImportResult(
             batchId: $batchId,

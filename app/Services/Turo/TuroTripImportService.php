@@ -14,6 +14,7 @@ use App\Repositories\TuroNormalizedTripRepository;
 use App\Repositories\TuroRawTripRepository;
 use App\Services\Fleet\MovementProjectionService;
 use App\Services\Fleet\ScheduledMovementLocationService;
+use App\Services\Fleet\TripExtraFulfillmentService;
 use App\Services\Fleet\TripIncidentalReviewService;
 use App\Services\Fleet\VehiclePositioningPlanService;
 use App\Validation\Turo\TuroTripCsvValidator;
@@ -44,6 +45,7 @@ class TuroTripImportService
         private readonly ?MovementProjectionService $movementProjection = null,
         private readonly ?VehiclePositioningPlanService $positioningPlans = null,
         private readonly ?TripIncidentalReviewService $incidentalReviews = null,
+        private readonly ?TripExtraFulfillmentService $extraFulfillments = null,
     ) {
         $this->db = $db ?? Database::connect();
     }
@@ -243,6 +245,16 @@ class TuroTripImportService
 
         $this->projection()->projectTrip((int) $upsert['id'], true, 'import');
         $this->incidentals()->projectTrip((int) $upsert['id'], $actorUserId);
+        if ($this->extraFulfillments !== null) {
+            $scope = $this->db->table('turo_trips_normalized trips')
+                ->select('vehicles.company_id')
+                ->join('fleet_vehicles vehicles', 'vehicles.id = trips.fleet_vehicle_id')
+                ->where('trips.id', (int) $upsert['id'])
+                ->get()->getRowArray();
+            if ($scope !== null) {
+                $this->extraFulfillments->reconcileForTrip((int) $scope['company_id'], (int) $upsert['id'], $actorUserId);
+            }
+        }
 
         $issues = [];
         if ($normalizedTrip->fleetVehicleId === null) {

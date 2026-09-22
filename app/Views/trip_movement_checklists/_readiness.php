@@ -3,6 +3,7 @@
 /** @var array<string, mixed>|null $readiness */
 /** @var array{pickup:array<string,mixed>|null,return:array<string,mixed>|null} $tripFacts */
 $requirements = $readiness['requirements'] ?? [];
+$requirements = array_values(array_filter($requirements, static fn (array $requirement): bool => ! str_starts_with((string) ($requirement['code'] ?? ''), 'extra_fulfillment_')));
 $itemsByCode = array_column($checklist['items'] ?? [], null, 'item_code');
 $readinessPhase = $readiness['readiness_phase'] ?? null;
 $closed = $checklist['completed_at'] !== null;
@@ -16,6 +17,7 @@ $blockingPending = array_values(array_filter($pending, static fn (array $require
 $requiredPending = array_values(array_filter($pending, static fn (array $requirement): bool => ! $requirement['blocking'] && ($itemsByCode[$requirement['code']]['is_required'] ?? false)));
 $additionalPending = array_values(array_filter($pending, static fn (array $requirement): bool => ! $requirement['blocking'] && ! ($itemsByCode[$requirement['code']]['is_required'] ?? false)));
 $blockingRemaining = count($blockingPending);
+$totalBlockingRemaining = (int) ($readiness['blocking_remaining_count'] ?? $blockingRemaining);
 $additionalRemaining = count($requiredPending) + count($additionalPending);
 $lifecycle = array_values(array_filter($requirements, static fn (array $requirement): bool => $requirement['phase'] === 'pickup_lifecycle'));
 $nextPickupPreparation = array_values(array_filter($requirements, static fn (array $requirement): bool => $requirement['phase'] === 'next_pickup_preparation'));
@@ -47,8 +49,8 @@ $factDetail = static function (array $requirement) use ($activeFacts): ?string {
     <div class="section-heading">
         <div>
             <p class="eyebrow"><?= ($checklist['movement_type'] ?? '') === 'return' ? 'Return readiness' : 'Pickup preparation' ?></p>
-            <h2 id="readiness-heading" tabindex="-1"><?= ($readiness['ready'] ?? false) ? 'Ready' : $blockingRemaining . ' blocking actions remaining' ?></h2>
-            <?php if ($additionalRemaining > 0): ?><p class="muted"><?= $blockingRemaining ?> blocking · <?= $additionalRemaining ?> additional action<?= $additionalRemaining === 1 ? '' : 's' ?></p><?php endif; ?>
+            <h2 id="readiness-heading" tabindex="-1"><?= ($readiness['ready'] ?? false) ? 'Ready' : $totalBlockingRemaining . ' blocking actions remaining' ?></h2>
+            <?php if ($additionalRemaining > 0): ?><p class="muted"><?= $totalBlockingRemaining ?> blocking · <?= $additionalRemaining ?> additional action<?= $additionalRemaining === 1 ? '' : 's' ?></p><?php endif; ?>
         </div>
         <?php if ($closed): ?><span class="status-badge tone-info">Workflow closed</span><?php endif; ?>
     </div>

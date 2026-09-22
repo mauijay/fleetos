@@ -89,6 +89,7 @@ $readiness = $vehicle['readiness_compact'] ?? [
             <span><?= ($state['code'] ?? null) === 'awaiting_recovery' ? 'Pending recovery' : ((int) $readiness['blocking_count'] === 0 ? 'Ready' : esc((string) $readiness['blocking_count'])) ?></span>
         </div>
         <p><strong><?= esc((string) $readiness['summary']) ?></strong></p>
+        <?php if ((int) ($readiness['trip_preparation_count'] ?? 0) > 0): ?><div class="movement-card__next-action"><span>Trip Preparation · <strong><?= (int) $readiness['trip_preparation_count'] ?> item<?= (int) $readiness['trip_preparation_count'] === 1 ? '' : 's' ?></strong></span><ul><?php foreach (($readiness['trip_preparation_items'] ?? []) as $item): ?><li><?= esc((string) $item) ?></li><?php endforeach; ?></ul><?php if (($readiness['next_actions'][0]['href'] ?? null) !== null): ?><a class="text-link" href="<?= esc((string) $readiness['next_actions'][0]['href'], 'attr') ?>#trip-preparation">Continue preparation</a><?php endif; ?></div><?php endif; ?>
         <?php foreach ($readiness['next_actions'] as $nextAction): ?>
             <p class="movement-card__next-action">Next: <strong><?= esc((string) $nextAction['label']) ?></strong></p>
         <?php endforeach; ?>

@@ -2,6 +2,7 @@
 
 namespace App\Services\Fleet;
 
+use App\Repositories\FleetExtraRepository;
 use App\Repositories\TripCommitmentRepository;
 use Config\Services;
 use InvalidArgumentException;
@@ -20,6 +21,7 @@ class TripCommitmentService
     public function __construct(
         private readonly ?TripCommitmentRepository $repository = null,
         private readonly ?TripEnergyRuleResolver $energyRuleResolver = null,
+        private readonly ?FleetExtraRepository $extraRepository = null,
     ) {
     }
 
@@ -46,6 +48,7 @@ class TripCommitmentService
             'phases' => $this->phaseOptions(),
             'handling_modes' => $this->handlingOptions(),
             'energy_comparisons' => $this->energyComparisonOptions(),
+            'fleet_extras' => $this->extraRepository?->options($companyId) ?? [],
         ];
     }
 
@@ -79,7 +82,7 @@ class TripCommitmentService
         if (! $this->tripIsOperational($trip)) {
             throw new InvalidArgumentException('Guest commitments cannot be added to a canceled or invalid trip.');
         }
-        $data = $this->validated($input);
+        $data = $this->validated($input, $companyId);
         $now = date('Y-m-d H:i:s');
         $data = array_merge($data, [
             'company_id' => $companyId,
@@ -109,7 +112,7 @@ class TripCommitmentService
     {
         $this->assertActor($actorUserId);
         $before = $this->activeCommitment($companyId, $tripId, $commitmentId);
-        $data = $this->validated($input);
+        $data = $this->validated($input, $companyId);
         $data = array_merge($data, [
             'active_override_slot' => $data['category'] === 'energy_override' ? 'energy' : null,
             'updated_by_user_id' => $actorUserId,
@@ -198,7 +201,7 @@ class TripCommitmentService
     }
 
     /** @return array<string, mixed> */
-    private function validated(array $input): array
+    private function validated(array $input, int $companyId): array
     {
         $category = trim((string) ($input['category'] ?? ''));
         $instruction = trim((string) ($input['instruction'] ?? ''));
@@ -243,8 +246,15 @@ class TripCommitmentService
         } else {
             $arrangedAt = null;
         }
+        $fleetExtraId = filter_var($input['fleet_extra_id'] ?? null, FILTER_VALIDATE_INT);
+        if ($fleetExtraId === false || $fleetExtraId === 0) {
+            $fleetExtraId = null;
+        }
+        if ($fleetExtraId !== null && ($fleetExtraId < 1 || $this->extraRepository?->extra($companyId, $fleetExtraId) === null)) {
+            throw new InvalidArgumentException('Choose a canonical Extra owned by the active company.');
+        }
 
-        return [
+        $data = [
             'category' => $category,
             'instruction' => $instruction,
             'applies_during' => $phase,
@@ -254,6 +264,11 @@ class TripCommitmentService
             'energy_percent' => $energy === null ? null : (int) $energy,
             'arranged_at' => $arrangedAt,
         ];
+        if (array_key_exists('fleet_extra_id', $input) && $this->repo()->supportsExtraLink()) {
+            $data['fleet_extra_id'] = $fleetExtraId;
+        }
+
+        return $data;
     }
 
     /** @return array<string, mixed> */
@@ -312,7 +327,20 @@ class TripCommitmentService
             'is_blocking' => (bool) $row['required_before_dispatch']
                 && (($row['handling_mode'] ?? null) === 'task'
                     || (($row['handling_mode'] ?? null) === 'acknowledgment' && ($row['acknowledged_at'] ?? null) === null)),
+            'fleet_extra_name' => $this->linkedExtraName($row),
         ]);
+    }
+
+    /** @param array<string, mixed> $row */
+    private function linkedExtraName(array $row): ?string
+    {
+        $extraId = (int) ($row['fleet_extra_id'] ?? 0);
+        if ($extraId < 1 || $this->extraRepository === null) {
+            return null;
+        }
+        $extra = $this->extraRepository->extra((int) $row['company_id'], $extraId);
+
+        return $extra === null ? null : (string) $extra['display_name'];
     }
 
     private function assertActor(int $actorUserId): void

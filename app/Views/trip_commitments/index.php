@@ -8,13 +8,14 @@
 /** @var string|null $success */
 /** @var string|null $error */
 $trip = $workspace['trip'];
+$workspace['fleet_extras'] ??= [];
 $tripIsOperational = (bool) $workspace['trip_is_operational'];
 $tripStateHeading = strtolower((string) ($trip['trip_status_code'] ?? '')) === 'invalid' ? 'Trip invalid' : 'Trip canceled';
 $preservedHeading = $tripStateHeading === 'Trip invalid' ? 'Commitments preserved from invalid trip' : 'Commitments preserved from canceled trip';
 $form = array_merge($editing ?? [
     'category' => 'pickup_instruction', 'instruction' => '', 'applies_during' => 'preparation',
     'handling_mode' => 'informational', 'required_before_dispatch' => false,
-    'energy_comparison' => 'target', 'energy_percent' => '', 'arranged_at' => null,
+    'energy_comparison' => 'target', 'energy_percent' => '', 'arranged_at' => null, 'fleet_extra_id' => null,
 ], $formData);
 $tripLabel = trim((string) ($trip['turo_reservation_id'] ?? '')) ?: (string) $trip['turo_trip_id'];
 $vehicleLabel = trim((string) ($trip['display_name'] ?? '')) ?: (string) $trip['fleet_code'];
@@ -57,6 +58,8 @@ $location = static fn (?string $class, ?string $source): string => trim((string)
             </dl>
         </section>
 
+        <?php if ($tripIsOperational): ?><?= view('trip_movement_checklists/_trip_preparation', ['checklist' => ['turo_trip_normalized_id' => (int) $trip['id']], 'extraPreparation' => $extraPreparation ?? []]) ?><?php endif; ?>
+
         <?php if ($tripIsOperational): ?>
         <section class="section" id="guest-commitments" aria-labelledby="commitments-heading">
             <div class="section-heading split-heading"><div><p class="eyebrow">What we promised</p><h2 id="commitments-heading">Active commitments</h2></div><span class="count-pill"><?= count($workspace['active']) ?> active</span></div>
@@ -66,6 +69,7 @@ $location = static fn (?string $class, ?string $source): string => trim((string)
                     <article class="guest-commitment-card<?= $commitment['is_blocking'] ? ' is-blocking' : '' ?>" id="commitment-<?= (int) $commitment['id'] ?>">
                         <div class="guest-commitment-card__heading"><div><p class="eyebrow"><?= esc((string) $commitment['category_label']) ?></p><h3><?= esc((string) $commitment['instruction']) ?></h3></div><span class="status-badge <?= $commitment['is_blocking'] ? 'tone-warning' : 'tone-info' ?>"><?= $commitment['is_blocking'] ? 'Required' : esc((string) $commitment['handling_label']) ?></span></div>
                         <p class="muted"><?= esc((string) $commitment['phase_label']) ?><?= (int) $commitment['required_before_dispatch'] === 1 ? ' · Required before dispatch' : '' ?></p>
+                        <?php if (($commitment['fleet_extra_name'] ?? null) !== null): ?><p class="muted">Linked Extra: <strong><?= esc((string) $commitment['fleet_extra_name']) ?></strong></p><?php endif; ?>
                         <?php if ($commitment['category'] === 'energy_override'): ?><div class="commitment-special-instruction"><strong>Special instruction</strong><?= view('trip_commitments/components/energy_override_context', ['commitment' => $commitment]) ?></div><?php endif; ?>
                         <?php if ($commitment['arranged_at'] !== null): ?><div class="commitment-time-arrangement"><span>Guest arrangement</span><strong><?= esc(date('M j, Y · g:i A', strtotime((string) $commitment['arranged_at']))) ?></strong></div><?php endif; ?>
                         <div class="commitment-actions">
@@ -86,6 +90,7 @@ $location = static fn (?string $class, ?string $source): string => trim((string)
                 <label>Category<select name="category" required data-commitment-category><?php foreach ($workspace['categories'] as $value => $label): ?><option value="<?= esc($value, 'attr') ?>"<?= $form['category'] === $value ? ' selected' : '' ?>><?= esc($label) ?></option><?php endforeach; ?></select></label>
                 <label>Applies during<select name="applies_during" required><?php foreach ($workspace['phases'] as $value => $label): ?><option value="<?= esc($value, 'attr') ?>"<?= $form['applies_during'] === $value ? ' selected' : '' ?>><?= esc($label) ?></option><?php endforeach; ?></select></label>
                 <label>Handling<select name="handling_mode" required data-commitment-handling><?php foreach ($workspace['handling_modes'] as $value => $label): ?><option value="<?= esc($value, 'attr') ?>"<?= $form['handling_mode'] === $value ? ' selected' : '' ?>><?= esc($label) ?></option><?php endforeach; ?></select></label>
+                <label>Related canonical Extra<select name="fleet_extra_id"><option value="">None</option><?php foreach ($workspace['fleet_extras'] as $extra): ?><option value="<?= (int) $extra['id'] ?>"<?= (int) ($form['fleet_extra_id'] ?? 0) === (int) $extra['id'] ? ' selected' : '' ?>><?= esc((string) $extra['display_name']) ?></option><?php endforeach; ?></select></label>
                 <label class="checkbox-row"><input type="checkbox" name="required_before_dispatch" value="1"<?= (bool) $form['required_before_dispatch'] ? ' checked' : '' ?>><span>Required before dispatch</span></label>
                 <label class="wide-field">Instruction<textarea name="instruction" rows="4" maxlength="4000" required><?= esc((string) $form['instruction']) ?></textarea></label>
                 <fieldset class="commitment-conditional wide-field" data-energy-fields><legend>Trip energy rule</legend>

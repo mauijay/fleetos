@@ -398,6 +398,11 @@ class MovementBoardIntelligenceService
     private function compactReadiness(array $card, int $blockingRemaining): array
     {
         $additional = (int) ($card['readiness_additional_remaining'] ?? 0);
+        $tripPreparationRequirements = array_values(array_filter(
+            $card['readiness_blockers'] ?? [],
+            static fn (array $requirement): bool => str_starts_with((string) ($requirement['code'] ?? ''), 'extra_fulfillment_'),
+        ));
+        $tripPreparationCount = count($tripPreparationRequirements);
         $nextActions = [];
         foreach ($card['readiness_blockers'] ?? [] as $requirement) {
             $label = trim((string) ($requirement['action']['label'] ?? ''));
@@ -426,6 +431,11 @@ class MovementBoardIntelligenceService
             'additional_count' => $additional,
             'summary' => $summary,
             'next_actions' => $nextActions,
+            'trip_preparation_count' => $tripPreparationCount,
+            'trip_preparation_items' => array_slice(array_map(
+                static fn (array $requirement): string => (string) ($requirement['label'] ?? 'Purchased Extra'),
+                $tripPreparationRequirements,
+            ), 0, 3),
         ];
     }
 

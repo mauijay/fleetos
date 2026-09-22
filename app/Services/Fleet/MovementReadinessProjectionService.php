@@ -115,6 +115,11 @@ class MovementReadinessProjectionService
             $this->derivedRequirement('guest_handoff', 'Guest handoff', self::PHASE_PICKUP_LIFECYCLE, $handoff !== null, false, $handoff !== null ? 'movement_event' : null, $handoff['occurred_at'] ?? null, 'Record actual guest handoff'),
         ];
         $requirements = array_merge($requirements, $this->commitmentRequirements($context['active_commitments'] ?? [], self::PHASE_PICKUP_PREPARATION));
+        $requirements = array_merge($requirements, $this->extraFulfillmentRequirements(
+            $context['extra_fulfillments'] ?? [],
+            self::PHASE_PICKUP_PREPARATION,
+            ['preparation', 'pickup', 'entire_trip'],
+        ));
 
         if ($handoff !== null) {
             $requirements = $this->suppressCompletedMovementPreparation($requirements, self::PHASE_PICKUP_PREPARATION);
@@ -150,6 +155,11 @@ class MovementReadinessProjectionService
             $requirements,
             $this->commitmentRequirements($context['active_commitments'] ?? [], self::PHASE_RETURN_INTAKE),
         );
+        $requirements = array_merge($requirements, $this->extraFulfillmentRequirements(
+            $context['extra_fulfillments'] ?? [],
+            self::PHASE_RETURN_INTAKE,
+            ['return', 'entire_trip'],
+        ));
 
         if ($nextTrip !== null) {
             $requirements[] = $this->nextPickupRequirement(
@@ -161,6 +171,13 @@ class MovementReadinessProjectionService
                 $nextTrip,
             );
             foreach ($this->commitmentRequirements($context['next_trip_commitments'] ?? [], self::PHASE_NEXT_PICKUP_PREPARATION) as $requirement) {
+                $requirements[] = $this->nextPickupRequirement($requirement, $nextTrip);
+            }
+            foreach ($this->extraFulfillmentRequirements(
+                $context['next_trip_extra_fulfillments'] ?? [],
+                self::PHASE_NEXT_PICKUP_PREPARATION,
+                ['preparation', 'pickup', 'entire_trip'],
+            ) as $requirement) {
                 $requirements[] = $this->nextPickupRequirement($requirement, $nextTrip);
             }
         }
@@ -501,6 +518,44 @@ class MovementReadinessProjectionService
                     'label' => (string) $commitment['instruction'],
                 ],
             );
+        }
+
+        return $requirements;
+    }
+
+    /** @param list<array<string, mixed>> $fulfillments @param list<string> $applicablePhases @return list<array<string, mixed>> */
+    private function extraFulfillmentRequirements(array $fulfillments, string $phase, array $applicablePhases): array
+    {
+        $requirements = [];
+        foreach ($fulfillments as $fulfillment) {
+            if (($fulfillment['removed_at'] ?? null) !== null
+                || ! in_array((string) ($fulfillment['fulfillment_phase'] ?? ''), $applicablePhases, true)
+                || ! (bool) ($fulfillment['requires_operator_confirmation'] ?? false)
+                || (int) ($fulfillment['fulfillment_id'] ?? 0) < 1) {
+                continue;
+            }
+            $complete = (bool) ($fulfillment['is_completed'] ?? false);
+            $actionable = (bool) ($fulfillment['is_actionable'] ?? false);
+            $id = (int) $fulfillment['fulfillment_id'];
+            $requirement = $this->requirement(
+                'extra_fulfillment_' . $id,
+                (string) ($fulfillment['title'] ?? 'Purchased Extra'),
+                $phase,
+                self::KIND_HUMAN,
+                $complete ? self::STATUS_SATISFIED : self::STATUS_UNSATISFIED,
+                (bool) ($fulfillment['readiness_blocking'] ?? false),
+                $complete ? 'extra_fulfillment_confirmation' : null,
+                $complete ? ($fulfillment['completed_at'] ?? null) : null,
+                $complete || ! $actionable ? null : [
+                    'type' => 'extra_fulfillment_complete',
+                    'fulfillment_id' => $id,
+                    'trip_id' => (int) ($fulfillment['turo_trip_normalized_id'] ?? 0),
+                    'label' => (string) ($fulfillment['action_label'] ?? 'Confirm Extra prepared'),
+                ],
+            );
+            $requirement['actionable'] = $actionable;
+            $requirement['extra_fulfillment'] = $fulfillment;
+            $requirements[] = $requirement;
         }
 
         return $requirements;

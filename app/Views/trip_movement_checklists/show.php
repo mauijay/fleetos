@@ -100,6 +100,7 @@ $tripFacts ??= [
             <?php if (! $tripIsOperational): ?>
                 <?= view('trip_movement_checklists/_inactive', ['checklist' => $checklist, 'tripStatusCode' => $tripStatusCode]) ?>
             <?php else: ?>
+            <?= view('trip_movement_checklists/_trip_preparation', ['checklist' => $checklist, 'extraPreparation' => $extraPreparation ?? []]) ?>
             <?php if (($checklist['movement_type'] ?? null) === 'return'): ?>
                 <?= view('trip_movement_checklists/_return_workflow', ['checklist' => $checklist, 'readiness' => $readiness, 'guestReturn' => $guestReturn, 'guestReturnActive' => $guestReturnActive, 'returnCompleted' => $returnCompleted, 'canRecover' => $canRecover, 'turnaroundWork' => $turnaroundWork, 'recoveryExceptions' => $recoveryExceptions]) ?>
             <?php else: ?>
@@ -318,17 +319,17 @@ $tripFacts ??= [
                 <?php if ($tripIsOperational): ?>
                 <?php
 $movementType = (string) (($correctingFacts || $repairingFacts) ? ($latestFacts['movement_type'] ?? $factTarget ?? $checklist['movement_type'] ?? 'movement') : ($checklist['movement_type'] ?? 'movement'));
-$formAction = $correctingFacts ? '/operations/checklists/' . (int) $checklist['id'] . '/facts/correct' : '/operations/checklists/' . (int) $checklist['id'] . '/facts';
-$occurredAt = (string) ($factFormData['occurred_at'] ?? date('Y-m-d\TH:i'));
-$occurredOn = substr($occurredAt, 0, 10);
-$occurredTime = substr($occurredAt, 11, 5);
-$selectedLocation = (string) ($factFormData['location_class'] ?? 'unknown');
-$selectedGarage = (string) ($factFormData['airport_garage_code'] ?? '');
-$selectedLevel = (string) ($factFormData['airport_parking_level'] ?? '');
-$selectedRow = (string) ($factFormData['airport_parking_row'] ?? '');
-$selectedCleanliness = (string) ($factFormData['cleanliness'] ?? '');
-$energyPercent = $factFormData['energy_percent'] ?? '';
-?>
+                    $formAction = $correctingFacts ? '/operations/checklists/' . (int) $checklist['id'] . '/facts/correct' : '/operations/checklists/' . (int) $checklist['id'] . '/facts';
+                    $occurredAt = (string) ($factFormData['occurred_at'] ?? date('Y-m-d\TH:i'));
+                    $occurredOn = substr($occurredAt, 0, 10);
+                    $occurredTime = substr($occurredAt, 11, 5);
+                    $selectedLocation = (string) ($factFormData['location_class'] ?? 'unknown');
+                    $selectedGarage = (string) ($factFormData['airport_garage_code'] ?? '');
+                    $selectedLevel = (string) ($factFormData['airport_parking_level'] ?? '');
+                    $selectedRow = (string) ($factFormData['airport_parking_row'] ?? '');
+                    $selectedCleanliness = (string) ($factFormData['cleanliness'] ?? '');
+                    $energyPercent = $factFormData['energy_percent'] ?? '';
+                    ?>
                 <?php if ($repairingFacts): ?>
                     <form class="issue-filters" action="/operations/checklists/<?= (int) $checklist['id'] ?>/facts/repair-trip" method="post">
                         <?= csrf_field() ?>

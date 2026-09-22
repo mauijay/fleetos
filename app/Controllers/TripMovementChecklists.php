@@ -84,6 +84,27 @@ class TripMovementChecklists extends BaseController
                 $readiness['energy_rule'] ?? null,
             )
             : [];
+        $currentTripId = (int) ($checklist['turo_trip_normalized_id'] ?? 0);
+        $nextTripId = (int) ($readiness['next_trip']['id'] ?? 0);
+        $extraTripIds = array_values(array_filter([$currentTripId, $nextTripId]));
+        $extraPreparationByTrip = ($checklist['exists'] ?? false) && $companyId > 0
+            ? Services::tripExtraFulfillmentService()->forTrips($companyId, $extraTripIds)
+            : [];
+        $currentPhases = ($checklist['movement_type'] ?? null) === 'return' ? ['return', 'entire_trip'] : ['preparation', 'pickup', 'entire_trip'];
+        $extraPreparation = array_map(static function (array $row) use ($currentPhases): array {
+            if (! in_array((string) ($row['fulfillment_phase'] ?? ''), $currentPhases, true) && ! ($row['is_informational'] ?? false)) {
+                $row['is_actionable'] = false;
+            }
+
+            return $row;
+        }, $extraPreparationByTrip[$currentTripId] ?? []);
+        foreach ($extraPreparationByTrip[$nextTripId] ?? [] as $row) {
+            if (! in_array((string) ($row['fulfillment_phase'] ?? ''), ['preparation', 'pickup', 'entire_trip'], true) && ! ($row['is_informational'] ?? false)) {
+                continue;
+            }
+            $row['is_next_trip'] = true;
+            $extraPreparation[] = $row;
+        }
         $locationClassifier = new LocationClassificationService();
         $recoveryLocationOptions = $locationClassifier->recoveryLocationOptions();
         $recoveryLocationPrefill = ($checklist['movement_type'] ?? null) === 'return'
@@ -107,6 +128,7 @@ class TripMovementChecklists extends BaseController
             'tripIsOperational' => $tripIsOperational,
             'tripStatusCode' => $tripSchedule['trip_status_code'] ?? null,
             'guestCommitments' => $guestCommitments,
+            'extraPreparation' => $extraPreparation,
             'factTarget' => $factTarget,
             'latestEvent' => $latestEvent,
             'guestReturn' => $guestReturn,
