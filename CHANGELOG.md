@@ -1,5 +1,44 @@
 # Changelog
 
+## v0.17.1 — Readiness Deduplication & Operator Action Labels
+
+Release date: 2026-09-22
+
+### Readiness Deduplication
+
+- Pickup workflows no longer show duplicate energy actions when charge/fuel level is unknown.
+- Unknown energy now produces exactly one measurement requirement.
+- Once energy is known, readiness evaluates the configured or trip-specific energy rule and produces at most one energy-readiness action.
+- No label-based deduplication was introduced. Exact trip and movement requirement identity remains authoritative.
+
+### Energy Sequencing
+
+- Unknown energy produces one **Record Charge/Fuel percentage** action.
+- Known energy below target produces one **Charge/Fuel toward target** action.
+- Known and ready energy produces zero energy actions.
+- Trip-specific Target, Maximum, and Minimum semantics remain unchanged.
+- Turnaround and recovery energy behavior remains unchanged.
+
+### Legacy Checklists
+
+- Preserve legacy `charge_confirmed` checklist rows in checklist history.
+- Prevent legacy rows from creating a second modern readiness blocker.
+
+### Fulfillment Action Labels
+
+- Use **Confirm packed** for Pack fulfillment.
+- Use **Confirm installed** for Install fulfillment.
+- Use **Confirm configured** for Configure fulfillment.
+- Use **Confirm reviewed** for Logistics fulfillment.
+- Keep detailed configured operator instructions visible above the button.
+- Do not derive confirmation labels through arbitrary text parsing.
+
+### Security & Domain Boundaries
+
+- Keep existing fulfillment POST, CSRF, permission, company ownership, actor, and audit behavior unchanged.
+- Add no endpoint and no GET-side mutation.
+- This release has no migration, schema, dependency, CSS, JavaScript, asset-replacement, financial-behavior, or Extras commercial-behavior changes.
+
 ## v0.17.0 — Extras Fulfillment & Trip Preparation
 
 Release date: 2026-09-21
