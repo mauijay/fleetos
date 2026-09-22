@@ -46,7 +46,33 @@ final class TripExtraFulfillmentTest extends CIUnitTestCase
         $presentation = $this->service->forTrips(1, [101])[101][0];
         $this->assertSame('Premium Beach Gear ×2', $presentation['title']);
         $this->assertSame('Pack 2 beach gear set(s)', $presentation['action_label']);
+        $this->assertSame('Confirm packed', $presentation['confirmation_label']);
         $this->assertTrue($presentation['is_actionable']);
+    }
+
+    public function testConfirmationLabelUsesExactConfiguredFulfillmentType(): void
+    {
+        $this->service->reconcileSelectionIds(1, [301]);
+
+        foreach ([
+            'pack' => 'Confirm packed',
+            'install' => 'Confirm installed',
+            'configure' => 'Confirm configured',
+            'logistics' => 'Confirm reviewed',
+            'informational' => null,
+            'none' => null,
+        ] as $type => $expected) {
+            $this->connection->table('fleet_extras')->where('id', 201)->update([
+                'fulfillment_type' => $type,
+                'requires_operator_confirmation' => $expected === null ? 0 : 1,
+                'default_action_label' => $expected === null ? null : 'Configured operator instruction',
+                'fulfillment_phase' => $expected === null ? null : 'preparation',
+            ]);
+
+            $presentation = $this->service->forTrips(1, [101])[101][0];
+            $this->assertSame($expected, $presentation['confirmation_label']);
+            $this->assertSame($expected !== null, $presentation['is_actionable']);
+        }
     }
 
     public function testCompletionIsIdempotentPriceDoesNotReopenButQuantityDoes(): void

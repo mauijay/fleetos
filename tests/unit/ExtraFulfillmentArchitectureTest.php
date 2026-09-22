@@ -38,7 +38,8 @@ final class ExtraFulfillmentArchitectureTest extends CIUnitTestCase
             $this->assertStringContainsString('name="' . $field . '"', $catalog);
         }
         $this->assertStringContainsString('Trip Preparation', $workflow);
-        $this->assertStringContainsString('Confirm fulfilled', $workflow);
+        $this->assertStringContainsString("['confirmation_label']", $workflow);
+        $this->assertStringNotContainsString('Confirm fulfilled', $workflow);
         $this->assertStringContainsString("'extra_fulfillment_'", $readiness);
         $this->assertStringContainsString('.trip-preparation-item', $css);
         $this->assertStringContainsString('@media (max-width: 44rem)', $css);
@@ -96,6 +97,54 @@ final class ExtraFulfillmentArchitectureTest extends CIUnitTestCase
         $this->assertStringContainsString('Operator #9', $html);
         $this->assertStringNotContainsString('/complete', $html);
         $this->assertStringNotContainsString('/reopen', $html);
+    }
+
+    public function testWorkflowRendersTypedConfirmationAndKeepsInstructionAsDetail(): void
+    {
+        $html = Services::renderer()->setData([
+            'checklist' => ['id' => 668],
+            'extraPreparation' => [[
+                'fulfillment_id' => 8,
+                'turo_trip_normalized_id' => 333,
+                'title' => 'Premium Beach Gear',
+                'action_label' => 'Pack the premium beach set near the rear cargo door',
+                'confirmation_label' => 'Confirm packed',
+                'quantity_unknown' => false,
+                'linked_commitments' => [],
+                'is_removed' => false,
+                'is_actionable' => true,
+                'is_completed' => false,
+                'is_informational' => false,
+            ]],
+        ])->render('trip_movement_checklists/_trip_preparation');
+
+        $this->assertStringContainsString('Pack the premium beach set near the rear cargo door', $html);
+        $this->assertStringContainsString('Confirm packed', $html);
+        $this->assertStringContainsString('/operations/trips/333/extra-fulfillments/8/complete', $html);
+        $this->assertStringNotContainsString('Confirm fulfilled', $html);
+    }
+
+    public function testInformationalFulfillmentHasNoConfirmationControl(): void
+    {
+        $html = Services::renderer()->setData([
+            'checklist' => ['id' => 668],
+            'extraPreparation' => [[
+                'fulfillment_id' => 10,
+                'turo_trip_normalized_id' => 333,
+                'title' => 'Informational Extra',
+                'action_label' => '',
+                'confirmation_label' => null,
+                'quantity_unknown' => false,
+                'linked_commitments' => [],
+                'is_removed' => false,
+                'is_actionable' => false,
+                'is_completed' => false,
+                'is_informational' => true,
+            ]],
+        ])->render('trip_movement_checklists/_trip_preparation');
+
+        $this->assertStringContainsString('No operator confirmation required', $html);
+        $this->assertStringNotContainsString('/complete', $html);
     }
 
     private function read(string $path): string

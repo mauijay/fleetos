@@ -213,6 +213,7 @@ class TripExtraFulfillmentService
             'quantity_label' => $quantity,
             'quantity_unknown' => $quantity === null,
             'action_label' => $action,
+            'confirmation_label' => $this->confirmationLabel((string) ($row['fulfillment_type'] ?? '')),
             'trip_is_operational' => $operational,
             'configured' => $configured,
             'is_removed' => ! $current,
@@ -273,6 +274,17 @@ class TripExtraFulfillmentService
         $value = rtrim(rtrim((string) $quantity, '0'), '.');
 
         return $value === '' ? '0' : $value;
+    }
+
+    private function confirmationLabel(string $fulfillmentType): ?string
+    {
+        return match ($fulfillmentType) {
+            'pack' => 'Confirm packed',
+            'install' => 'Confirm installed',
+            'configure' => 'Confirm configured',
+            'logistics' => 'Confirm reviewed',
+            default => null,
+        };
     }
 
     /** @return array<string, mixed> */

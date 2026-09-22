@@ -299,19 +299,20 @@ final class MovementReadinessProjectionServiceTest extends CIUnitTestCase
         ));
 
         $this->assertFalse($projection['ready']);
-        $this->assertSame(8, $projection['blocking_remaining_count']);
+        $this->assertSame(7, $projection['blocking_remaining_count']);
         $this->assertSame([
             'photos_complete',
             'vehicle_clean',
             'energy_known',
-            'energy_ready',
             'location_confirmed',
             'key_card_confirmed',
             'charging_adapter_confirmed',
             'airport_staging',
         ], array_column($blocking, 'code'));
         $this->assertSame('Photos complete', $blocking[0]['action']['label']);
+        $this->assertNotContains('energy_ready', array_column($projection['requirements'], 'code'));
         $this->assertCount(9, $projection['workflow_history']['legacy_items']);
+        $this->assertContains('charge_confirmed', array_column($projection['workflow_history']['legacy_items'], 'item_code'));
     }
 
     public function testConventionalVehicleUsesKeysAndDoesNotReceiveChargingAdapterWork(): void

@@ -106,14 +106,19 @@ class MovementReadinessProjectionService
             $this->photosRequirement($context),
             $this->derivedRequirement('vehicle_clean', 'Vehicle clean', self::PHASE_PICKUP_PREPARATION, $clean, true, $clean ? $assessmentAuthority : null, $assessment['captured_at'] ?? null, 'Record clean pickup condition'),
             $this->derivedRequirement('energy_known', 'Energy known', self::PHASE_PICKUP_PREPARATION, $energy !== null, true, $energy !== null ? $assessmentAuthority : null, $assessment['captured_at'] ?? null, 'Record Charge/Fuel percentage'),
-            $this->energyRequirement('energy_ready', 'Energy ready', self::PHASE_PICKUP_PREPARATION, $energyRule, $energy, $assessmentAuthority, $assessment['captured_at'] ?? null),
+        ];
+        if ($energy !== null) {
+            $requirements[] = $this->energyRequirement('energy_ready', 'Energy ready', self::PHASE_PICKUP_PREPARATION, $energyRule, $energy, $assessmentAuthority, $assessment['captured_at'] ?? null);
+        }
+        array_push(
+            $requirements,
             $this->locationRequirement($context, $actualLocation),
             $this->keyRequirement($context, $workflow),
             $this->chargingAdapterRequirement($context),
             $this->airportStagingRequirement($staged, $workflow, $isAirport),
             $this->airportMilestoneRequirement('parking_location_recorded', 'Parking location recorded', $staged, $workflow, $isAirport, $this->hasStructuredParking($staged) || $this->hasWorkflowParking($workflow), 'Record parking location'),
             $this->derivedRequirement('guest_handoff', 'Guest handoff', self::PHASE_PICKUP_LIFECYCLE, $handoff !== null, false, $handoff !== null ? 'movement_event' : null, $handoff['occurred_at'] ?? null, 'Record actual guest handoff'),
-        ];
+        );
         $requirements = array_merge($requirements, $this->commitmentRequirements($context['active_commitments'] ?? [], self::PHASE_PICKUP_PREPARATION));
         $requirements = array_merge($requirements, $this->extraFulfillmentRequirements(
             $context['extra_fulfillments'] ?? [],
