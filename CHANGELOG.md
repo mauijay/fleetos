@@ -1,5 +1,82 @@
 # Changelog
 
+## v0.17.0 — Extras Fulfillment & Trip Preparation
+
+Release date: 2026-09-21
+
+### Extras Fulfillment
+
+- Allow selected Turo Extras to produce operator fulfillment requirements while keeping commercial source truth in the existing Extras tables.
+- Track operational preparation for the exact trip and exact Turo Extra selection. One selection produces at most one requirement; quantity is displayed accurately but never multiplies blocker counts.
+
+### Canonical Fulfillment Configuration
+
+- Add admin-configured fulfillment behavior to canonical Extras: `none`, `informational`, `pack`, `install`, `configure`, and `logistics`.
+- Make fulfillment phase and operator action labels configurable. Blocking behavior requires explicit operator confirmation.
+- Default existing Extras safely to non-actionable. Never infer fulfillment behavior from Extra name, Turo label, or source type.
+
+### Trip Preparation
+
+- Surface Purchased Extras in a responsive **Trip Preparation** section on movement workflows.
+- Allow physical and configuration Extras to block readiness until confirmed. Move completed fulfillment into compact history/context with completion actor and time.
+- Keep informational Extras visible without creating blockers.
+
+### Quantity-Aware Preparation
+
+- Render quantity-aware instructions such as **Body Board ×2 — Load 2 body boards** and **Child Safety Seat ×2 — Install 2 child safety seats**, while retaining one blocker per selection.
+- Preserve omitted Turo quantity as unknown rather than silently treating it as one.
+
+### Guest Commitment Linkage
+
+- Allow Guest Commitments to link explicitly to a canonical Extra without text matching.
+- Show linked informational instructions beneath their Extra, such as a child-seat arrangement, without creating a duplicate blocker. Independently required commitments remain independent work.
+
+### FSD, EV Recharge & One-Way Trips
+
+- Support manual FSD preparation verification without claiming that FleetOS enables FSD automatically.
+- Support informational, nonblocking Prepaid EV Recharge context without inventing a charge target or financial action.
+- Support One-way Trip logistics confirmation without rewriting the official Turo schedule or vehicle position.
+
+### Reconciliation
+
+- Reconcile fulfillment against the exact current Extra selection with idempotent repeated imports.
+- Prevent stale or partial snapshots from removing or reopening work. Complete-snapshot removal suppresses active work while preserving history; re-added selections reopen appropriately.
+- Reopen completed fulfillment when quantity, canonical mapping, fulfillment policy, or vehicle basis changes. Price-only changes do not reopen operational work.
+
+### Canceled Trips & Post-Handoff State
+
+- Preserve fulfillment history while suppressing active work for canceled or invalid trips. Reactivation of the same normalized trip restores applicability.
+- Suppress impossible physical preparation after authoritative guest handoff while retaining historical fulfillment context.
+
+### Workflow & Command Center
+
+- Integrate fulfillment into the existing readiness projection and Operations Queue work identity rather than introducing a duplicate Extras task source.
+- Show compact Trip Preparation context on the Movement Board.
+
+### Removed Extra History
+
+- Keep fulfilled or pending Extras removed by a later complete snapshot visible in historical/context presentation.
+- Removed Extras produce zero active actions and zero blockers and remain clearly labeled as removed with no action required.
+
+### Financial Firewall
+
+- Give fulfillment no price, gross, revenue, payout, recovery, expense, or financial-posting authority.
+- Keep Extra quantity, selected price, gross value, realized revenue, recoveries, expenses, and financial results unchanged by fulfillment completion.
+- Keep `FinancialActivityReadService`, `FinancialSummaryService`, and `VehicleFinancialSummaryService` outside the fulfillment path.
+
+### Migration
+
+- Add migration `2026-09-21-000024_CreateExtraFulfillment`.
+- Extend `fleet_extras` with fulfillment configuration and add optional canonical Extra linkage to Guest Commitments.
+- Create `trip_extra_fulfillments` and `trip_extra_fulfillment_audits` with required keys and foreign keys.
+- Keep the migration additive, with no name-based backfill, financial-table changes, or production fulfillment rows.
+
+### UX & Release Boundaries
+
+- Preserve responsive Trip Preparation behavior at 390px, 440px, desktop, and wide desktop. Keep linked guest instructions subordinate but visible and retain dark-mode styling.
+- This release requires migration 000024. It makes no dependency, financial-behavior, or Extras commercial-behavior changes.
+- Include frontend CSS changes; production Vite assets must be transferred during deployment.
+
 ## v0.16.1 — Future Trip Guest Commitment Navigation
 
 Release date: 2026-09-21
