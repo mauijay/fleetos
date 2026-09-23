@@ -66,6 +66,21 @@ final class VehicleRegistrationComplianceViewTest extends CIUnitTestCase
         $this->assertMatchesRegularExpression('/@media \(min-width: 1700px\) \{(?:(?!@media).)*\.vehicle-registry-grid,\s*\.vehicle-form-layout \{\s*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/s', $css);
     }
 
+    public function testReadinessCapabilitiesRenderAsOneAccessibleResponsiveGroup(): void
+    {
+        $form = file_get_contents(__DIR__ . '/../../app/Views/fleet_vehicles/form.php');
+        $css = file_get_contents(__DIR__ . '/../../resources/css/app.css');
+
+        $this->assertIsString($form);
+        $this->assertIsString($css);
+        $this->assertStringContainsString('class="issue-filters readiness-profile-fields"', $form);
+        $this->assertMatchesRegularExpression('/<fieldset class="readiness-capabilities"><legend>Vehicle readiness items<\/legend>.*name="operational_capabilities\[\]" value="key_card".*name="operational_capabilities\[\]" value="charging_adapter".*<\/fieldset>/s', $form);
+        $this->assertMatchesRegularExpression('/\.readiness-profile-fields\s*\{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/s', $css);
+        $this->assertMatchesRegularExpression('/\.readiness-capabilities\s*\{[^}]*grid-column: 1 \/ -1;[^}]*max-width: 100%;[^}]*min-width: 0;/s', $css);
+        $this->assertMatchesRegularExpression('/\.issue-filters \.readiness-capabilities \.checkbox-row\s*\{[^}]*align-items: center;[^}]*min-height: 44px;[^}]*cursor: pointer;/s', $css);
+        $this->assertMatchesRegularExpression('/\.issue-filters \.readiness-capabilities \.checkbox-row input\[type="checkbox"\]\s*\{[^}]*width: 20px;[^}]*height: 20px;[^}]*min-height: 20px;/s', $css);
+    }
+
     /** @param array<string, mixed> $overrides @return array<string, mixed> */
     private function vehicle(array $overrides = []): array
     {

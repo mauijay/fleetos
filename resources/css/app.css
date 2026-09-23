@@ -2912,6 +2912,58 @@ h3 {
   margin-top: 3px;
 }
 
+.readiness-profile-fields {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.readiness-capabilities {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 6px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 8px 10px 10px;
+}
+
+.readiness-capabilities legend {
+  padding: 0 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.readiness-capability-list {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.issue-filters .readiness-capabilities .checkbox-row {
+  align-items: center;
+  min-width: 0;
+  min-height: 44px;
+  border-radius: var(--radius);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 7px 8px;
+}
+
+.issue-filters .readiness-capabilities .checkbox-row input[type="checkbox"] {
+  width: 20px;
+  max-width: 20px;
+  min-width: 20px;
+  height: 20px;
+  min-height: 20px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--success);
+}
+
 .pagination-row {
   display: flex;
   justify-content: space-between;
