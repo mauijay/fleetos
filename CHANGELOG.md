@@ -1,5 +1,44 @@
 # Changelog
 
+## v0.18.2 — Readiness Profile UI Polish
+
+Release date: 2026-09-23
+
+### Readiness Profile Layout
+
+- Group **Key card applies** and **Charging adapter applies** into one coherent **Vehicle readiness items** section.
+- Keep the controls visually associated instead of allowing them to separate across form-grid columns.
+
+### Checkbox Usability
+
+- Increase readiness-item checkboxes to 20 × 20px.
+- Keep the entire label row clickable with a 44px minimum height for a larger mouse and touch target.
+
+### Responsive UX
+
+- Keep readiness controls grouped at desktop widths and stack them cleanly at 390–440px without horizontal overflow.
+- Preserve the existing Save Vehicle layout.
+
+### Accessibility
+
+- Preserve native checkbox inputs, label association, keyboard behavior, and visible focus behavior.
+- Add a semantic fieldset and **Vehicle readiness items** legend.
+
+### Form Contract
+
+- Preserve `operational_capabilities[] = key_card` and `operational_capabilities[] = charging_adapter` exactly.
+- Make no controller, service, repository, validation, persistence, or readiness behavior changes.
+
+### Manual Acceptance
+
+- Desktop: PASS.
+- Mobile 440px: PASS.
+
+### Release Boundaries
+
+- This release requires no migration, schema change, backend behavior change, or dependency change.
+- This release includes a frontend source change and requires fresh production Vite asset replacement.
+
 ## v0.18.1 — Vehicle Edit Identity Fix
 
 Release date: 2026-09-23
