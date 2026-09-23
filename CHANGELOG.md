@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.18.1 — Vehicle Edit Identity Fix
+
+Release date: 2026-09-23
+
+### Vehicle Edit Identity
+
+- Fix a latent vehicle-edit defect where raw operational-profile metadata could overwrite the canonical fleet vehicle ID in the enriched read model.
+- Preserve `fleet_vehicles.id` as the authoritative vehicle identity used by vehicle edit forms.
+
+### Fleet Number Immutability
+
+- Keep existing assigned fleet numbers immutable through ordinary editing while allowing unchanged values to save normally.
+- Continue rejecting genuine fleet-number changes and preserve the supported assignment workflow for previously unassigned vehicles.
+
+### Profile Enrichment
+
+- Merge only supported operational-profile domain fields in `FleetVehicleService` instead of blindly merging raw profile-row metadata.
+- Prevent profile primary keys and metadata from replacing vehicle identity or unrelated fleet-vehicle fields.
+
+### Energy Range Editing
+
+- Allow v0.18.0 energy range edits to save on vehicles that already have assigned fleet numbers.
+- Support changing a legacy 75% target to a 70% minimum and 80% preferred maximum while dual-writing the legacy target to 70%.
+- Keep energy range validation and readiness semantics unchanged.
+
+### Security and Scope
+
+- Preserve company scoping, fleet-number uniqueness, and immutable-number protections.
+
+### Test Coverage
+
+- Add regression coverage for canonical vehicle ID preservation, assigned fleet-number edits, genuine fleet-number change rejection, range edits with assigned numbers, canonical form actions, and company scoping.
+
+### Release Boundaries
+
+- This release requires no migration, schema change, dependency change, frontend asset change, Vite asset replacement, or business data migration.
+
 ## v0.18.0 — Energy Readiness Ranges
 
 Release date: 2026-09-22
