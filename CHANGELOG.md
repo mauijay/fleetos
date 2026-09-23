@@ -1,5 +1,84 @@
 # Changelog
 
+## v0.18.0 — Energy Readiness Ranges
+
+Release date: 2026-09-22
+
+### Energy Range Policy
+
+- Support minimum-only readiness, preferred readiness ranges, and unconfigured vehicle energy policy.
+- Allow normal Tesla policy to be configured explicitly as 70–80% without implying that every Tesla receives that policy automatically.
+- Treat the preferred upper range as informational rather than a hard ceiling. FleetOS never creates a discharge task merely because charge exceeds the preferred maximum.
+
+### Exact Observations
+
+- Preserve exact charge/fuel observations unchanged: a recovery recorded at 43% remains stored and displayed as 43%.
+- Keep observation truth separate from policy evaluation; historical observations are never converted into ranges.
+
+### Legacy Compatibility
+
+- Continue supporting `ready_energy_target_percent`; a legacy 75% target resolves as minimum-only 75%.
+- Do not automatically migrate or backfill 75% into a 70–80% range.
+- Dual-write the new range minimum to the legacy target field for rollback compatibility.
+
+### Trip-Specific Energy Overrides
+
+- Add Guest Commitment support for Preferred range overrides, such as a guest-preferred 50–60% range.
+- Below the lower bound, direct charging toward the range; within the range, report Ready; above the preferred maximum, remain Ready with informational context only.
+- Preserve existing hard Maximum behavior, including a blocking review when exceeded.
+
+### Shared Policy Authority
+
+- Make `TripEnergyRuleResolver` the authoritative energy-policy resolver for operational consumers.
+- Preserve exact-trip override precedence and stop operational consumers from independently reconstructing single-target policy.
+
+### Readiness Sequencing
+
+- Unknown energy produces exactly one measurement action.
+- Known energy below the minimum produces exactly one charge/fuel action.
+- Ready energy and energy above a preferred range produce zero energy blockers.
+- A hard maximum violation produces exactly one review blocker.
+
+### Same-Day Turnaround
+
+- Allow exact prior recovery energy to drive next-trip preparation only for the exact next eligible trip on the same local calendar day.
+- For example, a 43% recovery followed by a 70–80% next-trip range produces **Charge to 70–80%** without creating a synthetic pickup observation.
+- Do not treat an overnight cross-midnight turnaround as same-day.
+
+### Stale and Non-Same-Day Energy
+
+- Keep prior recovery energy visible as Last known context without treating it as current for a later-day pickup.
+- Require a fresh current Charge/Fuel measurement before evaluating later-day readiness.
+- Keep cleanliness independently stateful until superseded.
+
+### Cleanliness
+
+- Continue Dirty/Clean state independently from energy freshness.
+- Allow Dirty to remain actionable across days until a later Clean observation.
+
+### Guest Possession and Canceled Trips
+
+- Suppress impossible physical preparation while the guest has possession.
+- Produce zero active work for canceled or invalid trips while preserving history.
+
+### ICE and Gasoline Vehicles
+
+- Apply the same profile model to gasoline vehicles with fuel-specific readiness wording.
+- Never infer Tesla policy for ICE vehicles.
+
+### Admin UX
+
+- Replace the vehicle profile's single target input with **Ready energy minimum** and **Ready energy preferred maximum**.
+- Use paired minimum and maximum fields for Guest Commitment Preferred ranges.
+- Reject maximum-only, reversed, and out-of-range configurations.
+
+### Migration and Release Boundaries
+
+- Add migration `2026-09-22-000025_CreateEnergyReadinessRanges` with nullable range fields for vehicle operational profiles and trip commitments.
+- Keep the migration additive, with no business-row backfill or observation rewriting.
+- This release requires migration 000025 and production Vite asset replacement.
+- Make no dependency, financial-behavior, or Extras commercial-behavior changes.
+
 ## v0.17.1 — Readiness Deduplication & Operator Action Labels
 
 Release date: 2026-09-22
