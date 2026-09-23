@@ -45,6 +45,41 @@ final class TripCommitmentsArchitectureTest extends CIUnitTestCase
         $this->assertStringContainsString('@media (max-width: 560px)', $css);
     }
 
+    public function testEnergyRangeFormsAndResponsivePairedInputsUseStructuredFields(): void
+    {
+        $vehicleForm = $this->source('app/Views/fleet_vehicles/form.php');
+        $commitmentForm = $this->source('app/Views/trip_commitments/index.php');
+        $javascript = $this->source('resources/js/guest-commitment-form.js');
+        $css = $this->source('resources/css/app.css');
+
+        $this->assertStringContainsString('name="ready_energy_min_percent"', $vehicleForm);
+        $this->assertStringContainsString('name="ready_energy_preferred_max_percent"', $vehicleForm);
+        $this->assertStringNotContainsString('name="ready_energy_target_percent"', $vehicleForm);
+        $this->assertStringContainsString('Values above this preferred maximum are still ready', $vehicleForm);
+        $this->assertStringContainsString('name="energy_min_percent"', $commitmentForm);
+        $this->assertStringContainsString('name="energy_max_percent"', $commitmentForm);
+        $this->assertStringContainsString('data-range-energy', $commitmentForm);
+        $this->assertStringContainsString('comparison === "preferred_range"', $javascript);
+        $this->assertStringContainsString('.commitment-range-fields', $css);
+        $this->assertStringContainsString('grid-template-columns: repeat(2, minmax(0, 1fr))', $css);
+        $this->assertStringContainsString('grid-template-columns: minmax(0, 1fr)', $css);
+    }
+
+    public function testOperationalEnergyConsumersDoNotRebuildLegacyTargetPolicy(): void
+    {
+        foreach ([
+            'app/Services/Fleet/MovementReadinessProjectionService.php',
+            'app/Services/Fleet/MovementStateResolver.php',
+            'app/Services/Fleet/OperationalMovementWorkService.php',
+            'app/Services/Fleet/VehiclePositioningRecommendationService.php',
+            'app/Services/Fleet/DailyOperationsDashboardService.php',
+            'app/Services/Fleet/TaskService.php',
+            'app/Services/Fleet/FleetCommandCenterViewModelService.php',
+        ] as $path) {
+            $this->assertStringNotContainsString('ready_energy_target_percent', $this->source($path), $path);
+        }
+    }
+
     public function testCommitmentsRemainOutsideExtrasAndFinancialReadPaths(): void
     {
         foreach ([

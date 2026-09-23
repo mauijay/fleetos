@@ -90,7 +90,7 @@ class MovementBoardIntelligenceService
             && in_array($lifecycleEvent['event_code'] ?? null, ['actual_return', 'vehicle_recovered'], true)
             && (($assessment['cleanliness'] ?? null) !== 'clean'
                 || (string) ($assessment['captured_at'] ?? '') <= (string) $lifecycleEvent['occurred_at']));
-        $profile = $this->repo()->profile($vehicleId) ?? ['energy_kind' => 'unknown', 'ready_energy_target_percent' => null, 'capabilities' => []];
+        $profile = $this->repo()->profile($vehicleId) ?? $this->emptyProfile();
         $nextTrip = $this->nextTrips()->forVehicle($vehicleId, $asOf);
         $freshness = $this->freshness()->assess($nextTrip['import_completed_at'] ?? $schedule['import_completed_at'] ?? null, $asOf);
         $location = $this->positionBasis($lifecycleEvent ?? $event, $schedule, $card['current_position'] ?? null);
@@ -105,7 +105,8 @@ class MovementBoardIntelligenceService
             'assessment' => $assessment,
             'cleaning_required' => $cleaningRequired,
             ...($companyId !== null ? ['energy_condition' => $energyNeed['condition_code'] ?? null] : []),
-            ...($companyId !== null ? ['energy_target_percent' => $energyNeed['target_percent'] ?? null] : []),
+            ...($companyId !== null ? ['energy_rule' => $energyNeed['energy_rule'] ?? $this->energyRules()->forProfile($profile)] : []),
+            ...($companyId !== null ? ['energy_action_label' => $energyNeed['action_label'] ?? null] : []),
             'profile' => $profile,
             'next_trip' => $nextTrip,
             'blockers' => $blockers,
@@ -190,6 +191,8 @@ class MovementBoardIntelligenceService
             }
         }
 
+        $projectedEnergyAction = array_intersect($card['flags'] ?? [], ['charging_required', 'energy_check_required', 'energy_attention_required']) !== [];
+
         return array_merge($card, [
             'recovery_exceptions' => $recoveryExceptions,
             'primary_status' => $primaryStatus,
@@ -223,7 +226,11 @@ class MovementBoardIntelligenceService
             'readiness_additional_remaining' => $awaitingRecovery ? 0 : ($card['readiness_additional_remaining'] ?? 0),
             'readiness_blockers' => $awaitingRecovery ? [] : ($card['readiness_blockers'] ?? []),
             'flags' => $flags,
-            'actions' => $awaitingRecovery ? ['Recover Vehicle'] : array_values(array_unique(array_merge($card['actions'] ?? [], $cleaningRequired ? ['Cleaning Required'] : [], $energyNeed === null ? [] : [(string) $energyNeed['label']]))),
+            'actions' => $awaitingRecovery ? ['Recover Vehicle'] : array_values(array_unique(array_merge(
+                $card['actions'] ?? [],
+                $cleaningRequired ? ['Cleaning Required'] : [],
+                $energyNeed === null || $projectedEnergyAction ? [] : [(string) $energyNeed['label']],
+            ))),
             'cleaning_status_label' => $awaitingRecovery ? 'Not actionable until recovery' : ($cleaningRequired ? 'Cleaning required after return' : 'No cleaning task known'),
             'charging_status_label' => $awaitingRecovery ? 'Not actionable until recovery' : ($energyNeed['label'] ?? 'No Charge/Fuel action needed'),
             'recommendation' => $recommendation,
@@ -658,11 +665,11 @@ class MovementBoardIntelligenceService
     }
     private function states(): MovementStateResolver
     {
-        return $this->stateResolver ?? new MovementStateResolver();
+        return $this->stateResolver ?? new MovementStateResolver($this->energyRules());
     }
     private function positioning(): VehiclePositioningRecommendationService
     {
-        return $this->positioningService ?? new VehiclePositioningRecommendationService();
+        return $this->positioningService ?? new VehiclePositioningRecommendationService(null, $this->energyRules());
     }
     private function plans(): VehiclePositioningPlanService
     {
@@ -671,5 +678,17 @@ class MovementBoardIntelligenceService
     private function energyRules(): TripEnergyRuleResolver
     {
         return $this->energyRuleResolver ?? Services::tripEnergyRuleResolver();
+    }
+
+    /** @return array<string, mixed> */
+    private function emptyProfile(): array
+    {
+        return [
+            'energy_kind' => 'unknown',
+            'ready_energy_target_percent' => null,
+            'ready_energy_min_percent' => null,
+            'ready_energy_preferred_max_percent' => null,
+            'capabilities' => [],
+        ];
     }
 }

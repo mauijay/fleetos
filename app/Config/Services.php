@@ -401,7 +401,7 @@ class Services extends BaseService
             return static::getSharedInstance('movementReadinessProjectionService');
         }
 
-        return new MovementReadinessProjectionService();
+        return new MovementReadinessProjectionService(static::tripEnergyRuleResolver());
     }
 
     public static function movementReadinessReadService(bool $getShared = true): MovementReadinessReadService
@@ -551,7 +551,7 @@ class Services extends BaseService
             return static::getSharedInstance('movementStateResolver');
         }
 
-        return new MovementStateResolver();
+        return new MovementStateResolver(static::tripEnergyRuleResolver());
     }
 
     public static function vehiclePositioningRecommendationService(bool $getShared = true): VehiclePositioningRecommendationService
@@ -560,7 +560,7 @@ class Services extends BaseService
             return static::getSharedInstance('vehiclePositioningRecommendationService');
         }
 
-        return new VehiclePositioningRecommendationService(new MovementIntelligence());
+        return new VehiclePositioningRecommendationService(new MovementIntelligence(), static::tripEnergyRuleResolver());
     }
 
     public static function vehiclePositioningPlanService(bool $getShared = true): VehiclePositioningPlanService

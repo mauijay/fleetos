@@ -6,8 +6,10 @@ use Config\MovementIntelligence;
 
 class VehiclePositioningRecommendationService
 {
-    public function __construct(private readonly ?MovementIntelligence $config = null)
-    {
+    public function __construct(
+        private readonly ?MovementIntelligence $config = null,
+        private readonly ?TripEnergyRuleResolver $energyRuleResolver = null,
+    ) {
     }
 
     /** @return array<string, mixed> */
@@ -53,7 +55,7 @@ class VehiclePositioningRecommendationService
         $assessment = $context['assessment'] ?? [];
         $energyCondition = array_key_exists('energy_condition', $context)
             ? $context['energy_condition']
-            : $this->legacyEnergyCondition($profile, $assessment);
+            : $this->resolvedEnergyCondition($profile, $assessment);
         $missing = [];
         $reasons = [];
         $dependency = null;
@@ -136,12 +138,11 @@ class VehiclePositioningRecommendationService
         return ! (bool) ($this->settings()->locationCapabilities['airport_hnl'][$kind . '_refueling'] ?? false);
     }
 
-    private function legacyEnergyCondition(array $profile, array $assessment): ?string
+    private function resolvedEnergyCondition(array $profile, array $assessment): ?string
     {
-        $target = isset($profile['ready_energy_target_percent']) ? (int) $profile['ready_energy_target_percent'] : null;
         $energy = isset($assessment['energy_percent']) ? (int) $assessment['energy_percent'] : null;
 
-        return $target !== null && $energy !== null && $energy < $target ? 'charge_required' : null;
+        return $this->energyRules()->evaluate($this->energyRules()->forProfile($profile), $energy)['condition'];
     }
 
     private function explanation(string $code, string $strength): string
@@ -160,5 +161,10 @@ class VehiclePositioningRecommendationService
     private function settings(): MovementIntelligence
     {
         return $this->config ?? new MovementIntelligence();
+    }
+
+    private function energyRules(): TripEnergyRuleResolver
+    {
+        return $this->energyRuleResolver ?? new TripEnergyRuleResolver();
     }
 }

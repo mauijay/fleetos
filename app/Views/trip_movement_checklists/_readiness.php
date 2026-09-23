@@ -25,6 +25,7 @@ $nextPickupPending = array_values(array_filter($nextPickupPreparation, static fn
 $nextPickupFacts = array_values(array_filter($nextPickupPreparation, static fn (array $requirement): bool => $requirement['status'] !== 'unsatisfied' || ! ($requirement['actionable'] ?? true)));
 $exceptionalDispositions = $readiness['exceptional_dispositions'] ?? [];
 $currentDisposition = trim((string) ($checklist['vehicle_disposition'] ?? ''));
+$lastKnownVehicleFacts = $readiness['last_known_vehicle_facts'] ?? null;
 $pendingLabels = [
     'exterior_inspected' => 'Inspect exterior',
     'interior_inspected' => 'Inspect interior',
@@ -55,6 +56,20 @@ $factDetail = static function (array $requirement) use ($activeFacts): ?string {
         <?php if ($closed): ?><span class="status-badge tone-info">Workflow closed</span><?php endif; ?>
     </div>
 
+    <?php if (($lastKnownVehicleFacts['energy_percent'] ?? null) !== null): ?>
+        <?php
+        $energySourceLabel = in_array($lastKnownVehicleFacts['energy_source_event'] ?? null, ['actual_return', 'vehicle_recovered'], true)
+            ? 'Recorded at recovery'
+            : 'Last observed';
+        $energyObservedAt = trim((string) ($lastKnownVehicleFacts['energy_observed_at'] ?? ''));
+        ?>
+        <p class="muted readiness-last-known-energy">
+            Last known Charge/Fuel: <?= (int) $lastKnownVehicleFacts['energy_percent'] ?>%
+            <?php if ($energyObservedAt !== ''): ?> · <?= esc($energySourceLabel) ?> <?= esc(date('M j, g:i A', strtotime($energyObservedAt))) ?><?php endif; ?>.
+            <?php if (! ($lastKnownVehicleFacts['energy_applicable_to_target'] ?? false)): ?> Current Charge/Fuel needs verification.<?php endif; ?>
+        </p>
+    <?php endif; ?>
+
     <div class="readiness-groups">
         <div class="readiness-group">
             <h3>Action required</h3>
@@ -69,7 +84,7 @@ $factDetail = static function (array $requirement) use ($activeFacts): ?string {
                         $actionType = (string) ($requirement['action']['type'] ?? '');
                         $isSpecialAction = in_array($actionType, ['photos_composite', 'charging_adapter', 'guest_commitment_complete', 'guest_commitment_acknowledge'], true);
                         ?>
-                        <li id="checklist-action-<?= esc((string) $requirement['code'], 'attr') ?>" tabindex="-1" class="is-pending readiness-action-row<?= $isSpecialAction ? ' readiness-compound-action' : '' ?>"><span aria-hidden="true">○</span><div class="readiness-action-label"><strong><?= esc((string) ($pendingLabels[$requirement['code']] ?? $requirement['action']['label'] ?? $requirement['label'])) ?></strong></div>
+                        <li id="checklist-action-<?= esc((string) $requirement['code'], 'attr') ?>" tabindex="-1" class="is-pending readiness-action-row<?= $isSpecialAction ? ' readiness-compound-action' : '' ?>"><span aria-hidden="true">○</span><div class="readiness-action-label"><strong><?= esc((string) ($pendingLabels[$requirement['code']] ?? $requirement['action']['label'] ?? $requirement['label'])) ?></strong><?php if (($requirement['energy_policy_label'] ?? null) !== null): ?><small><?= esc((string) $requirement['energy_policy_label']) ?></small><?php endif; ?></div>
                             <?php if (! $closed && $actionType === 'photos_composite'): ?>
                                 <div class="readiness-action-controls"><form action="/operations/checklists/<?= (int) $checklist['id'] ?>/photos-complete" method="post"><?= csrf_field() ?><button class="primary-action" type="submit">Confirm</button></form></div>
                             <?php elseif (! $closed && $actionType === 'charging_adapter'): ?>
@@ -94,7 +109,7 @@ $factDetail = static function (array $requirement) use ($activeFacts): ?string {
             <?php if ($known === []): ?><p class="muted">No authoritative facts recorded yet.</p><?php endif; ?>
             <ul class="readiness-list">
                 <?php foreach ($known as $requirement): ?>
-                    <li id="checklist-action-<?= esc((string) $requirement['code'], 'attr') ?>" tabindex="-1" class="is-complete"><span aria-hidden="true">✓</span><div><strong><?= esc((string) $requirement['label']) ?></strong><?php if (($detail = $factDetail($requirement)) !== null && $detail !== ''): ?><small><?= esc($detail) ?></small><?php endif; ?></div></li>
+                    <li id="checklist-action-<?= esc((string) $requirement['code'], 'attr') ?>" tabindex="-1" class="is-complete"><span aria-hidden="true">✓</span><div><strong><?= esc((string) $requirement['label']) ?></strong><?php if (($detail = $factDetail($requirement)) !== null && $detail !== ''): ?><small><?= esc($detail) ?></small><?php endif; ?><?php if (($requirement['energy_policy_label'] ?? null) !== null): ?><small><?= esc((string) $requirement['energy_policy_label']) ?></small><?php endif; ?><?php if (($requirement['attention_label'] ?? null) !== null): ?><small><?= esc((string) $requirement['attention_label']) ?></small><?php endif; ?></div></li>
                 <?php endforeach; ?>
             </ul>
         </div>

@@ -8,8 +8,10 @@ use App\Services\Fleet\FleetCommandCenterViewModelService;
 use App\Services\Fleet\FleetHealthService;
 use App\Services\Fleet\MovementReadinessProjectionService;
 use App\Services\Fleet\MovementStateResolver;
+use App\Services\Fleet\NextConfirmedTripService;
 use App\Services\Fleet\OperationalMovementWorkService;
 use App\Services\Fleet\TaskService;
+use App\Services\Fleet\TripEnergyRuleResolver;
 use App\Services\Fleet\VehicleDailyStateService;
 use CodeIgniter\Test\CIUnitTestCase;
 
@@ -43,6 +45,93 @@ final class OperationalCorrectnessTest extends CIUnitTestCase
         $this->assertSame(2, $queue['scopes'][1]['count']);
         $this->assertSame(2, array_sum(array_column($queue['items'], 'count')));
         $this->assertSame(['Cleaning Tasks', 'Charge/Fuel & Energy Checks'], array_column($queue['items'], 'label'));
+    }
+
+    public function testOperationalEnergyWorkUsesRecoveryOnlyForExactSameDayNextTrip(): void
+    {
+        $sameDay = true;
+        $repo = $this->getMockBuilder(OperationalFactsRepository::class)->disableOriginalConstructor()->onlyMethods([
+            'activeFleetVehiclesForCompany', 'latestCustodyEventsForCompany', 'latestEnergyForCompany', 'profile', 'movementChecklistHref',
+        ])->getMock();
+        $repo->method('activeFleetVehiclesForCompany')->willReturn([['id' => 10, 'display_name' => 'Synthetic EV']]);
+        $repo->method('latestCustodyEventsForCompany')->willReturn([10 => [
+            'id' => 301, 'event_code' => 'vehicle_recovered', 'occurred_at' => '2026-09-22 06:45:00',
+            'turo_trip_normalized_id' => 691,
+        ]]);
+        $repo->method('latestEnergyForCompany')->willReturn([10 => [
+            'trip_movement_event_id' => 301, 'energy_percent' => 43, 'captured_at' => '2026-09-22 06:45:00',
+        ]]);
+        $repo->method('profile')->willReturn(['energy_kind' => 'electric']);
+        $repo->method('movementChecklistHref')->willReturn('/operations/checklists/691');
+        $nextTrips = $this->getMockBuilder(NextConfirmedTripService::class)->disableOriginalConstructor()->onlyMethods(['forVehicle'])->getMock();
+        $nextTrips->method('forVehicle')->willReturnCallback(static function () use (&$sameDay): array {
+            return ['id' => 692, 'starts_at' => '2026-09-22 15:00:00', 'is_same_day_turnaround' => $sameDay];
+        });
+        $rules = $this->getMockBuilder(TripEnergyRuleResolver::class)->disableOriginalConstructor()->onlyMethods(['forTrip'])->getMock();
+        $rules->expects($this->any())->method('forTrip')->with(1, 692)->willReturn([
+            'source' => 'vehicle_profile', 'mode' => 'preferred_range', 'energy_kind' => 'electric',
+            'minimum_percent' => 70, 'preferred_max_percent' => 80, 'target_percent' => null,
+            'hard_max_percent' => null, 'required' => true,
+        ]);
+        $work = new OperationalMovementWorkService($repo, $nextTrips, $rules);
+
+        $sameDayNeed = $work->energyNeedsForCompany(1, new DateTimeImmutable('2026-09-22 07:00:00'))[0];
+        $this->assertSame('charge_required', $sameDayNeed['condition_code']);
+        $this->assertSame(43, $sameDayNeed['energy_percent']);
+        $this->assertStringStartsWith('Charge to 70', $sameDayNeed['action_label']);
+        $this->assertStringEndsWith('80%', $sameDayNeed['action_label']);
+
+        $sameDay = false;
+        $staleNeed = $work->energyNeedsForCompany(1, new DateTimeImmutable('2026-09-22 07:00:00'))[0];
+        $this->assertSame('measurement_needed', $staleNeed['condition_code']);
+        $this->assertNull($staleNeed['energy_percent']);
+        $this->assertSame(43, $staleNeed['last_known_energy_percent']);
+        $this->assertSame('Record current Charge percentage', $staleNeed['action_label']);
+    }
+
+    public function testOperationalQueueCountsPhysicalReadinessWorkOnlyOnce(): void
+    {
+        $today = [
+            'todays_pickups' => [], 'todays_returns' => [], 'airport_deliveries' => [],
+            'cleaning_tasks' => [['fleet_vehicle_id' => 10]],
+            'charging_tasks' => [['fleet_vehicle_id' => 10]],
+            'awaiting_recovery' => [], 'recovery_exceptions' => [],
+        ];
+        $checklists = [[
+            'fleet_vehicle_id' => 10,
+            'blocking_remaining_count' => 3,
+            'additional_actions_remaining_count' => 0,
+            'readiness_projection' => [
+                'readiness_phase' => MovementReadinessProjectionService::PHASE_PICKUP_PREPARATION,
+                'requirements' => [
+                    ['code' => 'vehicle_clean', 'phase' => 'pickup_preparation', 'blocking' => true, 'status' => 'unsatisfied'],
+                    ['code' => 'energy_ready', 'phase' => 'pickup_preparation', 'blocking' => true, 'status' => 'unsatisfied'],
+                    ['code' => 'photos_complete', 'phase' => 'pickup_preparation', 'blocking' => true, 'status' => 'unsatisfied'],
+                ],
+            ],
+        ]];
+        $empty = ['total_unresolved' => 0, 'unique_unmatched_vehicles' => 0, 'awaiting_reconciliation' => 0,
+            'airport_workflows_requiring_action' => 0, 'total_actionable' => 0, 'total' => 0, 'href' => '/'];
+
+        $queue = (new ReflectionMethod(DailyOperationsDashboardService::class, 'operationalQueue'))->invoke(
+            new DailyOperationsDashboardService(),
+            $today,
+            [],
+            $empty,
+            $empty,
+            $empty,
+            $empty,
+            $empty,
+            $empty,
+            $empty,
+            $checklists,
+        );
+        $byCode = array_column($queue, null, 'code');
+
+        $this->assertSame(1, $byCode['readiness']['count']);
+        $this->assertSame(1, $byCode['cleaning']['count']);
+        $this->assertSame(1, $byCode['charging']['count']);
+        $this->assertSame(3, array_sum(array_column($queue, 'count')));
     }
 
     public function testRecoveryExceptionsHaveIndependentStableTodayActionsAndReconciledBadge(): void
@@ -233,7 +322,7 @@ final class OperationalCorrectnessTest extends CIUnitTestCase
         $before = $service->project($context);
         $energyBefore = array_values(array_filter($before['requirements'], static fn (array $row): bool => $row['code'] === 'energy_ready'))[0];
         $this->assertSame('unsatisfied', $energyBefore['status']);
-        $this->assertSame('Charge/Fuel to 80%', $energyBefore['action']['label']);
+        $this->assertSame('Charge/Fuel to at least 80%', $energyBefore['action']['label']);
 
         $context['active_events']['actual_handoff'] = ['occurred_at' => '2026-09-17 08:00:00'];
         $after = $service->project($context);
@@ -247,7 +336,7 @@ final class OperationalCorrectnessTest extends CIUnitTestCase
         $context['active_assessment']['energy_percent'] = null;
         $missing = $service->project($context);
         $known = array_values(array_filter($missing['requirements'], static fn (array $row): bool => $row['code'] === 'energy_known'))[0];
-        $this->assertSame('Record Charge/Fuel percentage', $known['action']['label']);
+        $this->assertSame('Record current Charge/Fuel percentage', $known['action']['label']);
     }
 
     public function testChecklistFocusPrioritizesBlockingThenSummary(): void
@@ -282,7 +371,7 @@ final class OperationalCorrectnessTest extends CIUnitTestCase
         $service = new MovementReadinessProjectionService();
         $before = $service->project($context);
         $energy = array_values(array_filter($before['requirements'], static fn (array $row): bool => $row['phase'] === 'next_pickup_preparation' && $row['code'] === 'energy_ready'))[0];
-        $this->assertSame('Charge/Fuel to 80%', $energy['action']['label']);
+        $this->assertSame('Charge/Fuel to at least 80%', $energy['action']['label']);
 
         $context['next_pickup_handoff'] = ['occurred_at' => '2026-09-17 15:00:00'];
         $after = $service->project($context);
@@ -298,7 +387,7 @@ final class OperationalCorrectnessTest extends CIUnitTestCase
         $board = [['fleet_vehicle_id' => 1, 'flags' => [], 'actions' => ['No action due']]];
         $summary = ['fleet_vehicle_id' => 1, 'href' => '/operations/checklists/1', 'blocking_remaining_count' => 1, 'additional_actions_remaining_count' => 0];
         $projection = ['readiness_phase' => 'pickup_preparation', 'requirements' => [
-            ['code' => 'energy_known', 'phase' => 'pickup_preparation', 'blocking' => true, 'status' => 'unsatisfied', 'action' => ['label' => 'Record Charge/Fuel percentage']],
+            ['code' => 'energy_known', 'phase' => 'pickup_preparation', 'blocking' => true, 'status' => 'unsatisfied', 'action' => ['label' => 'Record current Charge/Fuel percentage']],
             ['code' => 'energy_ready', 'phase' => 'pickup_preparation', 'blocking' => true, 'status' => 'unsatisfied', 'action' => ['label' => 'Charge/Fuel to 80%']],
         ]];
         $missing = $method->invoke($dashboard, $board, [array_merge($summary, ['readiness_projection' => $projection])])[0];

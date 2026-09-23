@@ -52,6 +52,8 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
         $this->connection->query('CREATE TABLE ' . $this->table('airport_movement_workflows') . ' (id INTEGER PRIMARY KEY, turo_trip_normalized_id INTEGER, airport_id INTEGER, movement_type VARCHAR(40), scheduled_at DATETIME)');
         $this->connection->query('CREATE TABLE ' . $this->table('turo_trips_normalized') . ' (id INTEGER PRIMARY KEY, fleet_vehicle_id INTEGER NULL, turo_trip_raw_id INTEGER NULL, trip_status_lookup_value_id INTEGER NULL, guest_name VARCHAR(190) NULL, starts_at DATETIME NULL, ends_at DATETIME NULL, deleted_at DATETIME NULL)');
         (new CreateMovementOperationalFacts(Database::forge($this->connection)))->up();
+        $this->connection->query('ALTER TABLE ' . $this->table('vehicle_operational_profiles') . ' ADD COLUMN ready_energy_min_percent INTEGER NULL');
+        $this->connection->query('ALTER TABLE ' . $this->table('vehicle_operational_profiles') . ' ADD COLUMN ready_energy_preferred_max_percent INTEGER NULL');
         $this->connection->table('fleet_vehicles')->insertBatch([
             ['id' => 10, 'company_id' => 1, 'deleted_at' => null],
             ['id' => 20, 'company_id' => 2, 'deleted_at' => null],
@@ -150,6 +152,25 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
         $this->assertNull($this->events->activeForTrip(100, ['vehicle_recovered']));
         $this->assertNotNull($this->assessments->find((int) $assessment['id'])['voided_at']);
         $this->assertSame([], (new OperationalMovementWorkService($this->repository))->energyNeedsForCompany(1, new DateTimeImmutable()));
+    }
+
+    public function testAbovePreferredRangeIsReadyAndCreatesNoOperationalEnergyWork(): void
+    {
+        $this->connection->table('vehicle_operational_profiles')->insert([
+            'fleet_vehicle_id' => 10,
+            'energy_kind' => 'electric',
+            'ready_energy_target_percent' => 70,
+            'ready_energy_min_percent' => 70,
+            'ready_energy_preferred_max_percent' => 80,
+            'created_by' => 7,
+            'updated_by' => 7,
+        ]);
+        $recoveryId = $this->events->record(10, 100, 'vehicle_recovered', 'return', '2026-09-21 09:00:00', 'home', null, 'vehicle_operator', 7);
+        $this->assessments->record(10, 100, $recoveryId, 'return', 'dirty', 85, '2026-09-21 09:00:00', 'vehicle_operator', 7);
+
+        $work = new OperationalMovementWorkService($this->repository);
+        $this->assertSame([], $work->energyNeedsForCompany(1, new DateTimeImmutable('2026-09-22 12:00:00')));
+        $this->assertSame(85, (int) $this->repository->assessmentForEventOrTrip($recoveryId, 100)['energy_percent']);
     }
 
     public function testNonStagedRecoveryStoresIndependentOptionalExceptionsAtomically(): void

@@ -1114,18 +1114,35 @@ class OperationalFactsRepository
         return $row;
     }
 
-    public function saveProfile(int $companyId, int $vehicleId, string $energyKind, ?int $target, array $capabilities, int $actorUserId): void
+    public function saveProfile(int $companyId, int $vehicleId, string $energyKind, ?int $minimum, ?int $preferredMaximum, array $capabilities, int $actorUserId): void
     {
         $this->db->transBegin();
         try {
             $now = date('Y-m-d H:i:s');
             $old = $this->profile($vehicleId);
             if ($old === null) {
-                $this->db->table('vehicle_operational_profiles')->insert(['fleet_vehicle_id' => $vehicleId, 'energy_kind' => $energyKind, 'ready_energy_target_percent' => $target, 'created_by' => $actorUserId, 'updated_by' => $actorUserId, 'created_at' => $now, 'updated_at' => $now]);
+                $this->db->table('vehicle_operational_profiles')->insert([
+                    'fleet_vehicle_id' => $vehicleId,
+                    'energy_kind' => $energyKind,
+                    'ready_energy_target_percent' => $minimum,
+                    'ready_energy_min_percent' => $minimum,
+                    'ready_energy_preferred_max_percent' => $preferredMaximum,
+                    'created_by' => $actorUserId,
+                    'updated_by' => $actorUserId,
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ]);
                 $profileId = (int) $this->db->insertID();
             } else {
                 $profileId = (int) $old['id'];
-                $this->db->table('vehicle_operational_profiles')->where('id', $profileId)->update(['energy_kind' => $energyKind, 'ready_energy_target_percent' => $target, 'updated_by' => $actorUserId, 'updated_at' => $now]);
+                $this->db->table('vehicle_operational_profiles')->where('id', $profileId)->update([
+                    'energy_kind' => $energyKind,
+                    'ready_energy_target_percent' => $minimum,
+                    'ready_energy_min_percent' => $minimum,
+                    'ready_energy_preferred_max_percent' => $preferredMaximum,
+                    'updated_by' => $actorUserId,
+                    'updated_at' => $now,
+                ]);
             }
             foreach (['key_card', 'charging_adapter'] as $code) {
                 $existing = $this->db->table('vehicle_operational_capabilities')->where(['fleet_vehicle_id' => $vehicleId, 'capability_code' => $code])->get()->getRowArray();

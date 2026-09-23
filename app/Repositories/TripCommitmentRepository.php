@@ -36,7 +36,7 @@ class TripCommitmentRepository
     {
         $row = $this->db->table('turo_trips_normalized trips')
             ->select('trips.*, statuses.code AS trip_status_code, vehicles.company_id, vehicles.fleet_code, vehicles.display_name')
-            ->select('profiles.energy_kind, profiles.ready_energy_target_percent')
+            ->select('profiles.energy_kind, profiles.ready_energy_target_percent, profiles.ready_energy_min_percent, profiles.ready_energy_preferred_max_percent')
             ->select('pickup.location_class AS pickup_location_class, pickup.source_text AS pickup_location_source_text')
             ->select('returns.location_class AS return_location_class, returns.source_text AS return_location_source_text')
             ->join('fleet_vehicles vehicles', 'vehicles.id = trips.fleet_vehicle_id')

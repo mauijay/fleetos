@@ -15,7 +15,7 @@ $preservedHeading = $tripStateHeading === 'Trip invalid' ? 'Commitments preserve
 $form = array_merge($editing ?? [
     'category' => 'pickup_instruction', 'instruction' => '', 'applies_during' => 'preparation',
     'handling_mode' => 'informational', 'required_before_dispatch' => false,
-    'energy_comparison' => 'target', 'energy_percent' => '', 'arranged_at' => null, 'fleet_extra_id' => null,
+    'energy_comparison' => 'target', 'energy_percent' => '', 'energy_min_percent' => '', 'energy_max_percent' => '', 'arranged_at' => null, 'fleet_extra_id' => null,
 ], $formData);
 $tripLabel = trim((string) ($trip['turo_reservation_id'] ?? '')) ?: (string) $trip['turo_trip_id'];
 $vehicleLabel = trim((string) ($trip['display_name'] ?? '')) ?: (string) $trip['fleet_code'];
@@ -94,9 +94,13 @@ $location = static fn (?string $class, ?string $source): string => trim((string)
                 <label class="checkbox-row"><input type="checkbox" name="required_before_dispatch" value="1"<?= (bool) $form['required_before_dispatch'] ? ' checked' : '' ?>><span>Required before dispatch</span></label>
                 <label class="wide-field">Instruction<textarea name="instruction" rows="4" maxlength="4000" required><?= esc((string) $form['instruction']) ?></textarea></label>
                 <fieldset class="commitment-conditional wide-field" data-energy-fields><legend>Trip energy rule</legend>
-                    <label>What does the percentage mean?<select name="energy_comparison"><?php foreach ($workspace['energy_comparisons'] as $value => $label): ?><option value="<?= esc($value, 'attr') ?>"<?= $form['energy_comparison'] === $value ? ' selected' : '' ?>><?= esc($label) ?></option><?php endforeach; ?></select></label>
-                    <label>Percentage<input name="energy_percent" type="number" min="1" max="100" value="<?= esc((string) $form['energy_percent'], 'attr') ?>"></label>
-                    <p class="muted">This replaces the normal vehicle target only while preparing this exact trip.</p>
+                    <label>What does the percentage mean?<select name="energy_comparison" data-energy-comparison><?php foreach ($workspace['energy_comparisons'] as $value => $label): ?><option value="<?= esc($value, 'attr') ?>"<?= $form['energy_comparison'] === $value ? ' selected' : '' ?>><?= esc($label) ?></option><?php endforeach; ?></select></label>
+                    <label data-single-energy>Percentage<input name="energy_percent" type="number" min="1" max="100" value="<?= esc((string) $form['energy_percent'], 'attr') ?>"></label>
+                    <div class="commitment-range-fields" data-range-energy>
+                        <label>Minimum %<input name="energy_min_percent" type="number" min="0" max="100" value="<?= esc((string) $form['energy_min_percent'], 'attr') ?>"></label>
+                        <label>Preferred maximum %<input name="energy_max_percent" type="number" min="0" max="100" value="<?= esc((string) $form['energy_max_percent'], 'attr') ?>"></label>
+                    </div>
+                    <p class="muted">This replaces the normal vehicle energy policy only while preparing this exact trip. A preferred maximum is guidance, not a discharge requirement.</p>
                 </fieldset>
                 <fieldset class="commitment-conditional wide-field" data-timing-fields><legend>Guest arrangement</legend><label>Arranged date/time<input name="arranged_at" type="datetime-local" value="<?= $form['arranged_at'] === null ? '' : esc(date('Y-m-d\TH:i', strtotime((string) $form['arranged_at'])), 'attr') ?>"></label><p class="muted">The official Turo pickup and return times remain unchanged.</p></fieldset>
                 <div class="form-actions wide-field"><button class="primary-action" type="submit"><?= $editing === null ? 'Add commitment' : 'Save changes' ?></button><?php if ($editing !== null): ?><a class="action-link" href="/operations/trips/<?= (int) $trip['id'] ?>/commitments#guest-commitments">Cancel edit</a><?php endif; ?></div>

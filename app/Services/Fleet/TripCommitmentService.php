@@ -16,7 +16,7 @@ class TripCommitmentService
     ];
     public const PHASES = ['preparation', 'pickup', 'return', 'entire_trip'];
     public const HANDLING_MODES = ['informational', 'acknowledgment', 'task', 'automatic_override'];
-    public const ENERGY_COMPARISONS = ['target', 'minimum', 'maximum'];
+    public const ENERGY_COMPARISONS = ['target', 'minimum', 'maximum', 'preferred_range'];
 
     public function __construct(
         private readonly ?TripCommitmentRepository $repository = null,
@@ -226,16 +226,33 @@ class TripCommitmentService
         }
         $comparison = $this->nullable($input['energy_comparison'] ?? null);
         $energy = $this->nullable($input['energy_percent'] ?? null);
+        $energyMinimum = $this->nullable($input['energy_min_percent'] ?? null);
+        $energyMaximum = $this->nullable($input['energy_max_percent'] ?? null);
         if ($category === 'energy_override') {
             if (! in_array($comparison, self::ENERGY_COMPARISONS, true)) {
                 throw new InvalidArgumentException('Choose what the energy percentage means.');
             }
-            if ($energy === null || ! ctype_digit($energy) || (int) $energy < 1 || (int) $energy > 100) {
-                throw new InvalidArgumentException('Energy percentage must be between 1 and 100.');
+            if ($comparison === 'preferred_range') {
+                $minimum = $this->energyPercentage($energyMinimum, 'Energy minimum');
+                $maximum = $this->energyPercentage($energyMaximum, 'Energy preferred maximum');
+                if ($minimum > $maximum) {
+                    throw new InvalidArgumentException('Energy minimum must not exceed the preferred maximum.');
+                }
+                $energy = null;
+                $energyMinimum = (string) $minimum;
+                $energyMaximum = (string) $maximum;
+            } else {
+                if ($energy === null || ! ctype_digit($energy) || (int) $energy < 1 || (int) $energy > 100) {
+                    throw new InvalidArgumentException('Energy percentage must be between 1 and 100.');
+                }
+                $energyMinimum = null;
+                $energyMaximum = null;
             }
         } else {
             $comparison = null;
             $energy = null;
+            $energyMinimum = null;
+            $energyMaximum = null;
         }
         $arrangedAt = $this->nullable($input['arranged_at'] ?? null);
         if ($category === 'timing_arrangement') {
@@ -262,6 +279,8 @@ class TripCommitmentService
             'required_before_dispatch' => ($input['required_before_dispatch'] ?? null) === '1' || ($input['required_before_dispatch'] ?? null) === 1 || ($input['required_before_dispatch'] ?? null) === true,
             'energy_comparison' => $comparison,
             'energy_percent' => $energy === null ? null : (int) $energy,
+            'energy_min_percent' => $energyMinimum === null ? null : (int) $energyMinimum,
+            'energy_max_percent' => $energyMaximum === null ? null : (int) $energyMaximum,
             'arranged_at' => $arrangedAt,
         ];
         if (array_key_exists('fleet_extra_id', $input) && $this->repo()->supportsExtraLink()) {
@@ -319,11 +338,13 @@ class TripCommitmentService
             'handling_label' => $this->handlingOptions()[$row['handling_mode']] ?? 'Information',
             'energy_comparison_label' => $row['energy_comparison'] === null ? null : ($this->energyComparisonOptions()[$row['energy_comparison']] ?? null),
             'energy_rule_summary' => $row['energy_comparison'] === null ? null : match ($row['energy_comparison']) {
+                'preferred_range' => 'Guest-preferred range: ' . (int) $row['energy_min_percent'] . '–' . (int) $row['energy_max_percent'] . '%',
                 'maximum' => 'Do not exceed ' . (int) $row['energy_percent'] . '% for this trip',
                 'minimum' => 'At least ' . (int) $row['energy_percent'] . '% for this trip',
                 default => 'Aim for ' . (int) $row['energy_percent'] . '% for this trip',
             },
             'energy_rule' => $resolvedEnergyRule,
+            'normal_vehicle_policy_summary' => $this->normalVehiclePolicySummary($resolvedEnergyRule),
             'is_blocking' => (bool) $row['required_before_dispatch']
                 && (($row['handling_mode'] ?? null) === 'task'
                     || (($row['handling_mode'] ?? null) === 'acknowledgment' && ($row['acknowledged_at'] ?? null) === null)),
@@ -357,6 +378,33 @@ class TripCommitmentService
         return $value === '' ? null : $value;
     }
 
+    private function energyPercentage(?string $value, string $label): int
+    {
+        if ($value === null || ! ctype_digit($value) || (int) $value < 0 || (int) $value > 100) {
+            throw new InvalidArgumentException($label . ' must be between 0 and 100.');
+        }
+
+        return (int) $value;
+    }
+
+    /** @param array<string, mixed>|null $resolvedEnergyRule */
+    private function normalVehiclePolicySummary(?array $resolvedEnergyRule): ?string
+    {
+        if ($resolvedEnergyRule === null || ! is_array($resolvedEnergyRule['normal_vehicle_policy'] ?? null)) {
+            return null;
+        }
+        $label = $this->energyRules()->policyLabel($resolvedEnergyRule['normal_vehicle_policy']);
+        if ($label === null) {
+            return null;
+        }
+
+        return str_replace(
+            ['Ready range:', 'Ready minimum:', 'Ready target:'],
+            ['Normal vehicle range:', 'Normal vehicle minimum:', 'Normal vehicle target:'],
+            $label,
+        );
+    }
+
     /** @return array<string, string> */
     public function categoryOptions(): array
     {
@@ -382,7 +430,12 @@ class TripCommitmentService
     /** @return array<string, string> */
     public function energyComparisonOptions(): array
     {
-        return ['target' => 'Aim for this percentage', 'minimum' => 'At least this percentage', 'maximum' => 'Do not exceed this percentage'];
+        return [
+            'target' => 'Aim for this percentage',
+            'minimum' => 'At least this percentage',
+            'maximum' => 'Do not exceed this percentage',
+            'preferred_range' => 'Preferred range',
+        ];
     }
 
     private function repo(): TripCommitmentRepository

@@ -132,10 +132,14 @@ class OperationalMovementWorkService
             $rule = $targetTripId > 0
                 ? $this->energyRules()->forTrip($companyId, $targetTripId, $profile)
                 : $this->energyRules()->forProfile($profile);
-            $target = isset($rule['percent']) ? (int) $rule['percent'] : null;
+            $target = $this->energyRules()->readinessMinimum($rule);
             $measurement = $measurements[$id] ?? null;
-            $isCurrent = $measurement !== null && ((int) ($measurement['trip_movement_event_id'] ?? 0) === (int) $event['id']
-                || (string) $measurement['captured_at'] > (string) $event['occurred_at']);
+            $isRecoveryMeasurement = $measurement !== null
+                && (int) ($measurement['trip_movement_event_id'] ?? 0) === (int) $event['id'];
+            $isLaterObservation = $measurement !== null
+                && (string) $measurement['captured_at'] > (string) $event['occurred_at'];
+            $isCurrent = $measurement !== null && ($isLaterObservation
+                || ($isRecoveryMeasurement && ($targetTripId === 0 || ($nextTrip['is_same_day_turnaround'] ?? false) === true)));
             $energy = $isCurrent ? (int) $measurement['energy_percent'] : null;
             $evaluation = $this->energyRules()->evaluate($rule, $energy);
             $condition = $evaluation['condition'];
@@ -151,15 +155,24 @@ class OperationalMovementWorkService
                 'target_trip_id' => $targetTripId > 0 ? $targetTripId : null,
                 'condition_code' => $condition,
                 'label' => match ($condition) {
-                    'charge_required' => $noun . ' Needed — ' . $energy . '%, ' . (($rule['comparison'] ?? null) === 'target' ? 'trip target ' : 'minimum ') . $target . '%',
+                    'charge_required' => $noun . ' Needed — ' . $energy . '%, ' . $this->policyDescription($rule),
                     'measurement_needed' => $noun . ' level unknown',
                     'above_maximum' => 'Above guest-requested maximum — ' . $energy . '%, limit ' . $target . '%',
-                    default => $noun . ' target not configured',
+                    default => $noun . ' readiness not configured',
                 },
-                'action_label' => $condition === 'target_needed' ? 'Configure Vehicle' : ($condition === 'above_maximum' ? 'Review guest charge limit' : 'Record ' . $noun . ' Level'),
+                'action_label' => $condition === 'target_needed'
+                    ? 'Configure Vehicle'
+                    : ($condition === 'above_maximum'
+                        ? 'Review guest charge limit'
+                        : ($condition === 'measurement_needed'
+                            ? 'Record current ' . $noun . ' percentage'
+                            : str_replace('Charge/Fuel', $noun, (string) $evaluation['action_label']))),
                 'energy_percent' => $energy,
+                'last_known_energy_percent' => $measurement === null ? null : (int) $measurement['energy_percent'],
+                'last_known_energy_at' => $measurement['captured_at'] ?? null,
                 'target_percent' => $target,
                 'energy_rule' => $rule,
+                'energy_policy_label' => $this->energyRules()->policyLabel($rule, ($rule['source'] ?? null) === 'trip_commitment'),
                 'energy_kind' => $energyKind,
                 'configuration_required' => $condition === 'target_needed',
                 'href' => $condition === 'target_needed'
@@ -184,5 +197,15 @@ class OperationalMovementWorkService
     private function energyRules(): TripEnergyRuleResolver
     {
         return $this->energyRuleResolver ?? Services::tripEnergyRuleResolver();
+    }
+
+    /** @param array<string, mixed> $rule */
+    private function policyDescription(array $rule): string
+    {
+        return match ($rule['mode'] ?? null) {
+            'preferred_range' => 'ready range ' . (int) $rule['minimum_percent'] . '–' . (int) $rule['preferred_max_percent'] . '%',
+            'target' => 'trip target ' . (int) $rule['target_percent'] . '%',
+            default => 'minimum ' . (int) $rule['minimum_percent'] . '%',
+        };
     }
 }

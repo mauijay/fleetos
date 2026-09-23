@@ -27,9 +27,10 @@ class MovementReadinessReadModelRepository
 
         $checklists = $this->db->table('trip_movement_checklists checklists')
             ->select('checklists.id, checklists.turo_trip_normalized_id, checklists.fleet_vehicle_id, checklists.movement_type, checklists.scheduled_at, checklists.readiness_status, checklists.vehicle_disposition, checklists.completed_at, checklists.completion_note')
-            ->select('trips.starts_at, trips.ends_at, vehicles.company_id')
+            ->select('trips.starts_at, trips.ends_at, trips.canceled_at, trips.deleted_at, trip_statuses.code AS trip_status_code, vehicles.company_id')
             ->join('turo_trips_normalized trips', 'trips.id = checklists.turo_trip_normalized_id')
             ->join('fleet_vehicles vehicles', 'vehicles.id = checklists.fleet_vehicle_id AND vehicles.id = trips.fleet_vehicle_id')
+            ->join('lookup_values trip_statuses', 'trip_statuses.id = trips.trip_status_lookup_value_id', 'left')
             ->where('vehicles.company_id', $companyId)
             ->whereIn('checklists.id', $checklistIds)
             ->orderBy('checklists.id', 'ASC')
@@ -114,6 +115,29 @@ class MovementReadinessReadModelRepository
             ->orderBy('assessments.id', 'DESC')
             ->get()
             ->getResultArray();
+        $vehicleFacts = $this->db->table('movement_assessments assessments')
+            ->select('assessments.*, events.occurred_at AS event_occurred_at, events.event_code, events.turo_trip_normalized_id AS event_trip_id')
+            ->join('trip_movement_events events', 'events.id = assessments.trip_movement_event_id AND events.company_id = assessments.company_id AND events.fleet_vehicle_id = assessments.fleet_vehicle_id')
+            ->join('fleet_vehicles vehicles', 'vehicles.id = assessments.fleet_vehicle_id AND vehicles.company_id = assessments.company_id')
+            ->where('assessments.company_id', $companyId)
+            ->whereIn('assessments.fleet_vehicle_id', $vehicleIds)
+            ->whereIn('events.event_code', ['actual_return', 'vehicle_recovered', 'vehicle_readiness_observed'])
+            ->where('assessments.voided_at', null)
+            ->where('events.voided_at', null)
+            ->where('assessments.captured_at <=', $asOfTimestamp)
+            ->where('events.occurred_at <=', $asOfTimestamp)
+            ->groupStart()
+                ->where('assessments.created_at', null)
+                ->orWhere('assessments.created_at <=', $asOfTimestamp)
+            ->groupEnd()
+            ->groupStart()
+                ->where('events.created_at', null)
+                ->orWhere('events.created_at <=', $asOfTimestamp)
+            ->groupEnd()
+            ->orderBy('assessments.captured_at', 'DESC')
+            ->orderBy('assessments.id', 'DESC')
+            ->get()
+            ->getResultArray();
         $profiles = $this->db->table('vehicle_operational_profiles profiles')
             ->select('profiles.*')
             ->join('fleet_vehicles vehicles', 'vehicles.id = profiles.fleet_vehicle_id')
@@ -188,6 +212,23 @@ class MovementReadinessReadModelRepository
                 }
             }
         }
+        $lastKnownByVehicle = [];
+        foreach ($vehicleFacts as $assessment) {
+            $vehicleId = (int) $assessment['fleet_vehicle_id'];
+            $lastKnownByVehicle[$vehicleId] ??= ['cleanliness' => null, 'energy_percent' => null];
+            foreach (['cleanliness', 'energy_percent'] as $field) {
+                if ($lastKnownByVehicle[$vehicleId][$field] !== null || $assessment[$field] === null) {
+                    continue;
+                }
+                $lastKnownByVehicle[$vehicleId][$field] = $assessment[$field];
+                $lastKnownByVehicle[$vehicleId]['_' . $field . '_captured_at'] = $assessment['captured_at'];
+                $lastKnownByVehicle[$vehicleId]['_' . $field . '_assessment_id'] = $assessment['id'];
+                $lastKnownByVehicle[$vehicleId]['_' . $field . '_event_id'] = $assessment['trip_movement_event_id'];
+                $lastKnownByVehicle[$vehicleId]['_' . $field . '_event_code'] = $assessment['event_code'];
+                $lastKnownByVehicle[$vehicleId]['_' . $field . '_event_occurred_at'] = $assessment['event_occurred_at'];
+                $lastKnownByVehicle[$vehicleId]['_' . $field . '_trip_id'] = $assessment['event_trip_id'];
+            }
+        }
         $profilesByVehicle = [];
         foreach ($profiles as $profile) {
             $profilesByVehicle[(int) $profile['fleet_vehicle_id']] = $profile;
@@ -218,12 +259,29 @@ class MovementReadinessReadModelRepository
             $vehicleId = (int) $checklist['fleet_vehicle_id'];
             $movementType = (string) $checklist['movement_type'];
             $nextTrip = $nextTripByChecklist[$checklistId] ?? null;
+            $targetTripId = $movementType === 'return' ? (int) ($nextTrip['id'] ?? 0) : $tripId;
+            $lastKnown = $lastKnownByVehicle[$vehicleId] ?? null;
+            $energySourceTripId = (int) ($lastKnown['_energy_percent_trip_id'] ?? 0);
+            $sameDayEnergy = $targetTripId > 0
+                && in_array($lastKnown['_energy_percent_event_code'] ?? null, ['actual_return', 'vehicle_recovered'], true)
+                && $this->isExactSameDayNextTrip($energySourceTripId, $targetTripId, $nextTripsByVehicle[$vehicleId] ?? []);
+            if ($lastKnown !== null) {
+                $lastKnown['_energy_percent_applicable'] = ($lastKnown['_energy_percent_event_code'] ?? null) === 'vehicle_readiness_observed'
+                    || $sameDayEnergy;
+                $lastKnown['_cleanliness_applicable'] = true;
+            }
+            $status = (string) ($checklist['trip_status_code'] ?? '');
+            $tripIsOperational = ($checklist['canceled_at'] ?? null) === null
+                && ($checklist['deleted_at'] ?? null) === null
+                && ! str_starts_with($status, 'canceled')
+                && $status !== 'invalid';
             $contexts[$checklistId] = array_merge($checklist, [
                 'items_by_code' => $itemsByChecklist[$checklistId] ?? [],
                 'active_events' => $eventsByTrip[$tripId][$movementType] ?? [],
                 'latest_custody_event' => $latestCustodyByVehicle[$vehicleId] ?? null,
                 'active_assessment' => $assessmentsByTrip[$tripId][$movementType] ?? null,
                 'current_readiness_assessment' => $currentReadinessByVehicle[$vehicleId] ?? null,
+                'last_known_vehicle_assessment' => $lastKnown,
                 'target_pickup_assessment' => $nextTrip === null ? null : ($assessmentsByTrip[(int) $nextTrip['id']]['pickup'] ?? null),
                 'profile' => $profilesByVehicle[$vehicleId] ?? null,
                 'capabilities' => $capabilitiesByVehicle[$vehicleId] ?? [],
@@ -231,6 +289,8 @@ class MovementReadinessReadModelRepository
                 'airport_workflow' => $airportByTrip[$tripId][$movementType] ?? null,
                 'positioning_plan' => $plansByVehicle[$vehicleId] ?? null,
                 'next_trip' => $nextTrip,
+                'prior_trip_is_same_day_turnaround' => $movementType === 'pickup' && $sameDayEnergy,
+                'trip_is_operational' => $tripIsOperational,
                 'next_pickup_handoff' => $nextTrip === null ? null : ($eventsByTrip[(int) $nextTrip['id']]['pickup']['actual_handoff'] ?? null),
             ]);
         }
@@ -241,10 +301,6 @@ class MovementReadinessReadModelRepository
     /** @param array<int, array<string, mixed>> $checklists @param list<int> $vehicleIds @return array<int, list<array<string, mixed>>> */
     private function nextTripCandidates(array $checklists, array $vehicleIds): array
     {
-        if (! array_any($checklists, static fn (array $checklist): bool => $checklist['movement_type'] === 'return')) {
-            return [];
-        }
-
         $builder = $this->db->table('turo_trips_normalized trips')
             ->select('trips.id, trips.fleet_vehicle_id, trips.starts_at, trips.ends_at, trips.canceled_at, trip_statuses.code AS trip_status_code')
             ->join('lookup_values trip_statuses', 'trip_statuses.id = trips.trip_status_lookup_value_id', 'left')
@@ -270,9 +326,10 @@ class MovementReadinessReadModelRepository
             return null;
         }
 
+        $sourceTripId = (int) ($checklist['turo_trip_normalized_id'] ?? $checklist['id'] ?? 0);
         foreach ($candidates as $candidate) {
             $status = (string) ($candidate['trip_status_code'] ?? '');
-            if ((int) $candidate['id'] === (int) $checklist['turo_trip_normalized_id']
+            if ((int) $candidate['id'] === $sourceTripId
                 || ($candidate['canceled_at'] ?? null) !== null
                 || str_starts_with($status, 'canceled')
                 || $status === 'invalid') {
@@ -294,5 +351,24 @@ class MovementReadinessReadModelRepository
         }
 
         return null;
+    }
+
+    /** @param list<array<string, mixed>> $candidates */
+    private function isExactSameDayNextTrip(int $sourceTripId, int $targetTripId, array $candidates): bool
+    {
+        if ($sourceTripId < 1 || $targetTripId < 1 || $sourceTripId === $targetTripId) {
+            return false;
+        }
+        foreach ($candidates as $sourceTrip) {
+            if ((int) $sourceTrip['id'] !== $sourceTripId) {
+                continue;
+            }
+            $nextTrip = $this->eligibleNextTrip($sourceTrip, $candidates);
+
+            return (int) ($nextTrip['id'] ?? 0) === $targetTripId
+                && ($nextTrip['is_same_day_turnaround'] ?? false) === true;
+        }
+
+        return false;
     }
 }

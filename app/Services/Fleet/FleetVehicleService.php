@@ -61,7 +61,13 @@ class FleetVehicleService
             return null;
         }
 
-        return array_merge($row, $this->profiles()->profile($id) ?? ['energy_kind' => 'unknown', 'ready_energy_target_percent' => null, 'capabilities' => []]);
+        return array_merge($row, $this->profiles()->profile($id) ?? [
+            'energy_kind' => 'unknown',
+            'ready_energy_target_percent' => null,
+            'ready_energy_min_percent' => null,
+            'ready_energy_preferred_max_percent' => null,
+            'capabilities' => [],
+        ]);
     }
 
     /** @return array<string, array<int, array<string, mixed>>> */
@@ -123,7 +129,14 @@ class FleetVehicleService
             $id = (int) $this->db->insertID();
 
             if ($this->hasOperationalProfileData($data)) {
-                $this->profiles()->save($id, (string) $data['energy_kind'], $data['ready_energy_target_percent'] ?? null, (array) ($data['operational_capabilities'] ?? []), (int) $actorUserId);
+                $this->profiles()->save(
+                    $id,
+                    (string) $data['energy_kind'],
+                    $data['ready_energy_min_percent'] ?? null,
+                    $data['ready_energy_preferred_max_percent'] ?? null,
+                    (array) ($data['operational_capabilities'] ?? []),
+                    (int) $actorUserId,
+                );
             }
 
             if ($turoVehicleId !== null && trim($turoVehicleId) !== '') {
@@ -185,7 +198,14 @@ class FleetVehicleService
             ]);
 
             if ($this->hasOperationalProfileData($data)) {
-                $this->profiles()->save($id, (string) $data['energy_kind'], $data['ready_energy_target_percent'] ?? null, (array) ($data['operational_capabilities'] ?? []), (int) $actorUserId);
+                $this->profiles()->save(
+                    $id,
+                    (string) $data['energy_kind'],
+                    $data['ready_energy_min_percent'] ?? null,
+                    $data['ready_energy_preferred_max_percent'] ?? null,
+                    (array) ($data['operational_capabilities'] ?? []),
+                    (int) $actorUserId,
+                );
             }
 
             if ($this->db->transStatus() === false) {
@@ -251,6 +271,22 @@ class FleetVehicleService
             $value = $this->nullable($data[$field] ?? null);
             if ($value !== null && ! $this->isDate($value)) {
                 $errors[$field] = 'Enter a valid date.';
+            }
+        }
+        if (array_key_exists('energy_kind', $data)) {
+            if (! in_array($data['energy_kind'], VehicleOperationalProfileService::ENERGY_KINDS, true)) {
+                $errors['energy_kind'] = 'Choose a valid energy type.';
+            }
+            if (array_diff((array) ($data['operational_capabilities'] ?? []), VehicleOperationalProfileService::CAPABILITIES) !== []) {
+                $errors['operational_capabilities'] = 'Choose valid operational capabilities.';
+            }
+            try {
+                $this->profiles()->validatePolicy(
+                    $data['ready_energy_min_percent'] ?? null,
+                    $data['ready_energy_preferred_max_percent'] ?? null,
+                );
+            } catch (\InvalidArgumentException $exception) {
+                $errors['ready_energy_policy'] = $exception->getMessage();
             }
         }
 

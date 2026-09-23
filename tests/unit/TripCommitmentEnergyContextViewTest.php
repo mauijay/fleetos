@@ -8,12 +8,21 @@ use PHPUnit\Framework\Attributes\DataProvider;
 final class TripCommitmentEnergyContextViewTest extends CIUnitTestCase
 {
     #[DataProvider('comparisonProvider')]
-    public function testEnergyOverrideShowsResolvedRuleAndNormalVehicleTarget(string $comparison, string $summary): void
+    public function testEnergyOverrideShowsResolvedRuleAndNormalVehiclePolicy(string $comparison, string $summary): void
     {
-        $html = $this->render($comparison, $summary, 75);
+        $html = $this->render($comparison, $summary, 'Normal vehicle minimum: 75%');
 
         $this->assertStringContainsString($summary, $html);
-        $this->assertStringContainsString('Normal vehicle target: 75%', $html);
+        $this->assertStringContainsString('Normal vehicle minimum: 75%', $html);
+        $this->assertStringContainsString('Guest-specific override', $html);
+    }
+
+    public function testPreferredRangeShowsGuestAndNormalVehicleRanges(): void
+    {
+        $html = $this->render('preferred_range', 'Guest-preferred range: 50–60%', 'Normal vehicle range: 70–80%');
+
+        $this->assertStringContainsString('Guest-preferred range: 50–60%', $html);
+        $this->assertStringContainsString('Normal vehicle range: 70–80%', $html);
         $this->assertStringContainsString('Guest-specific override', $html);
     }
 
@@ -34,17 +43,12 @@ final class TripCommitmentEnergyContextViewTest extends CIUnitTestCase
         yield 'minimum' => ['minimum', 'At least 50% for this trip'];
     }
 
-    private function render(string $comparison, string $summary, ?int $normalTarget): string
+    private function render(string $comparison, string $summary, ?string $normalPolicySummary): string
     {
         return CoreServices::renderer()->setData(['commitment' => [
             'energy_comparison' => $comparison,
             'energy_rule_summary' => $summary,
-            'energy_rule' => [
-                'source' => 'trip_commitment',
-                'comparison' => $comparison,
-                'percent' => 50,
-                'normal_vehicle_target' => $normalTarget,
-            ],
+            'normal_vehicle_policy_summary' => $normalPolicySummary,
         ]])->render('trip_commitments/components/energy_override_context');
     }
 }

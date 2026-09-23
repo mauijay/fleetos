@@ -35,7 +35,7 @@ $currentDisposition = trim((string) ($checklist['vehicle_disposition'] ?? ''));
                 </div></li>
             <?php endif; ?>
             <?php if ($energyWork !== null): ?>
-                <li class="is-pending readiness-action-row"><span aria-hidden="true">○</span><div class="readiness-action-label"><strong><?= esc((string) ($energyWork['label'] ?? 'Fuel/Charge level unknown')) ?></strong><?php if (($energyWork['condition_code'] ?? null) === 'target_needed'): ?><small>Configuration needed before FleetOS can evaluate readiness.</small><?php else: ?><small>Record the measured post-service level; FleetOS will evaluate it against the configured target.</small><?php endif; ?></div><div class="readiness-action-controls">
+                <li class="is-pending readiness-action-row"><span aria-hidden="true">○</span><div class="readiness-action-label"><strong><?= esc((string) ($energyWork['label'] ?? 'Fuel/Charge level unknown')) ?></strong><?php if (($energyWork['condition_code'] ?? null) === 'target_needed'): ?><small>Configuration needed before FleetOS can evaluate readiness.</small><?php else: ?><small><?= esc((string) ($energyWork['energy_policy_label'] ?? 'Configured readiness policy')) ?>. Record the exact measured level after service.</small><?php endif; ?></div><div class="readiness-action-controls">
                     <?php if (($energyWork['condition_code'] ?? null) === 'target_needed'): ?>
                         <a class="action-link" href="<?= esc((string) $energyWork['href'], 'attr') ?>"><?= esc((string) ($energyWork['action_label'] ?? 'Configure Vehicle')) ?></a>
                     <?php else: ?>

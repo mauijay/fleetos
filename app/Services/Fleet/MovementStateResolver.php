@@ -4,6 +4,10 @@ namespace App\Services\Fleet;
 
 class MovementStateResolver
 {
+    public function __construct(private readonly ?TripEnergyRuleResolver $energyRuleResolver = null)
+    {
+    }
+
     /** @return array<string, mixed> */
     public function resolve(array $context, ?\DateTimeImmutable $asOf = null): array
     {
@@ -38,22 +42,24 @@ class MovementStateResolver
         }
 
         if (in_array($event['event_code'] ?? null, ['actual_return', 'vehicle_recovered'], true)) {
-            $target = isset($profile['ready_energy_target_percent']) ? (int) $profile['ready_energy_target_percent'] : null;
-            $effectiveTarget = isset($context['energy_target_percent']) ? (int) $context['energy_target_percent'] : $target;
             $needsCleaning = (bool) ($context['cleaning_required'] ?? (($assessment['cleanliness'] ?? null) !== 'clean'));
-            $energyCondition = array_key_exists('energy_condition', $context) ? $context['energy_condition'] : ($target === null ? 'target_needed' : (($assessment['energy_percent'] ?? null) === null ? 'measurement_needed' : ((int) $assessment['energy_percent'] < $target ? 'charge_required' : null)));
+            $energyRule = $context['energy_rule'] ?? $this->energyRules()->forProfile($profile);
+            $energyEvaluation = array_key_exists('energy_condition', $context)
+                ? ['condition' => $context['energy_condition'], 'action_label' => $context['energy_action_label'] ?? null]
+                : $this->energyRules()->evaluate($energyRule, isset($assessment['energy_percent']) ? (int) $assessment['energy_percent'] : null);
+            $energyCondition = $energyEvaluation['condition'];
             $hasPickupPreparation = $this->hasCriticalBlockers($context, $blockers);
             if ($needsCleaning || $energyCondition !== null || $hasPickupPreparation) {
                 if ($needsCleaning) {
                     $blockers[] = ['code' => 'cleaning_required', 'label' => 'Cleaning required', 'severity' => 'meaningful'];
                 }
                 if ($energyCondition === 'charge_required') {
-                    $blockers[] = ['code' => 'energy_below_target', 'label' => 'Charge/Fuel to ' . $effectiveTarget . '%', 'severity' => 'meaningful'];
+                    $blockers[] = ['code' => 'energy_below_target', 'label' => (string) ($energyEvaluation['action_label'] ?? 'Charge/Fuel preparation required'), 'severity' => 'meaningful'];
                 } elseif ($energyCondition === 'measurement_needed') {
                     $missing[] = 'return_energy_percent';
                     $blockers[] = ['code' => 'energy_measurement_needed', 'label' => 'Record charge/fuel level', 'severity' => 'meaningful'];
                 } elseif ($energyCondition === 'target_needed') {
-                    $missing[] = 'ready_energy_target_percent';
+                    $missing[] = 'energy_readiness_policy';
                     $blockers[] = ['code' => 'energy_target_needed', 'label' => $this->energyTargetLabel($profile) . ' not configured', 'severity' => 'meaningful'];
                 } elseif ($energyCondition === 'above_maximum') {
                     $blockers[] = ['code' => 'energy_above_guest_maximum', 'label' => 'Above guest-requested maximum — review before handoff', 'severity' => 'critical'];
@@ -168,5 +174,10 @@ class MovementStateResolver
     private function dateLabel(string $date): string
     {
         return (new \DateTimeImmutable($date))->format('M j, g:i A');
+    }
+
+    private function energyRules(): TripEnergyRuleResolver
+    {
+        return $this->energyRuleResolver ?? new TripEnergyRuleResolver();
     }
 }

@@ -895,6 +895,30 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
         $this->assertStringNotContainsString('Same-day turnaround', $turnaroundHtml);
     }
 
+    public function testReadinessDistinguishesLastKnownRecoveryEnergyFromCurrentTargetEnergy(): void
+    {
+        $data = $this->readinessViewData();
+        $data['readiness']['last_known_vehicle_facts'] = [
+            'energy_percent' => 43,
+            'energy_observed_at' => '2026-09-22 06:45:00',
+            'energy_source_event' => 'vehicle_recovered',
+            'energy_applicable_to_target' => false,
+        ];
+
+        $stale = html_entity_decode($this->render('pickup', $this->facts(), false, [], $data), ENT_QUOTES | ENT_HTML5);
+
+        $this->assertStringContainsString('Last known Charge/Fuel: 43%', $stale);
+        $this->assertStringContainsString('Recorded at recovery Sep 22, 6:45 AM', $stale);
+        $this->assertStringContainsString('Current Charge/Fuel needs verification.', $stale);
+        $this->assertStringNotContainsString('Current Charge/Fuel: 43%', $stale);
+
+        $data['readiness']['last_known_vehicle_facts']['energy_applicable_to_target'] = true;
+        $sameDay = html_entity_decode($this->render('pickup', $this->facts(), false, [], $data), ENT_QUOTES | ENT_HTML5);
+
+        $this->assertStringContainsString('Last known Charge/Fuel: 43%', $sameDay);
+        $this->assertStringNotContainsString('Current Charge/Fuel needs verification.', $sameDay);
+    }
+
     public function testPickupRendersCompactCompositeCapabilityActionsAndLegacyHistory(): void
     {
         $items = [

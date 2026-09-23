@@ -1,5 +1,6 @@
 <?php
 
+use App\Database\Migrations\CreateEnergyReadinessRanges;
 use App\Database\Migrations\CreateFleetTripCommitments;
 use App\Repositories\FleetExtraRepository;
 use App\Repositories\TripCommitmentRepository;
@@ -10,6 +11,7 @@ use CodeIgniter\Test\CIUnitTestCase;
 use Config\Database;
 
 require_once __DIR__ . '/../../app/Database/Migrations/2026-09-20-000023_CreateFleetTripCommitments.php';
+require_once __DIR__ . '/../../app/Database/Migrations/2026-09-22-000025_CreateEnergyReadinessRanges.php';
 
 /** @internal */
 final class TripCommitmentsTest extends CIUnitTestCase
@@ -29,6 +31,7 @@ final class TripCommitmentsTest extends CIUnitTestCase
         $this->createPrerequisites();
         $this->connection->query('PRAGMA foreign_keys = ON');
         (new CreateFleetTripCommitments(Database::forge($this->connection)))->up();
+        (new CreateEnergyReadinessRanges(Database::forge($this->connection)))->up();
         $this->connection->query('ALTER TABLE ' . $this->connection->getPrefix() . 'fleet_trip_commitments ADD COLUMN fleet_extra_id INTEGER NULL');
         $this->repository = new TripCommitmentRepository($this->connection);
         $this->service = new TripCommitmentService($this->repository, null, new FleetExtraRepository($this->connection));
@@ -44,6 +47,10 @@ final class TripCommitmentsTest extends CIUnitTestCase
     {
         $this->assertTrue($this->connection->tableExists('fleet_trip_commitments'));
         $this->assertTrue($this->connection->tableExists('fleet_trip_commitment_audits'));
+        $this->assertContains('energy_min_percent', $this->connection->getFieldNames('fleet_trip_commitments'));
+        $this->assertContains('energy_max_percent', $this->connection->getFieldNames('fleet_trip_commitments'));
+        $this->assertContains('ready_energy_min_percent', $this->connection->getFieldNames('vehicle_operational_profiles'));
+        $this->assertContains('ready_energy_preferred_max_percent', $this->connection->getFieldNames('vehicle_operational_profiles'));
         $this->assertNotContains('fleet_vehicle_id', $this->connection->getFieldNames('fleet_trip_commitments'));
         $indexes = array_keys($this->connection->getIndexData('fleet_trip_commitments'));
         $this->assertContains('fleet_trip_commitment_active_override_unique', $indexes);
@@ -51,6 +58,9 @@ final class TripCommitmentsTest extends CIUnitTestCase
         $this->assertContains('fleet_trip_commitment_company_phase_state', $indexes);
         $this->assertContains('fleet_trip_commitment_trip_category', $indexes);
         $this->assertCount(2, $this->connection->getForeignKeyData('fleet_trip_commitments'));
+        $this->assertSame(0, $this->connection->table('fleet_trip_commitments')->countAllResults());
+        $this->assertSame(3, $this->connection->table('vehicle_operational_profiles')->countAllResults());
+        $this->assertSame(3, $this->connection->table('vehicle_operational_profiles')->where('ready_energy_min_percent', null)->where('ready_energy_preferred_max_percent', null)->countAllResults());
     }
 
     public function testWrongCompanyCannotAccessTripWorkspace(): void
@@ -130,7 +140,7 @@ final class TripCommitmentsTest extends CIUnitTestCase
         $this->assertSame([], $workspace['history']);
         $this->assertCount(2, $workspace['audits']);
         $this->assertSame(2, $this->connection->table('fleet_trip_commitments')->where('turo_trip_normalized_id', 103)->where('state', 'active')->countAllResults());
-        $this->assertSame('vehicle_profile', (new TripEnergyRuleResolver($this->repository))->forTrip(1, 103, ['ready_energy_target_percent' => 75])['source']);
+        $this->assertSame('legacy_profile', (new TripEnergyRuleResolver($this->repository))->forTrip(1, 103, ['ready_energy_target_percent' => 75])['source']);
 
         try {
             $this->service->create(1, 103, $this->input('other', 'Must be rejected', 'informational'), 7);
@@ -192,7 +202,7 @@ final class TripCommitmentsTest extends CIUnitTestCase
         $presented = $this->service->activeForTrip(1, 101)[0];
         $this->assertSame(75, $presented['energy_rule']['normal_vehicle_target']);
         $this->assertSame('maximum', $presented['energy_rule']['comparison']);
-        $this->assertSame('vehicle_profile', $resolver->forTrip(1, 102, $normalProfile)['source']);
+        $this->assertSame('legacy_profile', $resolver->forTrip(1, 102, $normalProfile)['source']);
         $this->assertSame(75, $resolver->forTrip(1, 102, $normalProfile)['percent']);
 
         $this->expectException(RuntimeException::class);
@@ -219,6 +229,67 @@ final class TripCommitmentsTest extends CIUnitTestCase
         $this->assertSame('above_maximum', $above['condition']);
         $this->assertFalse($above['ready']);
         $this->assertStringNotContainsString('Charge', (string) $above['action_label']);
+    }
+
+    public function testPreferredRangeValidationPersistenceExactTripResolutionAndNormalContext(): void
+    {
+        $this->connection->table('vehicle_operational_profiles')->where('fleet_vehicle_id', 11)->update([
+            'ready_energy_target_percent' => 70,
+            'ready_energy_min_percent' => 70,
+            'ready_energy_preferred_max_percent' => 80,
+        ]);
+        foreach ([
+            ['min' => '', 'max' => '60', 'message' => 'minimum'],
+            ['min' => '80', 'max' => '70', 'message' => 'must not exceed'],
+            ['min' => '-1', 'max' => '60', 'message' => 'between 0 and 100'],
+            ['min' => '50', 'max' => '101', 'message' => 'between 0 and 100'],
+        ] as $invalid) {
+            $input = $this->input('energy_override', 'Guest-preferred energy range', 'automatic_override', true);
+            $input['energy_comparison'] = 'preferred_range';
+            $input['energy_min_percent'] = $invalid['min'];
+            $input['energy_max_percent'] = $invalid['max'];
+            try {
+                $this->service->create(1, 101, $input, 7);
+                $this->fail('Invalid preferred range must be rejected.');
+            } catch (InvalidArgumentException $exception) {
+                $this->assertStringContainsString($invalid['message'], $exception->getMessage());
+            }
+        }
+
+        $input = $this->input('energy_override', 'Guest prefers 50–60%', 'automatic_override', true);
+        $input['energy_comparison'] = 'preferred_range';
+        $input['energy_min_percent'] = '50';
+        $input['energy_max_percent'] = '60';
+        $created = $this->service->create(1, 101, $input, 7);
+
+        $this->assertNull($created['energy_percent']);
+        $this->assertSame(50, (int) $created['energy_min_percent']);
+        $this->assertSame(60, (int) $created['energy_max_percent']);
+        $resolver = new TripEnergyRuleResolver($this->repository);
+        $rule = $resolver->forTrip(1, 101, [
+            'energy_kind' => 'electric',
+            'ready_energy_min_percent' => 70,
+            'ready_energy_preferred_max_percent' => 80,
+            'ready_energy_target_percent' => 70,
+        ]);
+        $this->assertSame('trip_commitment', $rule['source']);
+        $this->assertSame('preferred_range', $rule['mode']);
+        $this->assertSame(50, $rule['minimum_percent']);
+        $this->assertSame(60, $rule['preferred_max_percent']);
+        $this->assertSame('preferred_range', $rule['normal_vehicle_policy']['mode']);
+        $this->assertSame(70, $rule['normal_vehicle_policy']['minimum_percent']);
+        $this->assertSame(80, $rule['normal_vehicle_policy']['preferred_max_percent']);
+        $this->assertSame('Charge to 50–60%', $resolver->evaluate($rule, 45)['action_label']);
+        $this->assertTrue($resolver->evaluate($rule, 55)['ready']);
+        $above = $resolver->evaluate($rule, 65);
+        $this->assertTrue($above['ready']);
+        $this->assertNull($above['condition']);
+        $this->assertSame('Above guest-preferred range', $above['attention_label']);
+
+        $presented = $this->service->activeForTrip(1, 101)[0];
+        $this->assertSame('Guest-preferred range: 50–60%', $presented['energy_rule_summary']);
+        $this->assertSame('Normal vehicle range: 70–80%', $presented['normal_vehicle_policy_summary']);
+        $this->assertSame('legacy_profile', $resolver->forTrip(1, 102, ['energy_kind' => 'electric', 'ready_energy_target_percent' => 75])['source']);
     }
 
     public function testExtraAndSetupCommitmentCoexistWithoutCommercialOrFinancialWrites(): void
@@ -261,6 +332,8 @@ final class TripCommitmentsTest extends CIUnitTestCase
             'required_before_dispatch' => $required ? '1' : '0',
             'energy_comparison' => null,
             'energy_percent' => null,
+            'energy_min_percent' => null,
+            'energy_max_percent' => null,
             'arranged_at' => null,
         ];
     }

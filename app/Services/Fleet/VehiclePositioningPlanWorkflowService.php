@@ -32,7 +32,13 @@ class VehiclePositioningPlanWorkflowService
         $tripId = isset($lifecycleEvent['turo_trip_normalized_id']) ? (int) $lifecycleEvent['turo_trip_normalized_id'] : null;
         $schedule = $tripId === null ? null : $this->repo()->tripSchedule($tripId);
         $assessment = $this->repo()->assessmentForEventOrTrip(isset($lifecycleEvent['id']) ? (int) $lifecycleEvent['id'] : null, $tripId);
-        $profile = $this->repo()->profile($vehicleId) ?? ['energy_kind' => 'unknown', 'ready_energy_target_percent' => null, 'capabilities' => []];
+        $profile = $this->repo()->profile($vehicleId) ?? [
+            'energy_kind' => 'unknown',
+            'ready_energy_target_percent' => null,
+            'ready_energy_min_percent' => null,
+            'ready_energy_preferred_max_percent' => null,
+            'capabilities' => [],
+        ];
         $nextTrip = $this->nextTrips()->forVehicle($vehicleId, $asOf);
         $nextTripId = (int) ($nextTrip['id'] ?? 0);
         $energyRule = $nextTripId > 0

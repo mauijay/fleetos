@@ -133,7 +133,7 @@ final class TripCommitmentReadinessTest extends CIUnitTestCase
 
             $this->assertSame(['energy_known'], array_column($energy, 'code'));
             $this->assertSame('unsatisfied', $energy[0]['status']);
-            $this->assertSame('Record Charge/Fuel percentage', $energy[0]['action']['label']);
+            $this->assertSame('Record current Charge/Fuel percentage', $energy[0]['action']['label']);
             $this->assertSame(1, $projection['blocking_remaining_count']);
         }
     }
@@ -146,7 +146,7 @@ final class TripCommitmentReadinessTest extends CIUnitTestCase
 
         $this->assertSame('satisfied', $this->requirement($belowProjection, 'energy_known')['status']);
         $this->assertSame('unsatisfied', $this->requirement($belowProjection, 'energy_ready')['status']);
-        $this->assertSame('Charge/Fuel to 75%', $this->requirement($belowProjection, 'energy_ready')['action']['label']);
+        $this->assertSame('Charge/Fuel to at least 75%', $this->requirement($belowProjection, 'energy_ready')['action']['label']);
 
         $ready = $this->context([]);
         $readyProjection = (new MovementReadinessProjectionService())->project($ready);
@@ -158,7 +158,7 @@ final class TripCommitmentReadinessTest extends CIUnitTestCase
     public function testTripOverrideRulesKeepTheSameMeasurementThenReadinessSequence(): void
     {
         foreach ([
-            ['comparison' => 'minimum', 'energy' => 40, 'expected' => 'Charge/Fuel to 50%'],
+            ['comparison' => 'minimum', 'energy' => 40, 'expected' => 'Charge/Fuel to at least 50%'],
             ['comparison' => 'target', 'energy' => 40, 'expected' => 'Charge/Fuel toward 50%'],
             ['comparison' => 'maximum', 'energy' => 60, 'expected' => 'Above guest-requested maximum of 50%'],
         ] as $case) {
@@ -227,7 +227,7 @@ final class TripCommitmentReadinessTest extends CIUnitTestCase
         $secondProjection = (new MovementReadinessProjectionService())->project($second);
 
         $this->assertSame(101, $firstProjection['trip_id']);
-        $this->assertSame('Charge/Fuel to 75%', $this->requirement($firstProjection, 'energy_ready')['action']['label']);
+        $this->assertSame('Charge/Fuel to at least 75%', $this->requirement($firstProjection, 'energy_ready')['action']['label']);
         $this->assertSame(102, $secondProjection['trip_id']);
         $this->assertSame(['energy_known'], array_column($this->energyRequirements($secondProjection), 'code'));
         $this->assertFalse($this->requirement($secondProjection, 'energy_known')['actionable']);

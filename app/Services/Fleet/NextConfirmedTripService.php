@@ -33,6 +33,19 @@ class NextConfirmedTripService
             return null;
         }
         $trip['planning_horizon'] = $this->horizons->classify(new \DateTimeImmutable((string) $trip['starts_at']), $asOf);
+        $trip['is_same_day_turnaround'] = false;
+        if (in_array($activeEvent['event_code'] ?? null, ['actual_return', 'vehicle_recovered'], true)
+            && (int) ($activeEvent['turo_trip_normalized_id'] ?? 0) > 0) {
+            $sourceTrip = $this->repo()->tripSchedule((int) $activeEvent['turo_trip_normalized_id']);
+            try {
+                $returnAt = new \DateTimeImmutable((string) ($sourceTrip['ends_at'] ?? ''));
+                $pickupAt = new \DateTimeImmutable((string) $trip['starts_at']);
+                $trip['is_same_day_turnaround'] = $returnAt <= $pickupAt
+                    && $returnAt->format('Y-m-d') === $pickupAt->format('Y-m-d');
+            } catch (\Exception) {
+                $trip['is_same_day_turnaround'] = false;
+            }
+        }
         return $trip;
     }
 
