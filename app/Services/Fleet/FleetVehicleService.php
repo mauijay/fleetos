@@ -61,12 +61,14 @@ class FleetVehicleService
             return null;
         }
 
-        return array_merge($row, $this->profiles()->profile($id) ?? [
-            'energy_kind' => 'unknown',
-            'ready_energy_target_percent' => null,
-            'ready_energy_min_percent' => null,
-            'ready_energy_preferred_max_percent' => null,
-            'capabilities' => [],
+        $profile = $this->profiles()->profile($id);
+
+        return array_merge($row, [
+            'energy_kind' => $profile['energy_kind'] ?? 'unknown',
+            'ready_energy_target_percent' => $profile['ready_energy_target_percent'] ?? null,
+            'ready_energy_min_percent' => $profile['ready_energy_min_percent'] ?? null,
+            'ready_energy_preferred_max_percent' => $profile['ready_energy_preferred_max_percent'] ?? null,
+            'capabilities' => (array) ($profile['capabilities'] ?? []),
         ]);
     }
 

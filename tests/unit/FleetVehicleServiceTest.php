@@ -104,6 +104,73 @@ final class FleetVehicleServiceTest extends CIUnitTestCase
         $this->assertSame(2, (int) $this->service->vehicle((int) $result['id'])['vehicle_drivetrain_id']);
     }
 
+    public function testOperationalProfileEnrichmentPreservesCanonicalVehicleIdentityAndCompanyScope(): void
+    {
+        $this->seedAwdTesla();
+        $this->seedTeslaOperationalProfile();
+
+        $vehicle = $this->service->vehicle(6, 1);
+
+        $this->assertNotNull($vehicle);
+        $this->assertSame(6, (int) $vehicle['id']);
+        $this->assertSame(6, (int) $vehicle['fleet_number']);
+        $this->assertSame('electric', $vehicle['energy_kind']);
+        $this->assertSame(75, (int) $vehicle['ready_energy_target_percent']);
+        $this->assertSame(75, (int) $vehicle['ready_energy_min_percent']);
+        $this->assertNull($vehicle['ready_energy_preferred_max_percent']);
+        $this->assertSame(['key_card', 'charging_adapter'], $vehicle['capabilities']);
+        $this->assertNull($this->service->vehicle(6, 2));
+    }
+
+    public function testAssignedFleetNumberAllowsCanonicalMatchesAndRejectsChangesOrBlanks(): void
+    {
+        $this->seedAwdTesla();
+
+        foreach (['6', 6, '06'] as $submittedNumber) {
+            $result = $this->service->update(6, $this->teslaData([
+                'fleet_number' => $submittedNumber,
+                'display_name' => 'Tesla 6 ' . (string) $submittedNumber,
+            ]));
+
+            $this->assertTrue($result['success']);
+            $this->assertSame(6, (int) $this->service->vehicle(6)['fleet_number']);
+        }
+
+        foreach (['7', '', null] as $submittedNumber) {
+            $result = $this->service->update(6, $this->teslaData(['fleet_number' => $submittedNumber]));
+
+            $this->assertFalse($result['success']);
+            $this->assertSame('An assigned fleet number cannot be changed through ordinary editing.', $result['errors']['fleet_number']);
+        }
+    }
+
+    public function testAssignedVehicleAcceptsEnergyRangeAndOrdinaryFieldEdits(): void
+    {
+        $this->seedAwdTesla();
+        $this->seedTeslaOperationalProfile();
+
+        $result = $this->service->update(6, $this->teslaData([
+            'fleet_number' => '6',
+            'display_name' => 'Tesla 6 Ready',
+            'registered_owner' => 'FleetOS Test Owner',
+            'energy_kind' => 'electric',
+            'ready_energy_min_percent' => 70,
+            'ready_energy_preferred_max_percent' => 80,
+            'operational_capabilities' => ['key_card', 'charging_adapter'],
+        ]), 42);
+
+        $this->assertTrue($result['success']);
+        $vehicle = $this->service->vehicle(6);
+        $this->assertSame(6, (int) $vehicle['id']);
+        $this->assertSame(6, (int) $vehicle['fleet_number']);
+        $this->assertSame('Tesla 6 Ready', $vehicle['display_name']);
+        $this->assertSame('FleetOS Test Owner', $vehicle['registered_owner']);
+        $this->assertSame(70, (int) $vehicle['ready_energy_target_percent']);
+        $this->assertSame(70, (int) $vehicle['ready_energy_min_percent']);
+        $this->assertSame(80, (int) $vehicle['ready_energy_preferred_max_percent']);
+        $this->assertSame(['key_card', 'charging_adapter'], $vehicle['capabilities']);
+    }
+
     public function testUniquenessAndCompanyScopeAreEnforced(): void
     {
         $this->assertTrue($this->service->create($this->validData())['success']);
@@ -317,6 +384,21 @@ final class FleetVehicleServiceTest extends CIUnitTestCase
         ], $overrides);
     }
 
+    /** @return array<string, mixed> */
+    private function teslaData(array $overrides = []): array
+    {
+        return $this->validData(array_merge([
+            'company_id' => 1,
+            'fleet_number' => 6,
+            'fleet_code' => 'Tesla-6',
+            'display_name' => 'Tesla 6',
+            'model_year' => 2026,
+            'make_name' => 'Tesla',
+            'model_name' => 'Model Y',
+            'vin' => 'TESLAVIN6',
+        ], $overrides));
+    }
+
     private function seedLegacyVehicle(int $interiorColorId = 1): void
     {
         $this->connection->table('vehicle_makes')->insert(['id' => 1, 'code' => 'legacy', 'name' => 'Legacy']);
@@ -331,6 +413,22 @@ final class FleetVehicleServiceTest extends CIUnitTestCase
         $this->connection->table('vehicle_models')->insert(['id' => 2, 'vehicle_make_id' => 2, 'code' => 'model_y', 'name' => 'Model Y']);
         $this->connection->table('vehicle_specs')->insert(['id' => 2, 'vehicle_model_id' => 2, 'model_year' => 2026, 'vehicle_body_style_id' => 1, 'exterior_vehicle_color_id' => 1, 'interior_vehicle_color_id' => 1, 'battery_description' => '', 'seating_capacity' => 5]);
         $this->connection->table('fleet_vehicles')->insert(['id' => 6, 'company_id' => 1, 'vehicle_spec_id' => 2, 'vehicle_trim_level_id' => 1, 'vehicle_drivetrain_id' => 1, 'vehicle_status_id' => 1, 'fleet_number' => 6, 'fleet_code' => 'Tesla-6', 'display_name' => 'Tesla 6', 'vin' => 'TESLAVIN6']);
+    }
+
+    private function seedTeslaOperationalProfile(): void
+    {
+        $this->connection->table('vehicle_operational_profiles')->insert([
+            'id' => 1,
+            'fleet_vehicle_id' => 6,
+            'energy_kind' => 'electric',
+            'ready_energy_target_percent' => 75,
+            'ready_energy_min_percent' => 75,
+            'ready_energy_preferred_max_percent' => null,
+        ]);
+        $this->connection->table('vehicle_operational_capabilities')->insertBatch([
+            ['fleet_vehicle_id' => 6, 'capability_code' => 'key_card', 'is_applicable' => 1],
+            ['fleet_vehicle_id' => 6, 'capability_code' => 'charging_adapter', 'is_applicable' => 1],
+        ]);
     }
 
     private function seedLookups(): void

@@ -18,6 +18,14 @@ final class VehicleRegistrationComplianceViewTest extends CIUnitTestCase
         $this->assertStringContainsString('name="safety_inspection_due_on" type="date" value="<?= esc((string) $value(\'safety_inspection_due_on\'), \'attr\') ?>"', $source);
     }
 
+    public function testEditFormActionUsesCanonicalVehicleReadModelIdentity(): void
+    {
+        $source = file_get_contents(__DIR__ . '/../../app/Views/fleet_vehicles/form.php');
+
+        $this->assertIsString($source);
+        $this->assertStringContainsString("'/fleet/vehicles/' . (int) \$vehicle['id']", $source);
+    }
+
     public function testWorkspaceDisplaysRegistrationComplianceValues(): void
     {
         $html = $this->renderWorkspace($this->vehicle([
