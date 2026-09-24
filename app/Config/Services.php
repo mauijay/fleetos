@@ -29,6 +29,7 @@ use App\Repositories\VehicleTuroListingRepository;
 use App\Services\Files\PrivateEvidenceStorageService;
 use App\Services\Files\PrivateFileStorageService;
 use App\Services\Fleet\AirportMovementWorkflowService;
+use App\Services\Fleet\CurrentVehicleCustodyService;
 use App\Services\Fleet\CurrentVehicleLocationService;
 use App\Services\Fleet\DailyOperationsDashboardService;
 use App\Services\Fleet\DecisionSupport\BusinessInsightService;
@@ -443,7 +444,16 @@ class Services extends BaseService
             return static::getSharedInstance('currentVehicleLocationService');
         }
 
-        return new CurrentVehicleLocationService(static::operationalFactsRepository());
+        return new CurrentVehicleLocationService(static::operationalFactsRepository(), static::currentVehicleCustodyService());
+    }
+
+    public static function currentVehicleCustodyService(bool $getShared = true): CurrentVehicleCustodyService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('currentVehicleCustodyService');
+        }
+
+        return new CurrentVehicleCustodyService(static::operationalFactsRepository());
     }
 
     public static function fleetSnapshotService(bool $getShared = true): FleetSnapshotService
@@ -461,7 +471,13 @@ class Services extends BaseService
             return static::getSharedInstance('movementOperationalFactService');
         }
 
-        return new MovementOperationalFactService(null, static::movementEventService(), static::movementAssessmentService(), static::vehiclePositioningPlanService());
+        return new MovementOperationalFactService(
+            null,
+            static::movementEventService(),
+            static::movementAssessmentService(),
+            static::vehiclePositioningPlanService(),
+            custodyService: static::currentVehicleCustodyService(),
+        );
     }
 
     public static function movementOperationalFactPresentationService(bool $getShared = true): MovementOperationalFactPresentationService
@@ -533,7 +549,11 @@ class Services extends BaseService
             return static::getSharedInstance('nextConfirmedTripService');
         }
 
-        return new NextConfirmedTripService(static::operationalFactsRepository(), static::planningHorizonService());
+        return new NextConfirmedTripService(
+            static::operationalFactsRepository(),
+            static::planningHorizonService(),
+            static::currentVehicleCustodyService(),
+        );
     }
 
     public static function importFreshnessService(bool $getShared = true): ImportFreshnessService
@@ -585,6 +605,7 @@ class Services extends BaseService
             static::vehiclePositioningRecommendationService(),
             static::vehiclePositioningPlanService(),
             static::tripEnergyRuleResolver(),
+            static::currentVehicleCustodyService(),
         );
     }
 
@@ -603,6 +624,7 @@ class Services extends BaseService
             static::vehiclePositioningPlanService(),
             tripCommitmentService: static::tripCommitmentService(),
             energyRuleResolver: static::tripEnergyRuleResolver(),
+            custodyService: static::currentVehicleCustodyService(),
         );
     }
 

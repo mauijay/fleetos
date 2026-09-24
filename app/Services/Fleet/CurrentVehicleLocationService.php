@@ -6,24 +6,32 @@ use App\Repositories\OperationalFactsRepository;
 
 class CurrentVehicleLocationService
 {
-    public function __construct(private readonly ?OperationalFactsRepository $repository = null)
-    {
+    public function __construct(
+        private readonly ?OperationalFactsRepository $repository = null,
+        private readonly ?CurrentVehicleCustodyService $custodyService = null,
+    ) {
     }
 
     /** @return array<string, mixed> */
     public function resolve(int $vehicleId, ?\DateTimeImmutable $asOf = null): array
     {
         $asOf ??= new \DateTimeImmutable();
-        $lifecycle = $this->repo()->latestActiveLifecycleEvent($vehicleId, $asOf->format('Y-m-d H:i:s'));
+        $custody = $this->custody()->resolve($vehicleId, $asOf);
+        $lifecycle = $custody['basis_event'];
         if (($lifecycle['event_code'] ?? null) === 'guest_return_staged') {
             return $this->awaitingRecovery($lifecycle);
         }
-        $event = $this->repo()->latestCurrentStateEvent($vehicleId, $asOf->format('Y-m-d H:i:s'));
+
+        if ($custody['custody'] === 'guest' && is_array($lifecycle)) {
+            return $this->presentEvent($lifecycle, $asOf, 'guest');
+        }
+
+        $event = $this->operatorLocationEvent($custody, $this->repo()->latestLocationEvent($vehicleId, $asOf->format('Y-m-d H:i:s')));
         if ($event === null) {
             return $this->unknownLocation();
         }
 
-        return $this->presentEvent($event, $asOf);
+        return $this->presentEvent($event, $asOf, $custody['custody']);
     }
 
     /** @return array<int, array<string, mixed>> one row per active company vehicle */
@@ -34,23 +42,30 @@ class CurrentVehicleLocationService
         }
         $asOf ??= new \DateTimeImmutable();
         $vehicles = $this->repo()->activeFleetVehiclesForCompany($companyId, $asOf->format('Y-m-d'));
-        $events = $this->repo()->latestCurrentStateEventsForCompany(
+        $vehicleIds = array_map('intval', array_column($vehicles, 'id'));
+        $custody = $this->custody()->forCompany($companyId, $vehicleIds, $asOf);
+        $locations = $this->repo()->latestLocationEventsForCompany(
             $companyId,
-            array_map('intval', array_column($vehicles, 'id')),
+            $vehicleIds,
             $asOf->format('Y-m-d H:i:s'),
         );
-        $awaiting = array_column($this->repo()->awaitingRecoveryForCompany($companyId, $asOf->format('Y-m-d H:i:s')), null, 'fleet_vehicle_id');
 
-        return array_map(function (array $vehicle) use ($events, $awaiting, $asOf): array {
-            if (isset($awaiting[(int) $vehicle['id']])) {
-                return array_merge($vehicle, $this->awaitingRecovery($awaiting[(int) $vehicle['id']]));
+        return array_map(function (array $vehicle) use ($custody, $locations, $asOf): array {
+            $vehicleId = (int) $vehicle['id'];
+            $state = $custody[$vehicleId] ?? ['custody' => 'unknown', 'basis_event' => null];
+            $lifecycle = $state['basis_event'] ?? null;
+            if (($lifecycle['event_code'] ?? null) === 'guest_return_staged') {
+                return array_merge($vehicle, $this->awaitingRecovery($lifecycle));
             }
-            $event = $events[(int) $vehicle['id']] ?? null;
+            if (($state['custody'] ?? null) === 'guest' && is_array($lifecycle)) {
+                return array_merge($vehicle, $this->presentEvent($lifecycle, $asOf, 'guest'));
+            }
+            $event = $this->operatorLocationEvent($state, $locations[$vehicleId] ?? null);
             if ($event === null) {
                 return array_merge($vehicle, $this->unknownLocation());
             }
 
-            return array_merge($vehicle, $this->presentEvent($event, $asOf));
+            return array_merge($vehicle, $this->presentEvent($event, $asOf, (string) ($state['custody'] ?? 'unknown')));
         }, $vehicles);
     }
 
@@ -75,12 +90,12 @@ class CurrentVehicleLocationService
     }
 
     /** @return array<string, mixed> */
-    private function presentEvent(array $event, \DateTimeImmutable $asOf): array
+    private function presentEvent(array $event, \DateTimeImmutable $asOf, string $custody): array
     {
         $observed = new \DateTimeImmutable((string) $event['occurred_at']);
         $eventCode = (string) ($event['event_code'] ?? '');
-        $isCurrent = in_array($eventCode, ['actual_return', 'vehicle_recovered', 'vehicle_positioned', 'vehicle_staged'], true);
-        $isRented = $eventCode === 'actual_handoff';
+        $isRented = $custody === 'guest';
+        $isCurrent = $custody === 'operator';
 
         return [
             'location_class' => trim((string) ($event['location_class'] ?? '')) ?: 'unknown',
@@ -102,6 +117,25 @@ class CurrentVehicleLocationService
         ];
     }
 
+    /** @param array<string, mixed> $custody @return array<string, mixed>|null */
+    private function operatorLocationEvent(array $custody, ?array $latestLocation): ?array
+    {
+        $basis = $custody['basis_event'] ?? null;
+        if (($custody['custody'] ?? null) !== 'operator' || ! is_array($basis)) {
+            return $latestLocation;
+        }
+        if ($latestLocation === null || (string) ($latestLocation['occurred_at'] ?? '') < (string) ($basis['occurred_at'] ?? '')) {
+            return $basis;
+        }
+        $locationTripId = (int) ($latestLocation['turo_trip_normalized_id'] ?? 0);
+        $basisTripId = (int) ($basis['turo_trip_normalized_id'] ?? 0);
+        if ($locationTripId > 0 && $basisTripId > 0 && $locationTripId !== $basisTripId) {
+            return $basis;
+        }
+
+        return $latestLocation;
+    }
+
     /** @return array<string, mixed> */
     private function unknownLocation(): array
     {
@@ -121,5 +155,10 @@ class CurrentVehicleLocationService
     private function repo(): OperationalFactsRepository
     {
         return $this->repository ?? new OperationalFactsRepository();
+    }
+
+    private function custody(): CurrentVehicleCustodyService
+    {
+        return $this->custodyService ?? new CurrentVehicleCustodyService($this->repo());
     }
 }

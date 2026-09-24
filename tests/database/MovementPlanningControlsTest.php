@@ -3,6 +3,7 @@
 use App\Database\Migrations\CreateMovementOperationalFacts;
 use App\Database\Migrations\CreateMovementPlanningControls;
 use App\Repositories\OperationalFactsRepository;
+use App\Services\Fleet\CurrentVehicleCustodyService;
 use App\Services\Fleet\MovementAssessmentService;
 use App\Services\Fleet\MovementEventService;
 use App\Services\Fleet\MovementLocationAliasService;
@@ -242,7 +243,9 @@ final class MovementPlanningControlsTest extends CIUnitTestCase
         $plans = new VehiclePositioningPlanService($this->repository);
         $events = new MovementEventService($this->repository);
         $assessments = new MovementAssessmentService($this->repository);
-        $service = new MovementOperationalFactService($this->connection, $events, $assessments, $plans);
+        $custody = $this->createStub(CurrentVehicleCustodyService::class);
+        $custody->method('laterHandoffConflict')->willReturn(null);
+        $service = new MovementOperationalFactService($this->connection, $events, $assessments, $plans, custodyService: $custody);
         $checklist = ['exists' => true, 'fleet_vehicle_id' => 10, 'turo_trip_normalized_id' => 100, 'movement_type' => 'return'];
         $firstPlanId = $plans->create(10, 'retrieve_home', 'home', 'operator_choice', null, 'confirmed', null, null, null, 7);
 

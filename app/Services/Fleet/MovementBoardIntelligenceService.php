@@ -18,6 +18,7 @@ class MovementBoardIntelligenceService
         private readonly HnlGarageCatalog $hnlGarages = new HnlGarageCatalog(),
         private readonly ?TripCommitmentService $tripCommitmentService = null,
         private readonly ?TripEnergyRuleResolver $energyRuleResolver = null,
+        private readonly ?CurrentVehicleCustodyService $custodyService = null,
     ) {
     }
 
@@ -32,7 +33,10 @@ class MovementBoardIntelligenceService
         $energy = $companyId !== null && $companyId > 0
             ? $this->repo()->latestEnergyForCompany($companyId, $vehicleIds, $asOf->format('Y-m-d H:i:s'))
             : [];
-        $work = new OperationalMovementWorkService($this->repo(), $this->nextTrips(), $this->energyRules());
+        $custody = $companyId !== null && $companyId > 0
+            ? $this->custody()->forCompany($companyId, $vehicleIds, $asOf)
+            : array_combine($vehicleIds, array_map(fn (int $vehicleId): array => $this->custody()->resolve($vehicleId, $asOf), $vehicleIds));
+        $work = new OperationalMovementWorkService($this->repo(), $this->nextTrips(), $this->energyRules(), $this->custody());
         $cleaningNeeds = $companyId !== null && $companyId > 0
             ? array_column($work->cleaningNeedsForCompany($companyId, $asOf), null, 'fleet_vehicle_id')
             : [];
@@ -55,15 +59,16 @@ class MovementBoardIntelligenceService
             $energyNeeds[(int) ($card['fleet_vehicle_id'] ?? 0)] ?? null,
             $companyId,
             $exceptionsByVehicle[(int) ($card['fleet_vehicle_id'] ?? 0)] ?? [],
+            $custody[(int) ($card['fleet_vehicle_id'] ?? 0)] ?? null,
         ), $cards);
     }
 
     /** @return array<string, mixed> */
-    private function enrichCard(array $card, \DateTimeImmutable $asOf, ?array $latestCleanliness, ?array $latestEnergy, ?array $cleaningNeed, ?array $energyNeed, ?int $companyId, array $recoveryExceptions = []): array
+    private function enrichCard(array $card, \DateTimeImmutable $asOf, ?array $latestCleanliness, ?array $latestEnergy, ?array $cleaningNeed, ?array $energyNeed, ?int $companyId, array $recoveryExceptions = [], ?array $custodyState = null): array
     {
         $vehicleId = (int) ($card['fleet_vehicle_id'] ?? 0);
         $event = $this->repo()->latestActiveMovementEvent($vehicleId, $asOf->format('Y-m-d H:i:s'));
-        $latestLifecycleEvent = $this->repo()->latestActiveLifecycleEvent($vehicleId, $asOf->format('Y-m-d H:i:s'));
+        $latestLifecycleEvent = ($custodyState ?? $this->custody()->resolve($vehicleId, $asOf))['basis_event'] ?? null;
         $commitment = $this->activeOperationalCommitment($latestLifecycleEvent, $card, $asOf);
         $lifecycleEvent = $commitment['event'];
         $awaitingRecovery = ($lifecycleEvent['event_code'] ?? null) === 'guest_return_staged';
@@ -657,7 +662,7 @@ class MovementBoardIntelligenceService
     }
     private function nextTrips(): NextConfirmedTripService
     {
-        return $this->nextTripService ?? new NextConfirmedTripService($this->repo());
+        return $this->nextTripService ?? new NextConfirmedTripService($this->repo(), custodyService: $this->custody());
     }
     private function freshness(): ImportFreshnessService
     {
@@ -678,6 +683,11 @@ class MovementBoardIntelligenceService
     private function energyRules(): TripEnergyRuleResolver
     {
         return $this->energyRuleResolver ?? Services::tripEnergyRuleResolver();
+    }
+
+    private function custody(): CurrentVehicleCustodyService
+    {
+        return $this->custodyService ?? new CurrentVehicleCustodyService($this->repo());
     }
 
     /** @return array<string, mixed> */

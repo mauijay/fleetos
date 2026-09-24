@@ -1,6 +1,7 @@
 <?php
 
 use App\Repositories\OperationalFactsRepository;
+use App\Services\Fleet\CurrentVehicleCustodyService;
 use App\Services\Fleet\ImportFreshnessService;
 use App\Services\Fleet\MovementBoardIntelligenceService;
 use App\Services\Fleet\MovementStateResolver;
@@ -317,7 +318,13 @@ final class MovementBoardIntelligenceServiceTest extends CIUnitTestCase
                 'starts_at' => '2026-09-06 08:00:00',
             ]);
 
-        $trip = (new NextConfirmedTripService($repository))->forVehicle(9, new DateTimeImmutable('2026-09-03 12:00:00'));
+        $custody = $this->createStub(CurrentVehicleCustodyService::class);
+        $custody->method('resolve')->willReturn([
+            'custody' => 'operator', 'active_trip_id' => 900, 'basis_event' => [
+                'event_code' => 'vehicle_staged', 'turo_trip_normalized_id' => 900,
+            ],
+        ]);
+        $trip = (new NextConfirmedTripService($repository, custodyService: $custody))->forVehicle(9, new DateTimeImmutable('2026-09-03 12:00:00'));
 
         $this->assertSame(901, $trip['id']);
         $this->assertSame('Following Guest', $trip['guest_name']);
@@ -449,6 +456,14 @@ final class MovementBoardIntelligenceServiceTest extends CIUnitTestCase
         $nextTrips->method('forVehicle')->willReturn($nextTrip);
         $plans = $this->createStub(VehiclePositioningPlanService::class);
         $plans->method('active')->willReturn($plan);
+        $custodyState = [
+            'custody' => in_array($event['event_code'] ?? null, ['actual_handoff', 'guest_return_staged'], true) ? 'guest' : (in_array($event['event_code'] ?? null, ['vehicle_staged', 'actual_return', 'vehicle_recovered'], true) ? 'operator' : 'unknown'),
+            'active_trip_id' => in_array($event['event_code'] ?? null, ['actual_handoff', 'guest_return_staged', 'vehicle_staged'], true) ? (int) ($event['turo_trip_normalized_id'] ?? 0) : null,
+            'basis_event' => $event,
+        ];
+        $custody = $this->createStub(CurrentVehicleCustodyService::class);
+        $custody->method('resolve')->willReturn($custodyState);
+        $custody->method('forCompany')->willReturn([9 => $custodyState]);
 
         return new MovementBoardIntelligenceService(
             $repository,
@@ -457,6 +472,7 @@ final class MovementBoardIntelligenceServiceTest extends CIUnitTestCase
             new MovementStateResolver(),
             new VehiclePositioningRecommendationService(),
             $plans,
+            custodyService: $custody,
         );
     }
 }

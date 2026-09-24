@@ -6,8 +6,11 @@ use App\Repositories\OperationalFactsRepository;
 
 class NextConfirmedTripService
 {
-    public function __construct(private readonly ?OperationalFactsRepository $repository = null, private readonly PlanningHorizonService $horizons = new PlanningHorizonService())
-    {
+    public function __construct(
+        private readonly ?OperationalFactsRepository $repository = null,
+        private readonly PlanningHorizonService $horizons = new PlanningHorizonService(),
+        private readonly ?CurrentVehicleCustodyService $custodyService = null,
+    ) {
     }
 
     /** @return array<string, mixed>|null */
@@ -15,10 +18,10 @@ class NextConfirmedTripService
     {
         $asOf ??= new \DateTimeImmutable();
         $after = $asOf;
-        $activeTripId = null;
-        $activeEvent = $this->repo()->latestActiveLifecycleEvent($vehicleId, $asOf->format('Y-m-d H:i:s'));
-        if (in_array($activeEvent['event_code'] ?? null, ['actual_handoff', 'vehicle_staged'], true) && isset($activeEvent['turo_trip_normalized_id'])) {
-            $activeTripId = (int) $activeEvent['turo_trip_normalized_id'];
+        $custody = $this->custody()->resolve($vehicleId, $asOf);
+        $activeEvent = $custody['basis_event'];
+        $activeTripId = isset($custody['active_trip_id']) ? (int) $custody['active_trip_id'] : null;
+        if ($activeTripId !== null) {
             $activeTrip = $this->repo()->tripSchedule($activeTripId);
             if (! empty($activeTrip['starts_at'])) {
                 $activeStartsAt = new \DateTimeImmutable((string) $activeTrip['starts_at']);
@@ -52,5 +55,10 @@ class NextConfirmedTripService
     private function repo(): OperationalFactsRepository
     {
         return $this->repository ?? new OperationalFactsRepository();
+    }
+
+    private function custody(): CurrentVehicleCustodyService
+    {
+        return $this->custodyService ?? new CurrentVehicleCustodyService($this->repo());
     }
 }

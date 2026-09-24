@@ -1,6 +1,7 @@
 <?php
 
 use App\Repositories\OperationalFactsRepository;
+use App\Services\Fleet\CurrentVehicleCustodyService;
 use App\Services\Fleet\CurrentVehicleLocationService;
 use App\Services\Fleet\FleetSnapshotService;
 use CodeIgniter\Test\CIUnitTestCase;
@@ -43,11 +44,16 @@ final class FleetSnapshotServiceTest extends CIUnitTestCase
             ['id' => 1, 'company_id' => 7, 'fleet_number' => 1, 'fleet_code' => 'One', 'display_name' => 'One'],
             ['id' => 2, 'company_id' => 7, 'fleet_number' => 2, 'fleet_code' => 'Two', 'display_name' => 'Two'],
         ]);
-        $repository->expects($this->once())->method('latestCurrentStateEventsForCompany')->with(7, [1, 2], '2026-09-09 12:00:00')->willReturn([
+        $repository->expects($this->once())->method('latestLocationEventsForCompany')->with(7, [1, 2], '2026-09-09 12:00:00')->willReturn([
             1 => ['id' => 11, 'event_code' => 'vehicle_positioned', 'occurred_at' => '2026-09-09 10:00:00', 'location_class' => 'home'],
         ]);
+        $custody = $this->createStub(CurrentVehicleCustodyService::class);
+        $custody->method('forCompany')->willReturn([
+            1 => ['custody' => 'unknown', 'basis_event' => null],
+            2 => ['custody' => 'unknown', 'basis_event' => null],
+        ]);
 
-        $rows = (new CurrentVehicleLocationService($repository))->forCompany(7, new DateTimeImmutable('2026-09-09 12:00:00'));
+        $rows = (new CurrentVehicleLocationService($repository, $custody))->forCompany(7, new DateTimeImmutable('2026-09-09 12:00:00'));
 
         $this->assertCount(2, $rows);
         $this->assertSame('home', $rows[0]['location_class']);

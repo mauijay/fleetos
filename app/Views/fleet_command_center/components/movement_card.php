@@ -13,6 +13,7 @@ $readiness = $vehicle['readiness_compact'] ?? [
     'summary' => (string) ($vehicle['readiness_summary'] ?? 'Readiness not available'),
     'next_actions' => [],
 ];
+$statusLabel = ($state['code'] ?? null) === 'on_trip' ? 'Rented' : (string) $state['label'];
 ?>
 <article class="movement-card movement-card--structured tone-<?= esc($state['tone'], 'attr') ?>">
     <header class="movement-card__header">
@@ -20,7 +21,7 @@ $readiness = $vehicle['readiness_compact'] ?? [
             <h3><?= esc($vehicle['fleet_code']) ?></h3>
             <p><?= esc($vehicle['model'] === '' ? 'Model not captured' : $vehicle['model']) ?></p>
         </div>
-        <span class="status-badge tone-<?= esc($state['tone'], 'attr') ?>"><?= esc($state['label']) ?></span>
+        <span class="status-badge tone-<?= esc($state['tone'], 'attr') ?>"><?= esc($statusLabel) ?></span>
     </header>
 
     <div class="movement-card__commitment">

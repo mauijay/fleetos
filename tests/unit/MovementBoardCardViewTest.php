@@ -8,11 +8,15 @@ final class MovementBoardCardViewTest extends CIUnitTestCase
 {
     public function testCardRendersPlannedFactsFutureTripRecommendationFreshnessAndOneAction(): void
     {
-        $html = $this->render($this->vehicle());
+        $vehicle = $this->vehicle();
+        $html = $this->render($vehicle);
 
         $this->assertStringContainsString('movement-card movement-card--structured tone-info', $html);
         $this->assertStringContainsString('movement-card__facts', $html);
-        $this->assertStringContainsString('Currently Rented', $html);
+        $this->assertStringContainsString('>Rented</span>', $html);
+        $this->assertStringNotContainsString('Currently Rented', $html);
+        $this->assertSame('on_trip', $vehicle['state']['code']);
+        $this->assertSame('currently_rented', $vehicle['primary_status']);
         $this->assertStringContainsString('On trip; due Sep 5, 5:00 PM.', $html);
         $this->assertStringContainsString('movement-card__current-trip', $html);
         $this->assertStringContainsString('<strong>Current Guest</strong>', $html);
@@ -142,7 +146,8 @@ final class MovementBoardCardViewTest extends CIUnitTestCase
         return [
             'fleet_code' => 'EV-09',
             'model' => '2026 Tesla Model Y',
-            'state' => ['tone' => 'info', 'label' => 'Currently Rented'],
+            'state' => ['code' => 'on_trip', 'tone' => 'info', 'label' => 'Currently Rented'],
+            'primary_status' => 'currently_rented',
             'primary_line' => 'On trip; due Sep 5, 5:00 PM.',
             'current_trip' => ['id' => 90, 'guest_name' => 'Current Guest', 'timing_label' => 'Due Sep 5, 5:00 PM'],
             'current_movement_href' => null,

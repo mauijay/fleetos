@@ -105,7 +105,7 @@ class VehicleCapital extends BaseController
     private function currentReadiness(int $companyId, int $vehicleId, \DateTimeImmutable $asOf): ?array
     {
         $repository = Services::operationalFactsRepository();
-        $custody = $repository->latestActiveLifecycleEvent($vehicleId, $asOf->format('Y-m-d H:i:s'));
+        $custody = Services::currentVehicleCustodyService()->resolve($vehicleId, $asOf)['basis_event'];
         if (in_array($custody['event_code'] ?? null, ['actual_handoff', 'guest_return_staged'], true)) {
             return null;
         }
@@ -128,7 +128,7 @@ class VehicleCapital extends BaseController
     private function currentMovementHref(int $vehicleId, \DateTimeImmutable $asOf): ?string
     {
         $repository = Services::operationalFactsRepository();
-        $lifecycle = $repository->latestActiveLifecycleEvent($vehicleId, $asOf->format('Y-m-d H:i:s'));
+        $lifecycle = Services::currentVehicleCustodyService()->resolve($vehicleId, $asOf)['basis_event'];
         if (isset($lifecycle['turo_trip_normalized_id']) && in_array($lifecycle['event_code'] ?? null, ['actual_handoff', 'vehicle_staged'], true)) {
             $movementType = $lifecycle['event_code'] === 'actual_handoff' ? 'return' : 'pickup';
             $href = $repository->movementChecklistHref((int) $lifecycle['turo_trip_normalized_id'], $movementType);
