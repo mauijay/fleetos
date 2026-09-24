@@ -52,6 +52,10 @@ class TaskService
             'registration_renewals' => $health['registration_expiring'],
             'insurance_renewals' => $health['insurance_expiring'],
             'battery_alerts' => $health['vehicles_below_battery_threshold'],
+            'vehicle_health_reminders' => array_values(array_filter(
+                $health['vehicle_health_reminders'] ?? [],
+                static fn (array $reminder): bool => (bool) ($reminder['blocking'] ?? false),
+            )),
         ];
     }
 
@@ -80,7 +84,31 @@ class TaskService
             'insurance_renewals' => $this->health()->insuranceExpiring($day, 0),
             'loan_payments' => $this->health()->loanPaymentDue($day),
             'claims' => $this->health()->claimsRequiringFollowUp(),
+            'vehicle_health_reminders' => $this->vehicleHealthForDay($companyId, $day, $asOf),
         ];
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function vehicleHealthForDay(int $companyId, DateTimeImmutable $day, DateTimeImmutable $asOf): array
+    {
+        $reminders = array_values(array_filter(
+            $this->health()->vehicleHealthReminders($companyId, $asOf, true),
+            static fn (array $reminder): bool => ($reminder['reminder_code'] ?? null) !== 'current_odometer',
+        ));
+        if ($day->format('Y-m-d') === $asOf->format('Y-m-d')) {
+            return array_values(array_filter(
+                $reminders,
+                static fn (array $reminder): bool => in_array($reminder['state'] ?? null, ['attention', 'overdue', 'due'], true)
+                    || (($reminder['due_at'] ?? null) !== null
+                        && substr((string) $reminder['due_at'], 0, 10) === $day->format('Y-m-d')),
+            ));
+        }
+
+        return array_values(array_filter(
+            $reminders,
+            static fn (array $reminder): bool => ($reminder['due_at'] ?? null) !== null
+                && substr((string) $reminder['due_at'], 0, 10) === $day->format('Y-m-d'),
+        ));
     }
 
     /** @param array<int, array<string, mixed>> $reservations */

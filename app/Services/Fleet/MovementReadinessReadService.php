@@ -33,6 +33,7 @@ class MovementReadinessReadService
         $extrasByTrip = $this->extraFulfillmentService?->forTrips($companyId, array_values(array_unique($tripIds))) ?? [];
 
         foreach ($contexts as &$context) {
+            $context['as_of'] = $asOf->format('Y-m-d H:i:s');
             $tripId = (int) $context['turo_trip_normalized_id'];
             $movementType = (string) $context['movement_type'];
             $phases = $movementType === 'return' ? ['return', 'entire_trip'] : ['preparation', 'pickup', 'entire_trip'];

@@ -5192,3 +5192,104 @@ h3 {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.vehicle-health,
+.vehicle-health-grid,
+.vehicle-health-actions,
+.health-wheel-fields,
+.health-history,
+.vehicle-health .operational-card {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.vehicle-health-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+  gap: 1rem;
+}
+
+.health-reading-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(6.5rem, 1fr));
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+.health-reading-grid > div {
+  min-width: 0;
+  padding: 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 0.6rem;
+}
+
+.health-reading-grid dt,
+.health-reading-grid dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.health-reading-grid dt {
+  color: var(--muted);
+  font-size: 0.78rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.health-primary-value {
+  margin: 0.65rem 0;
+  font-size: clamp(1.75rem, 4vw, 2.4rem);
+  font-weight: 750;
+}
+
+.vehicle-health-actions {
+  display: grid;
+  gap: 0.8rem;
+  margin-top: 1rem;
+}
+
+.health-wheel-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr));
+  gap: 0.8rem;
+}
+
+.health-wheel-fields > *,
+.health-wheel-fields input,
+.health-wheel-fields textarea,
+.health-void-form > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.health-wide {
+  grid-column: 1 / -1;
+}
+
+.secondary-form,
+.health-void-form {
+  margin-top: 0.8rem;
+}
+
+.health-void-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 0.75rem;
+}
+
+.health-history {
+  margin-top: 1rem;
+}
+
+@media (max-width: 44rem) {
+  .health-wheel-fields,
+  .health-void-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .vehicle-health button,
+  .vehicle-health .button-link {
+    width: 100%;
+  }
+}

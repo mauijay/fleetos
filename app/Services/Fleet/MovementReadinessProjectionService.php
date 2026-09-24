@@ -20,8 +20,10 @@ class MovementReadinessProjectionService
         'offline' => 'Offline / unavailable',
     ];
 
-    public function __construct(private readonly ?TripEnergyRuleResolver $energyRuleResolver = null)
-    {
+    public function __construct(
+        private readonly ?TripEnergyRuleResolver $energyRuleResolver = null,
+        private readonly ?VehicleHealthReminderProjectionService $vehicleHealthProjectionService = null,
+    ) {
     }
 
     /** @param array<string, mixed> $context @return array<string, mixed> */
@@ -140,6 +142,7 @@ class MovementReadinessProjectionService
             self::PHASE_PICKUP_PREPARATION,
             ['preparation', 'pickup', 'entire_trip'],
         ));
+        $requirements = array_merge($requirements, $this->vehicleHealthRequirements($context));
 
         if ($handoff !== null) {
             $requirements = $this->suppressCompletedMovementPreparation($requirements, self::PHASE_PICKUP_PREPARATION);
@@ -606,6 +609,45 @@ class MovementReadinessProjectionService
     private function notApplicableRequirement(string $code, string $label, string $phase): array
     {
         return $this->requirement($code, $label, $phase, self::KIND_DERIVED, self::STATUS_NOT_APPLICABLE, false, 'structural_applicability', null, null);
+    }
+
+    /** @param array<string, mixed> $context @return list<array<string, mixed>> */
+    private function vehicleHealthRequirements(array $context): array
+    {
+        if ($this->vehicleHealthProjectionService === null) {
+            return [];
+        }
+        $asOf = new \DateTimeImmutable((string) ($context['as_of'] ?? 'now'));
+        $requirements = [];
+        foreach ($this->vehicleHealthProjectionService->forVehicle(
+            (int) $context['company_id'],
+            (int) $context['fleet_vehicle_id'],
+            $asOf,
+            false,
+        ) as $reminder) {
+            if (($reminder['reminder_code'] ?? null) !== 'tire_pressure_check'
+                || ! ($reminder['movement_relevance'] ?? false)) {
+                continue;
+            }
+            $requirements[] = $this->requirement(
+                'vehicle_health_tire_pressure',
+                (string) $reminder['title'],
+                self::PHASE_PICKUP_PREPARATION,
+                self::KIND_DERIVED,
+                self::STATUS_UNSATISFIED,
+                (bool) ($reminder['blocking'] ?? false),
+                null,
+                $reminder['observed_at'] ?? null,
+                [
+                    'type' => 'vehicle_health',
+                    'label' => (string) $reminder['action_label'],
+                    'href' => (string) $reminder['href'],
+                    'identity' => (string) $reminder['identity'],
+                ],
+            );
+        }
+
+        return $requirements;
     }
 
     /** @return array<string, mixed> */

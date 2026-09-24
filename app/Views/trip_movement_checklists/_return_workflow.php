@@ -47,6 +47,7 @@ $currentDisposition = trim((string) ($checklist['vehicle_disposition'] ?? ''));
         </ul></div>
         <?php if (($readiness['next_trip'] ?? null) !== null): ?><p class="muted">Next confirmed pickup: <?= esc((string) ($readiness['next_trip']['starts_at'] ?? 'Time not captured')) ?>. Preparation remains derived from current vehicle facts.</p><?php endif; ?>
     <?php endif; ?>
+    <p class="muted"><a class="text-link" href="/fleet/vehicles/<?= (int) $checklist['fleet_vehicle_id'] ?>#record-tire-pressure">Record tire pressure (optional)</a>. Tire checks are scheduled by vehicle policy, not by return count.</p>
 
     <?php if ($openExceptions !== []): ?>
         <div id="recovery-exceptions" class="readiness-subgroup" tabindex="-1"><h3>Recovery exceptions needing attention</h3>

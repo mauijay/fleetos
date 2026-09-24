@@ -339,6 +339,51 @@ final class OperationalCorrectnessTest extends CIUnitTestCase
         $this->assertSame('Record current Charge/Fuel percentage', $known['action']['label']);
     }
 
+    public function testTirePressureReminderAppearsOnceInPickupReadinessAndStopsBeingActionableAfterHandoff(): void
+    {
+        $health = $this->createMock(\App\Services\Fleet\VehicleHealthReminderProjectionService::class);
+        $health->expects($this->exactly(2))->method('forVehicle')->willReturn([[
+            'identity' => 'vehicle-health:1:1:tire-pressure-check',
+            'reminder_code' => 'tire_pressure_check',
+            'state' => 'attention',
+            'title' => 'Tire pressure needs attention',
+            'action_label' => 'Correct tire pressure',
+            'href' => '/fleet/vehicles/1#record-tire-pressure',
+            'observed_at' => '2026-09-23 07:00:00',
+            'movement_relevance' => true,
+            'blocking' => false,
+        ]]);
+        $context = [
+            'id' => 1, 'company_id' => 1, 'turo_trip_normalized_id' => 11, 'fleet_vehicle_id' => 1,
+            'movement_type' => 'pickup', 'active_events' => [],
+            'active_assessment' => ['energy_percent' => 80, 'cleanliness' => 'clean', 'captured_at' => '2026-09-23 07:00:00'],
+            'current_readiness_assessment' => null, 'profile' => ['ready_energy_target_percent' => 80],
+            'airport_workflow' => null, 'scheduled_location' => null, 'items_by_code' => [], 'capabilities' => [],
+            'completed_at' => null, 'readiness_status' => 'open', 'positioning_plan' => null, 'next_trip' => null,
+            'as_of' => '2026-09-23 08:00:00',
+        ];
+        $service = new MovementReadinessProjectionService(null, $health);
+
+        $before = $service->project($context);
+        $requirements = array_values(array_filter(
+            $before['requirements'],
+            static fn (array $row): bool => $row['code'] === 'vehicle_health_tire_pressure',
+        ));
+        $this->assertCount(1, $requirements);
+        $this->assertFalse($requirements[0]['blocking']);
+        $this->assertSame('vehicle_health', $requirements[0]['action']['type']);
+        $this->assertSame('/fleet/vehicles/1#record-tire-pressure', $requirements[0]['action']['href']);
+
+        $context['active_events']['actual_handoff'] = ['occurred_at' => '2026-09-23 08:05:00'];
+        $after = $service->project($context);
+        $requirement = array_values(array_filter(
+            $after['requirements'],
+            static fn (array $row): bool => $row['code'] === 'vehicle_health_tire_pressure',
+        ))[0];
+        $this->assertFalse($requirement['actionable']);
+        $this->assertNull($requirement['action']);
+    }
+
     public function testChecklistFocusPrioritizesBlockingThenSummary(): void
     {
         $focus = new ChecklistActionFocusService();

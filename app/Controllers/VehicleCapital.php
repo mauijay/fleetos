@@ -37,6 +37,11 @@ class VehicleCapital extends BaseController
             'currentReadiness' => $this->currentReadiness($companyId, $vehicleId, $asOf),
             'currentMovementHref' => $this->currentMovementHref($vehicleId, $asOf),
             'hnlGarages' => (new \App\Services\Fleet\HnlGarageCatalog())->definitions(),
+            'vehicleHealth' => $this->vehicleHealth($companyId, $vehicleId, $asOf, $workspace['vehicle']),
+            'vehicleHealthNotice' => CoreServices::session()->getFlashdata('vehicle_health_notice'),
+            'vehicleHealthErrors' => CoreServices::session()->getFlashdata('vehicle_health_errors') ?? [],
+            'vehicleHealthForm' => CoreServices::session()->getFlashdata('vehicle_health_form'),
+            'vehicleHealthData' => CoreServices::session()->getFlashdata('vehicle_health_data') ?? [],
         ]))->render('fleet_vehicles/show');
     }
 
@@ -139,6 +144,22 @@ class VehicleCapital extends BaseController
         $nextTrip = Services::nextConfirmedTripService()->forVehicle($vehicleId, $asOf);
 
         return $nextTrip === null ? null : $repository->movementChecklistHref((int) $nextTrip['id'], 'pickup');
+    }
+
+    /** @param array<string, mixed> $vehicle @return array<string, mixed> */
+    private function vehicleHealth(int $companyId, int $vehicleId, \DateTimeImmutable $asOf, array $vehicle): array
+    {
+        $observations = Services::vehicleHealthObservationRepository();
+
+        return [
+            'current_tire_pressure' => $observations->latestTirePressure($companyId, $vehicleId, $asOf->format('Y-m-d H:i:s')),
+            'current_odometer' => Services::currentVehicleOdometerResolver()->resolve($companyId, $vehicleId, $asOf),
+            'legacy_odometer' => $vehicle['odometer_miles'] ?? null,
+            'policy' => Services::vehicleHealthPolicyRepository()->tirePressurePolicy($companyId, $vehicleId),
+            'reminders' => Services::vehicleHealthReminderProjectionService()->forVehicle($companyId, $vehicleId, $asOf, true, $vehicle),
+            'history' => $observations->history($companyId, $vehicleId, null, 20),
+            'default_observed_at' => $asOf->format('Y-m-d\TH:i'),
+        ];
     }
 
     /** @return array<int, array<string, string>> */

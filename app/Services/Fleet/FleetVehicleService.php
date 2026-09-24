@@ -123,7 +123,7 @@ class FleetVehicleService
                 'purchase_date' => $this->nullable($data['purchase_date'] ?? null),
                 'in_service_date' => $this->nullable($data['in_service_date'] ?? null),
                 'out_of_service_date' => $this->nullable($data['out_of_service_date'] ?? null),
-                'odometer_miles' => $this->nullableInt($data['odometer_miles'] ?? null),
+                'odometer_miles' => null,
                 'sort_order' => (int) ($data['sort_order'] ?? $data['fleet_number']),
                 'created_at' => $now,
                 'updated_at' => $now,
@@ -195,7 +195,6 @@ class FleetVehicleService
                 'purchase_date' => $this->nullable($data['purchase_date'] ?? null),
                 'in_service_date' => $this->nullable($data['in_service_date'] ?? null),
                 'out_of_service_date' => $this->nullable($data['out_of_service_date'] ?? null),
-                'odometer_miles' => $this->nullableInt($data['odometer_miles'] ?? null),
                 'updated_at' => date('Y-m-d H:i:s'),
             ]);
 
@@ -374,11 +373,6 @@ class FleetVehicleService
         $value = trim((string) $value);
 
         return $value === '' ? null : $value;
-    }
-
-    private function nullableInt(mixed $value): ?int
-    {
-        return $this->nullable($value) === null ? null : (int) $value;
     }
 
     private function isDate(string $value): bool
