@@ -1,5 +1,53 @@
 # Changelog
 
+## v0.18.3 — Cross-Trip Custody Chronology
+
+Release date: 2026-09-23
+
+### Custody Authority
+
+- Add a shared, trip-aware current vehicle custody authority.
+- Prevent a later reservation's authoritative guest handoff from being overridden by a backfilled event belonging to an earlier reservation.
+- Keep current guest possession active until that same trip has an authoritative return or recovery transition.
+
+### Cross-Trip Chronology
+
+- Prevent prior-trip recovery and return facts from superseding a later trip merely because their stored occurrence timestamp is later.
+- Exclude canceled, invalid, voided, and superseded lifecycle facts from current custody authority.
+
+### Location Versus Custody
+
+- Treat physical vehicle position separately from possession.
+- Allow `vehicle_positioned` to describe position history without independently establishing operator possession, Ready state, or availability.
+- Keep guest-held vehicles operationally Rented without fabricating live GPS position.
+
+### Command Center and Movement Board
+
+- Derive current rented state and current-trip context from the shared custody authority.
+- Preserve future next-trip context alongside the active rental.
+- Shorten the Movement Board's visible rented badge from **Currently Rented** to **Rented** while preserving internal state codes.
+
+### Backfill Validation
+
+- Reject historical return or recovery entry when an earlier trip is assigned a return or recovery time at or after a later trip's authoritative guest handoff.
+- Continue supporting truthful historical times before the later handoff.
+
+### Recovery UX
+
+- Avoid blindly defaulting historical recovery to the current time when a later trip already establishes chronology.
+- Show useful chronology context, including scheduled return, guest-reported parked time, and a later guest handoff when applicable.
+- Preserve the convenient current-time default for contemporaneous recovery without a chronology conflict.
+
+### Live Defect Scenario
+
+- Fix the production scenario where an earlier trip's backfilled recovery incorrectly caused a vehicle already handed to the next guest to appear Ready at HNL instead of Rented.
+- Preserve historical events for audit without automatically rewriting their timestamps.
+
+### Release Boundaries
+
+- This release requires no migration, schema change, dependency change, frontend asset source change, Vite asset replacement, or production data correction.
+- Existing v0.18.2 Vite assets remain valid.
+
 ## v0.18.2 — Readiness Profile UI Polish
 
 Release date: 2026-09-23
