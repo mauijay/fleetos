@@ -433,6 +433,46 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
         $snapshot = (new FleetSnapshotService(new CurrentVehicleLocationService($this->repository), $this->repository))->forCompany(1, $asOf);
         $this->assertSame(1, array_column($snapshot['buckets'], 'count', 'code')['rented']);
         $this->assertSame(102, (int) (new NextConfirmedTripService($this->repository))->forVehicle(10, $asOf)['id']);
+
+        $plans = $this->createStub(VehiclePositioningPlanService::class);
+        $plans->method('active')->willReturn(null);
+        $board = new MovementBoardIntelligenceService(
+            $this->repository,
+            new NextConfirmedTripService($this->repository),
+            new ImportFreshnessService(),
+            new MovementStateResolver(),
+            new VehiclePositioningRecommendationService(),
+            $plans,
+            custodyService: new CurrentVehicleCustodyService($this->repository),
+        );
+        $card = $board->enrich([[
+            'fleet_vehicle_id' => 10,
+            'fleet_code' => 'Synthetic Cross-Trip Vehicle',
+            'model' => 'Synthetic EV',
+            'status' => 'in_progress',
+            'primary_status' => 'turnaround_attention',
+            'flags' => ['cleaning_required'],
+            'actions' => ['Complete turnaround'],
+            'current_position' => $location,
+        ]], $asOf)[0];
+
+        $this->assertSame('on_trip', $card['state']['code']);
+        $this->assertSame('currently_rented', $card['primary_status']);
+        $this->assertSame(101, $card['current_trip']['id']);
+        $this->assertSame('Current Guest', $card['current_trip']['guest_name']);
+        $this->assertSame(102, (int) $card['next_trip']['id']);
+        $this->assertSame('Next Guest', $card['next_trip']['guest_name']);
+        $this->assertSame('home', $card['current_position']['location_class']);
+        $this->assertNotSame('turnaround_attention', $card['state']['code']);
+        $this->assertNotSame('ready', $card['state']['code']);
+        $this->assertNotSame('airport_hnl', $card['current_position']['location_class']);
+
+        $html = \Config\Services::renderer()->setData(['vehicle' => $card])
+            ->render('fleet_command_center/components/movement_card');
+        $this->assertStringContainsString('>Rented<', $html);
+        $this->assertStringContainsString('Current Guest', $html);
+        $this->assertStringContainsString('Next Guest', $html);
+        $this->assertStringNotContainsString('Recovered — turnaround needed', $html);
     }
 
     public function testPriorTripRecoveryBackfillRejectsTimeAfterLaterHandoffAndAcceptsActualEarlierTime(): void
