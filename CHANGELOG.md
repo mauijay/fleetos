@@ -1,5 +1,90 @@
 # Changelog
 
+## v0.19.0 — Vehicle Health & Reminders
+
+Release date: 2026-09-24
+
+### Vehicle Health Foundation
+
+- Add immutable, timestamped, vehicle-scoped health observations.
+- Preserve observation source, actor, observed time, correction lineage, and void history.
+- Derive current state from authoritative observations rather than mutable vehicle fields.
+
+### Tire Pressure
+
+- Add four-wheel tire-pressure observations for LF, RF, LR, and RR using whole PSI values only.
+- Preserve recommended PSI with each observation.
+- Support vehicle policy for recommended PSI, acceptable minimum and maximum, optional safety minimum and maximum, and a recurring inspection interval.
+- Treat 42 PSI recommended and 40–44 PSI acceptable as a configured operating-policy example, not a migration default.
+- Generate **Correct tire pressure** when a value is outside the configured acceptable range.
+- Keep maintenance attention nonblocking unless an explicit safety threshold is configured and crossed; do not infer unsafe or dangerous language from ordinary maintenance bounds.
+
+### Tire-Pressure Reminders
+
+- Derive recurring tire-pressure checks from the latest valid observation plus the configured interval.
+- Restart the interval when a fresh observation is recorded.
+- Give a known out-of-range observation precedence over a routine check.
+- Emit one current tire-pressure action per vehicle instead of duplicate Check and Correct actions.
+- Distinguish **Next routine check** from **Routine check was due** in the UI.
+
+### Odometer Authority
+
+- Add timestamped authoritative odometer observations and `CurrentVehicleOdometerResolver`.
+- Keep legacy `fleet_vehicles.odometer_miles` as compatibility context only until confirmed through an authoritative observation.
+- Display legacy-only mileage as **Legacy odometer — unverified** and allow **Record current odometer** from the vehicle page.
+- Exclude missing odometer authority from fleet-wide Vehicle Health action counts.
+
+### Fleet-Wide Vehicle Health
+
+- Add the Vehicle Health & Reminders projection to the Command Center and integrate actionable health work with Today's Mission and the Operations Queue.
+- Surface actionable tire issues while suppressing healthy or upcoming items, vehicles without tire policy, inactive vehicles, and odometer setup-only reminders.
+- Use the actionable health issue in Fleet Activity instead of generic health noise where applicable.
+
+### Vehicle Health UI
+
+- Add a Vehicle Health section to the vehicle workspace showing the latest tire-pressure observation, PSI policy, authoritative or legacy odometer state, current reminders, observation history, and policy configuration.
+- Add actions to record tire pressure, record odometer, configure tire-pressure policy, and correct or void health observations.
+
+### Return and Movement Integration
+
+- Keep tire-pressure work out of routine trip checklists.
+- Surface due or abnormal tire-pressure context only in eligible preparation workflows.
+- Provide optional return pressure recording rather than a mandatory per-trip check.
+- Keep health reminders derived rather than persisted as checklist tasks.
+
+### Odometer Transition
+
+- Stop ordinary Vehicle Edit from independently establishing odometer authority.
+- Use health observations as the authoritative source while retaining legacy scalar mileage as compatibility context and cache.
+
+### Company Scope and Audit
+
+- Scope Vehicle Health reads and mutations explicitly to the company and reject cross-company access.
+- Record authenticated operator provenance for manual observations.
+- Supersede observations through corrections instead of rewriting history.
+
+### Migration
+
+- Add `2026-09-24-000026_CreateVehicleHealthObservationFoundation`.
+- Create `vehicle_health_observations`, `vehicle_tire_pressure_observations`, `vehicle_odometer_observations`, and `vehicle_health_policies`.
+- Create no observations, policies, tire-pressure defaults, acceptable or safety ranges, odometer backfill, or other business rows.
+
+### Custody Hotfix Compatibility
+
+- Retain all v0.18.3 trip-aware custody chronology behavior.
+- Prevent a prior-trip backfilled recovery from overriding a later trip's guest handoff.
+- Keep the Movement Board's visible rented status as **Rented**.
+
+### Deferred
+
+- Turo odometer ingestion remains a planned follow-on and is not included in v0.19.0.
+- This release does not add tire rotation, tread-depth tracking, tire lifecycle or tire cost per mile, cabin filters, wiper reminders, registration/safety/insurance reminders, loan-payment reminders, software-update reminders, or Tesla API/telemetry.
+
+### Release Boundaries
+
+- This release requires migration `000026`, includes a schema change and frontend source change, and requires production Vite asset replacement.
+- This release has no dependency change, business-data migration, automatic policy creation, or automatic policy seeding.
+
 ## v0.18.3 — Cross-Trip Custody Chronology
 
 Release date: 2026-09-23

@@ -6,7 +6,7 @@ use CodeIgniter\Config\BaseConfig;
 
 class App extends BaseConfig
 {
-    public string $appVersion = '0.18.3';
+    public string $appVersion = '0.19.0';
 
     public string $siteCreditEmail = 'jaycadla@gmail.com';
 
