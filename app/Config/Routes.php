@@ -44,6 +44,12 @@ $routes->group('', ['filter' => 'session'], static function (RouteCollection $ro
         $routes->post('(:num)/loans/(:num)/snapshots', 'VehicleCapital::saveSnapshot/$1/$2');
         $routes->post('(:num)/current-position', 'VehicleCurrentState::recordPosition/$1');
         $routes->post('(:num)/current-readiness', 'VehicleCurrentState::recordReadiness/$1');
+        $routes->post('(:num)/health/tire-pressure', 'VehicleHealth::recordTirePressure/$1');
+        $routes->post('(:num)/health/odometer', 'VehicleHealth::recordOdometer/$1');
+        $routes->post('(:num)/health/tire-pressure-policy', 'VehicleHealth::saveTirePressurePolicy/$1');
+        $routes->post('(:num)/health/tire-pressure-policy/disable', 'VehicleHealth::disableTirePressurePolicy/$1');
+        $routes->post('(:num)/health/observations/(:num)/correct', 'VehicleHealth::correctObservation/$1/$2');
+        $routes->post('(:num)/health/observations/(:num)/void', 'VehicleHealth::voidObservation/$1/$2');
     });
     $routes->get('operations/checklists/(:num)', 'TripMovementChecklists::show/$1', ['filter' => 'permission:admin.access']);
     $routes->get('operations/vehicles/(:num)/trip-history', 'TripMovementChecklists::vehicleTripHistory/$1', ['filter' => 'permission:admin.access']);

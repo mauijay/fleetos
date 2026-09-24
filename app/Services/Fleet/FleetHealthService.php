@@ -10,6 +10,7 @@ class FleetHealthService
     public function __construct(
         private readonly ?FleetIntelligenceRepository $repository = null,
         private readonly ?OperationalMovementWorkService $movementWorkService = null,
+        private readonly ?VehicleHealthReminderProjectionService $vehicleHealthProjectionService = null,
     ) {
     }
 
@@ -17,6 +18,11 @@ class FleetHealthService
     public function summary(?DateTimeImmutable $asOf = null): array
     {
         $asOf ??= new DateTimeImmutable();
+        $vehicleHealthReminders = [];
+        if (($this->vehicleHealthProjectionService ?? null) !== null) {
+            $work = $this->movementWorkService ?? new OperationalMovementWorkService();
+            $vehicleHealthReminders = $this->vehicleHealthReminders($work->singleActiveCompanyId($asOf), $asOf);
+        }
 
         return [
             'vehicles_needing_cleaning' => $this->vehiclesNeedingCleaning($asOf),
@@ -30,7 +36,20 @@ class FleetHealthService
             'missing_documents' => $this->missingDocuments(),
             'missing_turo_listing_data' => $this->missingTuroListingData(),
             'incomplete_vehicle_setup' => $this->incompleteVehicleSetup(),
+            'vehicle_health_reminders' => $vehicleHealthReminders,
         ];
+    }
+
+    /** @return list<array<string, mixed>> */
+    public function vehicleHealthReminders(int $companyId, ?DateTimeImmutable $asOf = null, bool $includeInactiveStates = false): array
+    {
+        // Some focused tests intentionally construct partial FleetHealthService doubles
+        // without running the constructor. Keep this additive reader optional there.
+        if (! isset($this->vehicleHealthProjectionService)) {
+            return [];
+        }
+
+        return $this->vehicleHealthProjectionService->forCompany($companyId, $asOf, $includeInactiveStates);
     }
 
     /** Returns operator-held vehicles without a later Clean observation after return. */

@@ -148,6 +148,7 @@ class FleetCommandCenterViewModelService
             $this->taskCard('Insurance Due', $today['insurance_renewals'], 'insurance', 'danger'),
             $this->taskCard('Loan Payments Due', $today['loan_payments'], 'loan', 'neutral'),
             $this->taskCard('Claims Requiring Follow-up', $today['claims'], 'claim', 'danger'),
+            $this->taskCard('Vehicle Health & Reminders', $today['vehicle_health_reminders'] ?? [], 'health', 'warning'),
         ];
     }
 
@@ -502,6 +503,7 @@ class FleetCommandCenterViewModelService
             $this->alertCard('Vehicle missing Turo listing', $health['missing_turo_listing_data'], 'neutral'),
             $this->alertCard('Missing documentation', $health['missing_documents'], 'neutral'),
             $this->alertCard('Battery below threshold', $health['vehicles_below_battery_threshold'], 'neutral'),
+            $this->alertCard('Vehicle health & reminders', $health['vehicle_health_reminders'] ?? [], 'warning'),
         ], static fn (array $alert): bool => $alert['count'] > 0));
     }
 
@@ -579,6 +581,7 @@ class FleetCommandCenterViewModelService
             'registration_renewals' => ['Registration Renewals', '/#fleet-health'],
             'insurance_renewals' => ['Insurance Renewals', '/#fleet-health'],
             'claims' => ['Claims Follow-up', '/#fleet-health'],
+            'vehicle_health_reminders' => ['Vehicle Health & Reminders', '/#fleet-health'],
         ];
 
         $actions = $this->scopedActions($tasks, $definitions);
@@ -615,6 +618,7 @@ class FleetCommandCenterViewModelService
             'registration_renewals' => ['Registration Renewals', '/#fleet-health'],
             'insurance_renewals' => ['Insurance Renewals', '/#fleet-health'],
             'battery_alerts' => ['Battery Attention', '/#fleet-health'],
+            'vehicle_health_reminders' => ['Vehicle Health & Reminders', '/#fleet-health'],
         ]);
     }
 
@@ -670,6 +674,12 @@ class FleetCommandCenterViewModelService
     private function taskPreview(array $item, string $type): string
     {
         $vehicle = (string) ($item['display_name'] ?? $item['fleet_code'] ?? $item['guest_name'] ?? $item['source_reservation_id'] ?? 'Task ready');
+
+        if ($type === 'health') {
+            $prefix = ($item['fleet_number'] ?? null) === null ? $vehicle : '#' . (int) $item['fleet_number'];
+
+            return $prefix . ' · ' . (string) ($item['action_label'] ?? $item['title'] ?? 'Review vehicle health');
+        }
 
         return $type === 'charging'
             ? $vehicle . ' — ' . (string) ($item['label'] ?? 'Review energy')
@@ -730,9 +740,20 @@ class FleetCommandCenterViewModelService
             foreach ($rows as $row) {
                 $fleetVehicleId = (int) ($row['fleet_vehicle_id'] ?? $row['id'] ?? 0);
 
-                if ($fleetVehicleId > 0) {
+                if ($fleetVehicleId > 0 && ! in_array($label, $issues[$fleetVehicleId] ?? [], true)) {
                     $issues[$fleetVehicleId][] = $label;
                 }
+            }
+        }
+
+        foreach ($health['vehicle_health_reminders'] ?? [] as $row) {
+            if (($row['reminder_code'] ?? null) === 'current_odometer') {
+                continue;
+            }
+            $fleetVehicleId = (int) ($row['fleet_vehicle_id'] ?? $row['id'] ?? 0);
+            $label = trim((string) ($row['action_label'] ?? $row['title'] ?? ''));
+            if ($fleetVehicleId > 0 && $label !== '' && ! in_array($label, $issues[$fleetVehicleId] ?? [], true)) {
+                $issues[$fleetVehicleId][] = $label;
             }
         }
 

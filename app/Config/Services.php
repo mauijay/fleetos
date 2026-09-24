@@ -25,12 +25,15 @@ use App\Repositories\TuroNormalizedTransactionRepository;
 use App\Repositories\TuroNormalizedTripRepository;
 use App\Repositories\TuroVehicleMappingIssueRepository;
 use App\Repositories\VehicleCapitalRepository;
+use App\Repositories\VehicleHealthObservationRepository;
+use App\Repositories\VehicleHealthPolicyRepository;
 use App\Repositories\VehicleTuroListingRepository;
 use App\Services\Files\PrivateEvidenceStorageService;
 use App\Services\Files\PrivateFileStorageService;
 use App\Services\Fleet\AirportMovementWorkflowService;
 use App\Services\Fleet\CurrentVehicleCustodyService;
 use App\Services\Fleet\CurrentVehicleLocationService;
+use App\Services\Fleet\CurrentVehicleOdometerResolver;
 use App\Services\Fleet\DailyOperationsDashboardService;
 use App\Services\Fleet\DecisionSupport\BusinessInsightService;
 use App\Services\Fleet\DecisionSupport\DecisionSupportDashboardService;
@@ -80,6 +83,9 @@ use App\Services\Fleet\UnknownVehicleOnboardingService;
 use App\Services\Fleet\VehicleAvailabilityService;
 use App\Services\Fleet\VehicleCapitalService;
 use App\Services\Fleet\VehicleFinancialSummaryService;
+use App\Services\Fleet\VehicleHealthObservationService;
+use App\Services\Fleet\VehicleHealthPolicyService;
+use App\Services\Fleet\VehicleHealthReminderProjectionService;
 use App\Services\Fleet\VehicleOperationalProfileService;
 use App\Services\Fleet\VehiclePositioningPlanService;
 use App\Services\Fleet\VehiclePositioningPlanWorkflowService;
@@ -337,6 +343,74 @@ class Services extends BaseService
         return new VehicleCapitalService(repository: static::vehicleCapitalRepository());
     }
 
+    public static function vehicleHealthObservationRepository(bool $getShared = true): VehicleHealthObservationRepository
+    {
+        if ($getShared) {
+            return static::getSharedInstance('vehicleHealthObservationRepository');
+        }
+
+        return new VehicleHealthObservationRepository();
+    }
+
+    public static function vehicleHealthPolicyRepository(bool $getShared = true): VehicleHealthPolicyRepository
+    {
+        if ($getShared) {
+            return static::getSharedInstance('vehicleHealthPolicyRepository');
+        }
+
+        return new VehicleHealthPolicyRepository();
+    }
+
+    public static function currentVehicleOdometerResolver(bool $getShared = true): CurrentVehicleOdometerResolver
+    {
+        if ($getShared) {
+            return static::getSharedInstance('currentVehicleOdometerResolver');
+        }
+
+        return new CurrentVehicleOdometerResolver(static::vehicleHealthObservationRepository());
+    }
+
+    public static function vehicleHealthObservationService(bool $getShared = true): VehicleHealthObservationService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('vehicleHealthObservationService');
+        }
+
+        return new VehicleHealthObservationService(
+            repository: static::vehicleHealthObservationRepository(),
+            odometerResolver: static::currentVehicleOdometerResolver(),
+            auditRepository: new AuditLogRepository(),
+            lookupRepository: new LookupRepository(),
+        );
+    }
+
+    public static function vehicleHealthPolicyService(bool $getShared = true): VehicleHealthPolicyService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('vehicleHealthPolicyService');
+        }
+
+        return new VehicleHealthPolicyService(
+            repository: static::vehicleHealthPolicyRepository(),
+            observationRepository: static::vehicleHealthObservationRepository(),
+            auditRepository: new AuditLogRepository(),
+            lookupRepository: new LookupRepository(),
+        );
+    }
+
+    public static function vehicleHealthReminderProjectionService(bool $getShared = true): VehicleHealthReminderProjectionService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('vehicleHealthReminderProjectionService');
+        }
+
+        return new VehicleHealthReminderProjectionService(
+            static::vehicleHealthObservationRepository(),
+            static::vehicleHealthPolicyRepository(),
+            static::currentVehicleOdometerResolver(),
+        );
+    }
+
     public static function unknownVehicleOnboardingService(bool $getShared = true): UnknownVehicleOnboardingService
     {
         if ($getShared) {
@@ -402,7 +476,10 @@ class Services extends BaseService
             return static::getSharedInstance('movementReadinessProjectionService');
         }
 
-        return new MovementReadinessProjectionService(static::tripEnergyRuleResolver());
+        return new MovementReadinessProjectionService(
+            static::tripEnergyRuleResolver(),
+            static::vehicleHealthReminderProjectionService(),
+        );
     }
 
     public static function movementReadinessReadService(bool $getShared = true): MovementReadinessReadService
@@ -855,7 +932,10 @@ class Services extends BaseService
             return static::getSharedInstance('fleetHealthService');
         }
 
-        return new FleetHealthService(static::fleetIntelligenceRepository());
+        return new FleetHealthService(
+            static::fleetIntelligenceRepository(),
+            vehicleHealthProjectionService: static::vehicleHealthReminderProjectionService(),
+        );
     }
 
     public static function vehicleAvailabilityService(bool $getShared = true): VehicleAvailabilityService

@@ -57,6 +57,11 @@ $currentStateNotice ??= null;
 $currentStateError ??= null;
 $currentPositionData ??= [];
 $currentReadinessData ??= [];
+$vehicleHealth ??= [];
+$vehicleHealthNotice ??= null;
+$vehicleHealthErrors ??= [];
+$vehicleHealthForm ??= null;
+$vehicleHealthData ??= [];
 ?>
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title><?= esc((string) $vehicle['fleet_code']) ?> | FleetOS</title><?php if ($assets['css'] !== null): ?><link rel="stylesheet" href="/build/<?= esc($assets['css'], 'attr') ?>"><?php endif; ?></head>
 <body class="fleet-shell"><a class="skip-link" href="#main-content">Skip to main content</a><div class="app-frame import-frame"><?= view('fleet_command_center/components/navigation', ['items' => $navigation]) ?><main id="main-content" class="command-main import-main vehicle-main" tabindex="-1">
@@ -64,9 +69,11 @@ $currentReadinessData ??= [];
 <?php if ($notice !== null): ?><section class="section import-message tone-success"><strong><?= esc($notice) ?></strong></section><?php endif; ?>
 <?php if ($errors !== []): ?><section class="section import-message tone-danger"><strong>Financial details were not saved.</strong><ul><?php foreach ($errors as $error): ?><li><?= esc($error) ?></li><?php endforeach; ?></ul></section><?php endif; ?>
 <?= view('fleet_vehicles/components/current_operations', compact('vehicle', 'currentLocation', 'currentReadiness', 'currentMovementHref', 'hnlGarages', 'currentStateNotice', 'currentStateError', 'currentPositionData', 'currentReadinessData')) ?>
-<nav class="capital-tabs" aria-label="Vehicle detail sections"><a href="#overview">Overview</a><a href="#acquisition">Acquisition</a><a href="#financing">Financing</a><a href="#performance">Financial Performance</a><a href="#documents">Notes &amp; Documents</a></nav>
+<nav class="capital-tabs" aria-label="Vehicle detail sections"><a href="#overview">Overview</a><a href="#vehicle-health">Vehicle Health</a><a href="#acquisition">Acquisition</a><a href="#financing">Financing</a><a href="#performance">Financial Performance</a><a href="#documents">Notes &amp; Documents</a></nav>
 
 <section class="section" id="overview"><div class="section-heading"><p class="eyebrow">Vehicle detail</p><h2>Overview</h2></div><dl class="issue-facts capital-facts"><div><dt>Fleet code</dt><dd><?= esc((string) $vehicle['fleet_code']) ?></dd></div><div><dt>Status</dt><dd><?= esc((string) $vehicle['status_name']) ?></dd></div><div><dt>Acquired</dt><dd><?= esc($date($vehicle['purchase_date'] ?? null)) ?></dd></div><div><dt>Funding</dt><dd><span class="status-badge tone-info"><?= esc((string) ($acquisition['funding_method_name'] ?? 'Not entered')) ?></span></dd></div><div><dt>Loan status</dt><dd><span class="status-badge tone-info"><?= esc($label($financing_state)) ?></span></dd></div><div><dt>Agreements</dt><dd><?= count($loans) ?></dd></div></dl><?= view('fleet_vehicles/components/compliance_summary', ['vehicle' => $vehicle, 'date' => $date]) ?></section>
+
+<?= view('fleet_vehicles/components/vehicle_health', ['vehicle' => $vehicle, 'vehicleHealth' => $vehicleHealth, 'notice' => $vehicleHealthNotice, 'errors' => $vehicleHealthErrors, 'form' => $vehicleHealthForm, 'formData' => $vehicleHealthData]) ?>
 
 <section class="section" id="acquisition"><div class="section-heading"><p class="eyebrow">Capital facts</p><h2>Acquisition</h2></div><p class="muted">The acquisition date is maintained on the vehicle record. Amounts below are independent recorded facts and are not inferred from one another.</p>
 <form action="/fleet/vehicles/<?= (int) $vehicle['id'] ?>/acquisition" method="post"><?= csrf_field() ?><div class="issue-filters">
