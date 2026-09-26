@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.19.1 — Future-Staging Custody Hotfix
+
+Release date: 2026-09-25
+
+### Fixed
+
+- Preserve active guest custody when a future reservation has already been staged.
+- Prevent cross-trip staging and pickup confirmation while another trip retains guest custody.
+
+### Release Boundaries
+
+- This release requires no migration, schema change, dependency change, frontend asset source change, Vite asset replacement, or production data correction.
+
 ## v0.19.0 — Vehicle Health & Reminders
 
 Release date: 2026-09-24
