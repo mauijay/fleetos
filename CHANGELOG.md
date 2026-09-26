@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.22.0 — Admin Vehicle Performance Report
+
+Release date: 2026-09-26
+
+### Added
+
+- Add an admin Vehicle Performance report showing vehicle, in-service date, month-to-date earnings, year-to-date earnings, and lifetime earnings.
+- Add company-scoped realized revenue totals using normalized Turo operating revenue.
+- Add explicit Unallocated / Unmatched reporting for valid company revenue outside the current vehicle roster.
+- Add responsive mobile presentation and allowlisted sorting across all report columns.
+
+### Changed
+
+- Provide simultaneous MTD, YTD, and lifetime realized revenue views using Honolulu reporting boundaries.
+
+### Release Boundaries
+
+- This release requires no migration or schema change.
+- Earnings are based only on realized `operating_revenue`; forecasts, projected revenue, and unsafe attribution are excluded.
+- Profitability, utilization, trip metrics, exports, and custom date ranges remain deferred.
+
 ## v0.21.0 — Vehicle Damage & Condition Ledger
 
 Release date: 2026-09-26
