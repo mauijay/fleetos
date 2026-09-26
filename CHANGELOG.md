@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.20.0 — Turo Odometer Ingestion
+
+Release date: 2026-09-25
+
+### Added
+
+- Add automatic Turo pickup and return odometer ingestion into Vehicle Health.
+- Add replay-safe immutable source identities and correction/supersession handling for imported odometer readings.
+- Add validation that prevents malformed, mismatched, cross-company, canceled-trip, and distance-only source data from becoming odometer observations.
+
+### Changed
+
+- Include imported Turo odometer observations in the existing Vehicle Health authority model alongside manual observations.
+- Use scheduled trip start and end as provenance-qualified temporal anchors because Turo does not provide separate physical odometer-reading timestamps.
+
+### Release Boundaries
+
+- This release requires no migration or schema change.
+- Historical Turo odometer backfill is not included.
+- Existing legacy `fleet_vehicles.odometer_miles` remains non-authoritative and is not updated by this release.
+
 ## v0.19.1 — Future-Staging Custody Hotfix
 
 Release date: 2026-09-25
