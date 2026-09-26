@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.21.0 — Vehicle Damage & Condition Ledger
+
+Release date: 2026-09-26
+
+### Added
+
+- Add persistent vehicle-level damage tracking for current and historical physical condition.
+- Add append-only damage lifecycle history for worsening, severity changes, accepted-unrepaired condition, repair, and other resolution.
+- Add Damage & Condition views on vehicle detail and read-only known-damage context in pickup and return workflows.
+- Add links to existing recovery exceptions, claims, vehicle files and images, and external or Turo evidence references.
+
+### Changed
+
+- Keep known unrepaired damage visible across later trips until the physical damage is repaired or otherwise resolved.
+- Preserve the original damage item and append condition history when damage worsens instead of replacing its prior condition.
+
+### Release Boundaries
+
+- This release includes migration `000027` for the Vehicle Damage Ledger.
+- Damage claims and recovery exceptions remain independent from physical repair status.
+- Unsafe damage produces an operational warning but does not automatically change vehicle availability.
+- Automated Turo photo import, image comparison, repair estimation, insurance integration, and claim automation remain deferred.
+
 ## v0.20.0 — Turo Odometer Ingestion
 
 Release date: 2026-09-25
