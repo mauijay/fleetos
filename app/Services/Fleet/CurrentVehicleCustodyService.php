@@ -127,28 +127,30 @@ class CurrentVehicleCustodyService
             return $this->unknown();
         }
 
-        uasort($byTrip, function (array $left, array $right): int {
-            return $this->compareTripChronology($left[0], $right[0]);
-        });
-        $orderedTrips = array_values($byTrip);
-        $tripEvents = $orderedTrips[count($orderedTrips) - 1];
-        usort($tripEvents, $this->compareEventChronology(...));
+        $tripStates = array_map($this->resolveTripEvents(...), array_values($byTrip));
+        $guestStates = array_values(array_filter(
+            $tripStates,
+            static fn (array $state): bool => $state['custody'] === 'guest',
+        ));
 
-        $handoffs = array_values(array_filter($tripEvents, static fn (array $event): bool => ($event['event_code'] ?? null) === 'actual_handoff'));
-        $handoff = $handoffs === [] ? null : end($handoffs);
-        if (is_array($handoff)) {
-            $basis = $handoff;
-            foreach ($tripEvents as $event) {
-                if (! in_array($event['event_code'] ?? null, ['actual_handoff', 'guest_return_staged', 'actual_return', 'vehicle_recovered'], true)) {
-                    continue;
-                }
-                if ($this->compareEventChronology($event, $handoff) >= 0
-                    && $this->compareEventChronology($event, $basis) >= 0) {
-                    $basis = $event;
-                }
-            }
+        if ($guestStates !== []) {
+            usort($guestStates, function (array $left, array $right): int {
+                $tripComparison = $this->compareTripChronology($left['basis'], $right['basis']);
+
+                return $tripComparison !== 0
+                    ? $tripComparison
+                    : $this->compareEventChronology($left['basis'], $right['basis']);
+            });
+            $basis = $guestStates[count($guestStates) - 1]['basis'];
         } else {
-            $basis = $tripEvents[count($tripEvents) - 1];
+            usort($tripStates, function (array $left, array $right): int {
+                $eventComparison = $this->compareEventChronology($left['basis'], $right['basis']);
+
+                return $eventComparison !== 0
+                    ? $eventComparison
+                    : $this->compareTripChronology($left['basis'], $right['basis']);
+            });
+            $basis = $tripStates[count($tripStates) - 1]['basis'];
         }
 
         $code = (string) ($basis['event_code'] ?? '');
@@ -166,6 +168,36 @@ class CurrentVehicleCustodyService
             'basis_event_code' => $code === '' ? null : $code,
             'occurred_at' => $basis['occurred_at'] ?? null,
             'basis_event' => $basis,
+        ];
+    }
+
+    /**
+     * @param list<array<string, mixed>> $events
+     * @return array{custody:string,basis:array<string, mixed>}
+     */
+    private function resolveTripEvents(array $events): array
+    {
+        usort($events, $this->compareEventChronology(...));
+        $handoffs = array_values(array_filter($events, static fn (array $event): bool => ($event['event_code'] ?? null) === 'actual_handoff'));
+        $handoff = $handoffs === [] ? null : end($handoffs);
+        if (is_array($handoff)) {
+            $basis = $handoff;
+            foreach ($events as $event) {
+                if (! in_array($event['event_code'] ?? null, ['actual_handoff', 'guest_return_staged', 'actual_return', 'vehicle_recovered'], true)) {
+                    continue;
+                }
+                if ($this->compareEventChronology($event, $handoff) >= 0
+                    && $this->compareEventChronology($event, $basis) >= 0) {
+                    $basis = $event;
+                }
+            }
+        } else {
+            $basis = $events[count($events) - 1];
+        }
+
+        return [
+            'custody' => in_array($basis['event_code'] ?? null, ['actual_handoff', 'guest_return_staged'], true) ? 'guest' : 'operator',
+            'basis' => $basis,
         ];
     }
 

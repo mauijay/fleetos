@@ -374,6 +374,10 @@ class MovementOperationalFactService
         if (! in_array($data['cleanliness'] ?? null, ['clean', 'dirty'], true) || ($data['energy_percent'] ?? '') === '') {
             throw new \InvalidArgumentException('Capture cleanliness and charge or fuel before staging at HNL.');
         }
+        $this->rejectOtherTripGuestPossession(
+            (int) $checklist['fleet_vehicle_id'],
+            (int) $checklist['turo_trip_normalized_id'],
+        );
         $active = $this->events->latestForTrip((int) $checklist['turo_trip_normalized_id']);
         if (in_array($active['event_code'] ?? null, ['vehicle_staged', 'actual_handoff'], true)) {
             throw new \InvalidArgumentException('This pickup is already staged or confirmed.');
@@ -612,6 +616,14 @@ class MovementOperationalFactService
         }
     }
 
+    private function rejectOtherTripGuestPossession(int $vehicleId, int $tripId): void
+    {
+        $custody = $this->custody()->resolve($vehicleId);
+        if ($custody['custody'] === 'guest' && (int) ($custody['active_trip_id'] ?? 0) !== $tripId) {
+            throw new \InvalidArgumentException('This vehicle is currently in guest possession on another trip. Record the return or recovery before staging or confirming another pickup.');
+        }
+    }
+
     private function requiredPastTimestamp(array $data, string $label): string
     {
         $value = trim((string) ($data['occurred_at'] ?? ''));
@@ -638,6 +650,10 @@ class MovementOperationalFactService
         if (($checklist['movement_type'] ?? null) !== 'pickup') {
             throw new \InvalidArgumentException('Guest pickup can only be confirmed for a pickup movement.');
         }
+        $this->rejectOtherTripGuestPossession(
+            (int) $checklist['fleet_vehicle_id'],
+            (int) $checklist['turo_trip_normalized_id'],
+        );
         $this->rejectDuplicateHandoff($checklist);
         $active = $this->events->latestForTrip((int) $checklist['turo_trip_normalized_id']);
         if (($active['event_code'] ?? null) !== 'vehicle_staged') {
@@ -651,6 +667,10 @@ class MovementOperationalFactService
 
         $this->db->transBegin();
         try {
+            $this->rejectOtherTripGuestPossession(
+                (int) $checklist['fleet_vehicle_id'],
+                (int) $checklist['turo_trip_normalized_id'],
+            );
             $this->rejectDuplicateHandoff($checklist);
             $this->events->record(
                 (int) $checklist['fleet_vehicle_id'],
@@ -751,6 +771,12 @@ class MovementOperationalFactService
 
         $this->db->transBegin();
         try {
+            if ($eventCode === 'vehicle_staged') {
+                $this->rejectOtherTripGuestPossession(
+                    (int) $checklist['fleet_vehicle_id'],
+                    (int) $checklist['turo_trip_normalized_id'],
+                );
+            }
             if ($eventCode === 'actual_handoff') {
                 $this->rejectDuplicateHandoff($checklist);
             } elseif ($eventCode === 'actual_return' && $this->events->activeForTrip((int) $checklist['turo_trip_normalized_id'], ['actual_return', 'vehicle_recovered']) !== null) {
