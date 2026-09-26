@@ -126,6 +126,9 @@ class TripMovementChecklists extends BaseController
             && in_array($tripSchedule['trip_status_code'] ?? null, ['booked', 'in_progress'], true);
         $checklistNotice = session()->getFlashdata('movement_checklist_notice');
         $checklistError = session()->getFlashdata('movement_checklist_error');
+        $vehicleDamage = ($checklist['exists'] ?? false) && $companyId > 0
+            ? Services::vehicleDamageService()->workspace($companyId, (int) $checklist['fleet_vehicle_id'])
+            : ['current' => [], 'history' => [], 'has_unsafe' => false, 'zones' => [], 'damage_types' => [], 'severities' => [], 'statuses' => []];
         return view('trip_movement_checklists/show', [
             'assets' => Services::assetManifestService()->appAssets(),
             'navigation' => $this->navigation(),
@@ -146,6 +149,14 @@ class TripMovementChecklists extends BaseController
             'returnCompleted' => $returnCompleted,
             'canRecover' => $canRecover,
             'recoveryExceptions' => $recoveryExceptions,
+            'vehicleDamage' => $vehicleDamage,
+            'availableDamageExceptions' => ($checklist['exists'] ?? false) && $companyId > 0
+                ? Services::vehicleDamageService()->availableDamageExceptions($companyId, (int) $checklist['fleet_vehicle_id'], (int) $checklist['turo_trip_normalized_id'])
+                : [],
+            'vehicleDamageNotice' => CoreServices::session()->getFlashdata('vehicle_damage_notice'),
+            'vehicleDamageErrors' => CoreServices::session()->getFlashdata('vehicle_damage_errors') ?? [],
+            'vehicleDamageForm' => CoreServices::session()->getFlashdata('vehicle_damage_form'),
+            'vehicleDamageData' => CoreServices::session()->getFlashdata('vehicle_damage_data') ?? [],
             'turnaroundWork' => $turnaroundWork,
             'correctGuestReturn' => $this->request->getGet('correct_guest_return') === '1',
             'guestReturnFormData' => CoreServices::session()->getFlashdata('guest_return_data') ?: [],

@@ -50,6 +50,11 @@ $routes->group('', ['filter' => 'session'], static function (RouteCollection $ro
         $routes->post('(:num)/health/tire-pressure-policy/disable', 'VehicleHealth::disableTirePressurePolicy/$1');
         $routes->post('(:num)/health/observations/(:num)/correct', 'VehicleHealth::correctObservation/$1/$2');
         $routes->post('(:num)/health/observations/(:num)/void', 'VehicleHealth::voidObservation/$1/$2');
+        $routes->post('(:num)/damage', 'VehicleDamage::createForVehicle/$1');
+        $routes->post('(:num)/damage/(:num)/correct', 'VehicleDamage::correct/$1/$2');
+        $routes->post('(:num)/damage/(:num)/severity', 'VehicleDamage::changeSeverity/$1/$2');
+        $routes->post('(:num)/damage/(:num)/worsen', 'VehicleDamage::worsenForVehicle/$1/$2');
+        $routes->post('(:num)/damage/(:num)/status/(:segment)', 'VehicleDamage::transition/$1/$2/$3');
     });
     $routes->get('operations/checklists/(:num)', 'TripMovementChecklists::show/$1', ['filter' => 'permission:admin.access']);
     $routes->get('operations/vehicles/(:num)/trip-history', 'TripMovementChecklists::vehicleTripHistory/$1', ['filter' => 'permission:admin.access']);
@@ -68,6 +73,8 @@ $routes->group('', ['filter' => 'session'], static function (RouteCollection $ro
     $routes->post('operations/checklists/(:num)/guest-return-staged/void', 'TripMovementChecklists::voidGuestReturn/$1', ['filter' => 'permission:admin.access']);
     $routes->post('operations/checklists/(:num)/recover-vehicle', 'TripMovementChecklists::recoverVehicle/$1', ['filter' => 'permission:admin.access']);
     $routes->post('operations/checklists/(:num)/recovery-exceptions/(:num)/resolve', 'TripMovementChecklists::resolveRecoveryException/$1/$2', ['filter' => 'permission:admin.access']);
+    $routes->post('operations/checklists/(:num)/damage', 'VehicleDamage::createForChecklist/$1', ['filter' => 'permission:admin.access']);
+    $routes->post('operations/checklists/(:num)/damage/(:num)/worsen', 'VehicleDamage::worsenForChecklist/$1/$2', ['filter' => 'permission:admin.access']);
     $routes->post('operations/checklists/(:num)/recover-vehicle/void', 'TripMovementChecklists::voidRecoveredVehicle/$1', ['filter' => 'permission:admin.access']);
     $routes->post('operations/checklists/(:num)/stage-at-hnl', 'TripMovementChecklists::stageAtHnl/$1', ['filter' => 'permission:admin.access']);
     $routes->post('operations/checklists/(:num)/confirm-guest-pickup', 'TripMovementChecklists::confirmGuestPickup/$1', ['filter' => 'permission:admin.access']);

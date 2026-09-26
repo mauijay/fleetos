@@ -62,6 +62,12 @@ $canRecordRetroactiveHandoff ??= false;
 $showRetroactiveHandoffForm ??= false;
 $retroactiveHandoffData ??= [];
 $factTarget ??= null;
+$vehicleDamage ??= ['current' => [], 'history' => [], 'has_unsafe' => false, 'zones' => [], 'damage_types' => [], 'severities' => [], 'statuses' => []];
+$availableDamageExceptions ??= [];
+$vehicleDamageNotice ??= null;
+$vehicleDamageErrors ??= [];
+$vehicleDamageForm ??= null;
+$vehicleDamageData ??= [];
 $tripFacts ??= [
     'pickup' => ($latestFacts['movement_type'] ?? $checklist['movement_type'] ?? null) === 'pickup' ? $latestFacts : null,
     'return' => ($latestFacts['movement_type'] ?? $checklist['movement_type'] ?? null) === 'return' ? $latestFacts : null,
@@ -107,6 +113,7 @@ $tripFacts ??= [
                 <?= view('trip_movement_checklists/_readiness', ['checklist' => $checklist, 'readiness' => $readiness, 'tripFacts' => $tripFacts]) ?>
             <?php endif; ?>
             <?= view('trip_movement_checklists/_guest_commitments', ['checklist' => $checklist, 'guestCommitments' => $guestCommitments ?? []]) ?>
+            <?= view('trip_movement_checklists/_known_damage', ['checklist' => $checklist, 'vehicleDamage' => $vehicleDamage, 'availableDamageExceptions' => $availableDamageExceptions, 'notice' => $vehicleDamageNotice, 'errors' => $vehicleDamageErrors, 'form' => $vehicleDamageForm, 'formData' => $vehicleDamageData]) ?>
 
             <?php if (($checklist['movement_type'] ?? null) === 'return'): ?>
                 <?php if ($canRecover): ?>

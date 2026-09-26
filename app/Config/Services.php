@@ -25,6 +25,7 @@ use App\Repositories\TuroNormalizedTransactionRepository;
 use App\Repositories\TuroNormalizedTripRepository;
 use App\Repositories\TuroVehicleMappingIssueRepository;
 use App\Repositories\VehicleCapitalRepository;
+use App\Repositories\VehicleDamageRepository;
 use App\Repositories\VehicleHealthObservationRepository;
 use App\Repositories\VehicleHealthPolicyRepository;
 use App\Repositories\VehicleTuroListingRepository;
@@ -82,6 +83,7 @@ use App\Services\Fleet\TuroAccessReimbursementService;
 use App\Services\Fleet\UnknownVehicleOnboardingService;
 use App\Services\Fleet\VehicleAvailabilityService;
 use App\Services\Fleet\VehicleCapitalService;
+use App\Services\Fleet\VehicleDamageService;
 use App\Services\Fleet\VehicleFinancialSummaryService;
 use App\Services\Fleet\VehicleHealthObservationService;
 use App\Services\Fleet\VehicleHealthPolicyService;
@@ -342,6 +344,28 @@ class Services extends BaseService
         }
 
         return new VehicleCapitalService(repository: static::vehicleCapitalRepository());
+    }
+
+    public static function vehicleDamageRepository(bool $getShared = true): VehicleDamageRepository
+    {
+        if ($getShared) {
+            return static::getSharedInstance('vehicleDamageRepository');
+        }
+
+        return new VehicleDamageRepository();
+    }
+
+    public static function vehicleDamageService(bool $getShared = true): VehicleDamageService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('vehicleDamageService');
+        }
+
+        return new VehicleDamageService(
+            repository: static::vehicleDamageRepository(),
+            auditRepository: new AuditLogRepository(),
+            lookupRepository: new LookupRepository(),
+        );
     }
 
     public static function vehicleHealthObservationRepository(bool $getShared = true): VehicleHealthObservationRepository

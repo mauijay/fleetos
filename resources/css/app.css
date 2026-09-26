@@ -5293,3 +5293,158 @@ h3 {
     width: 100%;
   }
 }
+
+.vehicle-damage-section,
+.known-damage-section,
+.damage-item-list,
+.damage-item-card,
+.damage-form-grid,
+.damage-update-grid {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.damage-context,
+.damage-action-help {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.damage-context strong,
+.damage-context span,
+.damage-evidence li {
+  overflow-wrap: anywhere;
+}
+
+.damage-context span {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.damage-link-details {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.damage-link-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  gap: 0.75rem;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.damage-link-grid > label,
+.damage-link-grid input {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.damage-summary,
+.damage-item-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.damage-item-card {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.damage-item-card h3,
+.damage-item-card p,
+.damage-history p {
+  overflow-wrap: anywhere;
+}
+
+.damage-item-unsafe {
+  border-color: var(--danger, #dc2626);
+}
+
+.damage-facts {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+}
+
+.damage-history {
+  display: grid;
+  gap: 0.75rem;
+  margin: 1rem 0;
+  padding-left: 1.25rem;
+}
+
+.damage-history li,
+.damage-history span {
+  display: block;
+}
+
+.damage-history span {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.damage-update-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
+  gap: 1rem;
+}
+
+.damage-update-grid form,
+.damage-status-actions,
+.damage-evidence {
+  display: grid;
+  gap: 0.65rem;
+  min-width: 0;
+  padding: 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 0.65rem;
+}
+
+.known-damage-section .damage-item-card > details form {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.known-damage-section .damage-item-card > details label,
+.known-damage-section .damage-item-card > details :is(select, input, textarea) {
+  display: block;
+  min-width: 0;
+  width: 100%;
+}
+
+.known-damage-section .damage-item-card > details :is(select, input, textarea) {
+  margin-top: 0.35rem;
+}
+
+.damage-status-actions form {
+  display: grid;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+@media (max-width: 44rem) {
+  .vehicle-damage-section > .section-heading,
+  .known-damage-section > .section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .known-damage-section > .section-heading .status-badge {
+    white-space: nowrap;
+  }
+
+  .damage-summary,
+  .damage-item-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .vehicle-damage-section button,
+  .known-damage-section button {
+    width: 100%;
+  }
+}

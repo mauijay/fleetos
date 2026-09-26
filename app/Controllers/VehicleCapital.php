@@ -42,6 +42,11 @@ class VehicleCapital extends BaseController
             'vehicleHealthErrors' => CoreServices::session()->getFlashdata('vehicle_health_errors') ?? [],
             'vehicleHealthForm' => CoreServices::session()->getFlashdata('vehicle_health_form'),
             'vehicleHealthData' => CoreServices::session()->getFlashdata('vehicle_health_data') ?? [],
+            'vehicleDamage' => Services::vehicleDamageService()->workspace($companyId, $vehicleId),
+            'vehicleDamageNotice' => CoreServices::session()->getFlashdata('vehicle_damage_notice'),
+            'vehicleDamageErrors' => CoreServices::session()->getFlashdata('vehicle_damage_errors') ?? [],
+            'vehicleDamageForm' => CoreServices::session()->getFlashdata('vehicle_damage_form'),
+            'vehicleDamageData' => CoreServices::session()->getFlashdata('vehicle_damage_data') ?? [],
         ]))->render('fleet_vehicles/show');
     }
 
