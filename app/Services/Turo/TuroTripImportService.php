@@ -46,6 +46,7 @@ class TuroTripImportService
         private readonly ?VehiclePositioningPlanService $positioningPlans = null,
         private readonly ?TripIncidentalReviewService $incidentalReviews = null,
         private readonly ?TripExtraFulfillmentService $extraFulfillments = null,
+        private readonly ?TuroOdometerIngestionService $odometerIngestion = null,
     ) {
         $this->db = $db ?? Database::connect();
     }
@@ -257,6 +258,10 @@ class TuroTripImportService
         }
 
         $issues = [];
+        if ($this->odometerIngestion !== null && $normalizedTrip->fleetVehicleId !== null) {
+            $odometerResult = $this->odometerIngestion->ingest((int) $upsert['id'], $rawTripId, $actorUserId);
+            $issues = $odometerResult['issues'];
+        }
         if ($normalizedTrip->fleetVehicleId === null) {
             $issues[] = new ValidationIssue('vehicle_unmatched', 'Trip imported, but no fleet vehicle could be matched. Check the Vehicle ID, Turo Vehicle ID, or Fleet Code in this row against the fleet vehicle record.', 'external_vehicle_id', 'warning');
         }

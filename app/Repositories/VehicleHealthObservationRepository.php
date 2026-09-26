@@ -161,6 +161,24 @@ class VehicleHealthObservationRepository
         return $row === null ? null : $row;
     }
 
+    /** @return list<array<string, mixed>> */
+    public function sourceVersions(
+        int $companyId,
+        int $vehicleId,
+        string $source,
+        string $observationCode,
+        string $externalIdPrefix,
+    ): array {
+        return $this->db->table('vehicle_health_observations')
+            ->where('company_id', $companyId)
+            ->where('fleet_vehicle_id', $vehicleId)
+            ->where('source', $source)
+            ->where('observation_code', $observationCode)
+            ->like('source_external_id', $externalIdPrefix, 'after')
+            ->orderBy('id', 'ASC')
+            ->get()->getResultArray();
+    }
+
     public function insertObservation(int $companyId, int $vehicleId, array $values): int
     {
         $this->db->table('vehicle_health_observations')->insert(array_merge($values, [

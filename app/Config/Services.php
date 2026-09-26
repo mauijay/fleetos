@@ -93,6 +93,7 @@ use App\Services\Fleet\VehiclePositioningRecommendationService;
 use App\Services\Turo\TuroEarningsImportService;
 use App\Services\Turo\TuroExtrasImportService;
 use App\Services\Turo\TuroImportIssueService;
+use App\Services\Turo\TuroOdometerIngestionService;
 use App\Services\Turo\TuroTransactionRelinkingService;
 use App\Services\Turo\TuroTripImportService;
 use App\Services\Turo\TuroTripReconciliationService;
@@ -869,6 +870,19 @@ class Services extends BaseService
             positioningPlans: static::vehiclePositioningPlanService(),
             incidentalReviews: static::tripIncidentalReviewService(),
             extraFulfillments: static::tripExtraFulfillmentService(),
+            odometerIngestion: static::turoOdometerIngestionService(),
+        );
+    }
+
+    public static function turoOdometerIngestionService(bool $getShared = true): TuroOdometerIngestionService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('turoOdometerIngestionService');
+        }
+
+        return new TuroOdometerIngestionService(
+            observations: static::vehicleHealthObservationService(),
+            observationRepository: static::vehicleHealthObservationRepository(),
         );
     }
 

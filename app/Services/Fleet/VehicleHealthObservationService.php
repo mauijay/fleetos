@@ -108,6 +108,86 @@ class VehicleHealthObservationService
         );
     }
 
+    /**
+     * Records an immutable imported odometer fact without treating import order as
+     * observation chronology or updating the legacy compatibility scalar.
+     *
+     * @return array{success:bool,id?:int,existing?:bool,errors:array<string,string>}
+     */
+    public function recordImportedOdometer(
+        int $companyId,
+        int $vehicleId,
+        array $data,
+        string $sourceExternalId,
+        string $sourcePayloadHash,
+        ?int $actorUserId = null,
+        ?int $supersedesObservationId = null,
+        ?DateTimeImmutable $now = null,
+    ): array {
+        $now ??= new DateTimeImmutable();
+        $errors = $this->baseErrors(
+            $companyId,
+            $vehicleId,
+            $data,
+            $actorUserId,
+            'import',
+            $sourceExternalId,
+            $sourcePayloadHash,
+            $now,
+        );
+        $odometer = filter_var($data['odometer_miles'] ?? null, FILTER_VALIDATE_INT, [
+            'options' => ['min_range' => 0, 'max_range' => 4294967295],
+        ]);
+        if ($odometer === false) {
+            $errors['odometer_miles'] = 'Enter a non-negative whole number of miles.';
+        }
+        if ($supersedesObservationId !== null) {
+            $original = $this->repo()->observation($companyId, $vehicleId, $supersedesObservationId);
+            if (
+                $original === null
+                || $original['observation_code'] !== 'odometer'
+                || $original['source'] !== 'import'
+                || $original['voided_at'] !== null
+                || $this->repo()->hasReplacement($companyId, $vehicleId, $supersedesObservationId)
+            ) {
+                $errors['supersedes_observation_id'] = 'The active imported odometer observation is not available for supersession.';
+            }
+        }
+        if ($errors !== []) {
+            return ['success' => false, 'errors' => $errors];
+        }
+        $idempotent = $this->idempotentResult($companyId, 'odometer', 'import', $sourceExternalId, $sourcePayloadHash);
+        if ($idempotent !== null) {
+            return $idempotent;
+        }
+
+        $this->db->transBegin();
+        try {
+            $id = $this->insert(
+                $companyId,
+                $vehicleId,
+                'odometer',
+                array_merge($data, ['odometer_miles' => $odometer]),
+                $actorUserId,
+                'import',
+                $sourceExternalId,
+                $sourcePayloadHash,
+                $now,
+                $supersedesObservationId,
+            );
+            if ($this->db->transStatus() === false) {
+                throw new \RuntimeException('Imported odometer observation transaction failed.');
+            }
+            $this->db->transCommit();
+
+            return ['success' => true, 'id' => $id, 'errors' => []];
+        } catch (Throwable $exception) {
+            $this->db->transRollback();
+
+            return $this->failure('database', $exception->getMessage());
+        }
+    }
+
     /** @return array{success:bool,id?:int,errors:array<string,string>} */
     public function correct(int $companyId, int $vehicleId, int $observationId, array $data, int $actorUserId, ?DateTimeImmutable $now = null): array
     {

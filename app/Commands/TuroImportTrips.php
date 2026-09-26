@@ -2,9 +2,9 @@
 
 namespace App\Commands;
 
-use App\Services\Turo\TuroTripImportService;
 use CodeIgniter\CLI\BaseCommand;
 use CodeIgniter\CLI\CLI;
+use Config\Services;
 use Throwable;
 
 class TuroImportTrips extends BaseCommand
@@ -35,7 +35,7 @@ class TuroImportTrips extends BaseCommand
         $actorUserId = $actorUserId === null ? null : (int) $actorUserId;
 
         try {
-            $result = (new TuroTripImportService())->import($filePath, $actorUserId);
+            $result = Services::turoTripImportService()->import($filePath, $actorUserId);
         } catch (Throwable $exception) {
             CLI::error($exception->getMessage());
 

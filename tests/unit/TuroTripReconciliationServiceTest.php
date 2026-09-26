@@ -10,6 +10,7 @@ use App\Services\Fleet\MovementProjectionService;
 use App\Services\Fleet\TripIncidentalReviewService;
 use App\Services\Fleet\TripMovementChecklistService;
 use App\Services\Fleet\VehiclePositioningPlanService;
+use App\Services\Turo\TuroOdometerIngestionService;
 use App\Services\Turo\TuroTripImportService;
 use App\Services\Turo\TuroTripReconciliationService;
 use CodeIgniter\Database\BaseConnection;
@@ -26,6 +27,7 @@ final class TuroTripReconciliationServiceTest extends CIUnitTestCase
     private TuroTripImportService $importer;
     private TuroTripReconciliationPositioningPlanSpy $positioningPlans;
     private TuroTripReconciliationIncidentalsSpy $incidentals;
+    private TuroTripReconciliationOdometerSpy $odometers;
 
     protected function setUp(): void
     {
@@ -43,11 +45,13 @@ final class TuroTripReconciliationServiceTest extends CIUnitTestCase
 
         $this->positioningPlans = new TuroTripReconciliationPositioningPlanSpy();
         $this->incidentals = new TuroTripReconciliationIncidentalsSpy();
+        $this->odometers = new TuroTripReconciliationOdometerSpy();
         $this->importer = new TuroTripImportService(
             $this->connection,
             movementProjection: $projection,
             positioningPlans: $this->positioningPlans,
             incidentalReviews: $this->incidentals,
+            odometerIngestion: $this->odometers,
         );
         $this->service = new TuroTripReconciliationService(
             new TuroVehicleMappingIssueRepository($this->connection),
@@ -81,6 +85,7 @@ final class TuroTripReconciliationServiceTest extends CIUnitTestCase
         $this->assertSame([[9, 'material_trip_reconciliation', null]], $this->positioningPlans->invalidations);
         $this->assertCount(1, $this->incidentals->tripIds);
         $this->assertSame((int) $trip['id'], $this->incidentals->tripIds[0]);
+        $this->assertSame([[(int) $trip['id'], (int) $trip['turo_trip_raw_id'], null]], $this->odometers->calls);
     }
 
     public function testOnlyCreatedOrMateriallyUpdatedTripInvalidatesPositioningPlan(): void
@@ -332,5 +337,22 @@ final class TuroTripReconciliationIncidentalsSpy extends TripIncidentalReviewSer
     {
         $this->tripIds[] = $tripId;
         return true;
+    }
+}
+
+final class TuroTripReconciliationOdometerSpy extends TuroOdometerIngestionService
+{
+    /** @var list<array{int,int,?int}> */
+    public array $calls = [];
+
+    public function __construct()
+    {
+    }
+
+    public function ingest(int $normalizedTripId, int $rawTripId, ?int $actorUserId = null, ?\DateTimeImmutable $now = null): array
+    {
+        $this->calls[] = [$normalizedTripId, $rawTripId, $actorUserId];
+
+        return ['created' => 0, 'existing' => 0, 'corrected' => 0, 'issues' => []];
     }
 }
