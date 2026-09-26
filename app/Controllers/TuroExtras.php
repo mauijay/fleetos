@@ -170,7 +170,7 @@ class TuroExtras extends BaseController
             ['label' => 'Extras Import', 'href' => '/turo/extras', 'active' => 'true'],
             ['label' => 'Import Issues', 'href' => '/turo/import-issues', 'active' => 'false'],
             ['label' => 'Vehicle Matching', 'href' => '/turo/vehicle-matches', 'active' => 'false'],
-            ['label' => 'Reports', 'href' => '/reports/vehicle-financial-results', 'active' => 'false'],
+            ['label' => 'Reports', 'href' => '/reports/vehicle-performance', 'active' => 'false'],
         ];
     }
 }

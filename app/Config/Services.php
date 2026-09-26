@@ -89,6 +89,7 @@ use App\Services\Fleet\VehicleHealthObservationService;
 use App\Services\Fleet\VehicleHealthPolicyService;
 use App\Services\Fleet\VehicleHealthReminderProjectionService;
 use App\Services\Fleet\VehicleOperationalProfileService;
+use App\Services\Fleet\VehiclePerformanceReportService;
 use App\Services\Fleet\VehiclePositioningPlanService;
 use App\Services\Fleet\VehiclePositioningPlanWorkflowService;
 use App\Services\Fleet\VehiclePositioningRecommendationService;
@@ -286,6 +287,18 @@ class Services extends BaseService
         return new VehicleFinancialSummaryService(
             static::financialSummaryService(),
             static::fleetVehicleRepository(),
+        );
+    }
+
+    public static function vehiclePerformanceReportService(bool $getShared = true): VehiclePerformanceReportService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('vehiclePerformanceReportService');
+        }
+
+        return new VehiclePerformanceReportService(
+            static::fleetVehicleRepository(),
+            static::turoNormalizedTransactionRepository(),
         );
     }
 

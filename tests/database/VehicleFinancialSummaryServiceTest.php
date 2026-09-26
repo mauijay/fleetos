@@ -167,7 +167,7 @@ final class VehicleFinancialSummaryServiceTest extends CIUnitTestCase
     {
         $this->connection->query('CREATE TABLE ' . $this->table('lookup_types') . ' (id INTEGER PRIMARY KEY, code VARCHAR(80))');
         $this->connection->query('CREATE TABLE ' . $this->table('lookup_values') . ' (id INTEGER PRIMARY KEY, lookup_type_id INTEGER, code VARCHAR(80), name VARCHAR(150))');
-        $this->connection->query('CREATE TABLE ' . $this->table('fleet_vehicles') . ' (id INTEGER PRIMARY KEY, company_id INTEGER, fleet_number INTEGER NULL, fleet_code VARCHAR(80), display_name VARCHAR(150), deleted_at DATETIME NULL)');
+        $this->connection->query('CREATE TABLE ' . $this->table('fleet_vehicles') . ' (id INTEGER PRIMARY KEY, company_id INTEGER, fleet_number INTEGER NULL, fleet_code VARCHAR(80), display_name VARCHAR(150), in_service_date DATE NULL, deleted_at DATETIME NULL)');
         $this->connection->query('CREATE TABLE ' . $this->table('turo_trips_normalized') . ' (id INTEGER PRIMARY KEY, fleet_vehicle_id INTEGER, trip_status_lookup_value_id INTEGER NULL, deleted_at DATETIME NULL)');
         $this->connection->query('CREATE TABLE ' . $this->table('turo_transaction_raw') . ' (id INTEGER PRIMARY KEY, raw_payload TEXT)');
         $this->connection->query('CREATE TABLE ' . $this->table('turo_transactions_normalized') . ' (id INTEGER PRIMARY KEY, turo_transaction_raw_id INTEGER NULL, turo_trip_normalized_id INTEGER NULL, fleet_vehicle_id INTEGER NULL, transaction_type VARCHAR(120), normalized_type VARCHAR(40), event_class VARCHAR(40), description VARCHAR(255) NULL, amount DECIMAL(10,2), transaction_date DATE)');

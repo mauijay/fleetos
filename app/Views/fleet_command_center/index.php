@@ -234,7 +234,7 @@
                         <p class="eyebrow">Owner View</p>
                         <h2 id="financial-heading">Financial Snapshot</h2>
                     </div>
-                    <a class="text-link" href="/reports/vehicle-financial-results">View vehicle financial results</a>
+                    <span><a class="text-link" href="/reports/vehicle-performance">View vehicle performance</a> · <a class="text-link" href="/reports/vehicle-financial-results">View vehicle financial results</a></span>
                 </div>
                 <div class="financial-grid">
                     <?php foreach ($commandCenter['financial'] as $card): ?>

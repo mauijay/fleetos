@@ -164,6 +164,40 @@ class TuroNormalizedTransactionRepository
             ->get()->getResultArray();
     }
 
+    /**
+     * Returns one realized operating-revenue aggregate per authoritatively
+     * resolved company vehicle. The same ownership and conflict rules used by
+     * financialActivityForCompany() apply here.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function operatingRevenuePerformanceForCompany(
+        int $companyId,
+        string $monthStart,
+        string $yearStart,
+        string $toDateExclusive,
+    ): array {
+        $company = $this->db->escape($companyId);
+        $month = $this->db->escape($monthStart);
+        $year = $this->db->escape($yearStart);
+
+        return $this->db->table('turo_transactions_normalized txn')
+            ->select('COALESCE(txn.fleet_vehicle_id, trip.fleet_vehicle_id) AS fleet_vehicle_id', false)
+            ->select("COALESCE(SUM(CASE WHEN txn.transaction_date >= {$month} THEN txn.amount ELSE 0 END), 0) AS mtd_earnings", false)
+            ->select("COALESCE(SUM(CASE WHEN txn.transaction_date >= {$year} THEN txn.amount ELSE 0 END), 0) AS ytd_earnings", false)
+            ->select('COALESCE(SUM(txn.amount), 0) AS lifetime_earnings', false)
+            ->select('COUNT(*) AS transaction_count', false)
+            ->join('fleet_vehicles direct_vehicle', 'direct_vehicle.id = txn.fleet_vehicle_id', 'left')
+            ->join('turo_trips_normalized trip', 'trip.id = txn.turo_trip_normalized_id', 'left')
+            ->join('fleet_vehicles trip_vehicle', 'trip_vehicle.id = trip.fleet_vehicle_id', 'left')
+            ->where('txn.event_class', 'operating_revenue')
+            ->where('txn.transaction_date <', $toDateExclusive)
+            ->where("((txn.fleet_vehicle_id IS NOT NULL AND direct_vehicle.company_id = {$company}) OR (txn.fleet_vehicle_id IS NULL AND trip_vehicle.company_id = {$company}))", null, false)
+            ->where('(txn.fleet_vehicle_id IS NULL OR trip.fleet_vehicle_id IS NULL OR txn.fleet_vehicle_id = trip.fleet_vehicle_id)', null, false)
+            ->groupBy('COALESCE(txn.fleet_vehicle_id, trip.fleet_vehicle_id)', false)
+            ->get()->getResultArray();
+    }
+
     /** @return array<int, array<string, mixed>> */
     public function operatingRevenueByVehicleInPeriod(string $fromDate, string $toDateExclusive): array
     {

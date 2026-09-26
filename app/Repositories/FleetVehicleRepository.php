@@ -34,7 +34,7 @@ class FleetVehicleRepository
     public function financialReportRoster(int $companyId): array
     {
         return $this->db->table('fleet_vehicles')
-            ->select('id, fleet_number, fleet_code, display_name')
+            ->select('id, fleet_number, fleet_code, display_name, in_service_date')
             ->where('company_id', $companyId)
             ->where('deleted_at', null)
             ->orderBy('fleet_number IS NULL', 'ASC', false)

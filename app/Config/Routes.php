@@ -145,6 +145,7 @@ $routes->group('', ['filter' => 'session'], static function (RouteCollection $ro
         $routes->get('', 'VehicleFinancialResults::index');
         $routes->get('(:num)', 'VehicleFinancialResults::show/$1');
     });
+    $routes->get('reports/vehicle-performance', 'VehiclePerformanceReports::index', ['filter' => 'permission:admin.access']);
 });
 
 service('auth')->routes($routes, ['except' => ['logout']]);

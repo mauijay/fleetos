@@ -109,7 +109,7 @@ class FleetCommandCenterViewModelService
             ['label' => 'Charging', 'href' => '#todays-mission', 'active' => 'false'],
             ['label' => 'Airport', 'href' => '/operations/airport', 'active' => 'false'],
             ['label' => 'Airport Receipts', 'href' => '/operations/airport/reimbursements', 'active' => 'false'],
-            ['label' => 'Reports', 'href' => '/reports/vehicle-financial-results', 'active' => 'false'],
+            ['label' => 'Reports', 'href' => '/reports/vehicle-performance', 'active' => 'false'],
             ['label' => 'Administration', 'href' => '#future-integrations', 'active' => 'false'],
             ['label' => 'Settings', 'href' => '#future-integrations', 'active' => 'false'],
         ];

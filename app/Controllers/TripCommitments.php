@@ -132,7 +132,7 @@ class TripCommitments extends BaseController
             ['label' => 'Vehicles', 'href' => '/fleet/vehicles', 'active' => 'false'],
             ['label' => 'Turo Import', 'href' => '/turo/imports', 'active' => 'false'],
             ['label' => 'Extras Import', 'href' => '/turo/extras', 'active' => 'false'],
-            ['label' => 'Reports', 'href' => '/reports/vehicle-financial-results', 'active' => 'false'],
+            ['label' => 'Reports', 'href' => '/reports/vehicle-performance', 'active' => 'false'],
         ];
     }
 }

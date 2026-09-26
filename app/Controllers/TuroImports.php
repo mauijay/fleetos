@@ -104,7 +104,7 @@ class TuroImports extends BaseController
             ['label' => 'Reservations', 'href' => '/#fleet-timeline', 'active' => 'false'],
             ['label' => 'Revenue', 'href' => '/#financial-snapshot', 'active' => 'false'],
             ['label' => 'Maintenance', 'href' => '/#fleet-health', 'active' => 'false'],
-            ['label' => 'Reports', 'href' => '/#executive-kpis', 'active' => 'false'],
+            ['label' => 'Reports', 'href' => '/reports/vehicle-performance', 'active' => 'false'],
         ];
     }
 

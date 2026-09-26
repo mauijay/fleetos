@@ -490,6 +490,33 @@
   color: var(--danger-text);
 }
 
+.vehicle-performance-context {
+  margin: 0 0 16px;
+}
+
+.vehicle-performance-table {
+  min-width: 780px;
+}
+
+.vehicle-performance-table tfoot th,
+.vehicle-performance-table tfoot td {
+  border-top: 2px solid var(--line);
+  padding: 14px;
+  background: var(--surface-3);
+  font-weight: 800;
+}
+
+.vehicle-performance-table .unallocated-revenue-row {
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.financial-results-header .header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .vehicle-detail-summary {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
@@ -4674,6 +4701,89 @@ h3 {
 
   .financial-table-scroll {
     scrollbar-width: thin;
+  }
+
+  .vehicle-performance-scroll {
+    overflow: visible;
+    border: 0;
+  }
+
+  .vehicle-performance-table {
+    display: block;
+    min-width: 0;
+    background: transparent;
+  }
+
+  .vehicle-performance-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .vehicle-performance-table tbody,
+  .vehicle-performance-table tfoot,
+  .vehicle-performance-table tr,
+  .vehicle-performance-table th,
+  .vehicle-performance-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .vehicle-performance-table tbody tr,
+  .vehicle-performance-table tfoot tr {
+    margin-bottom: 12px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface-2);
+  }
+
+  .vehicle-performance-table th,
+  .vehicle-performance-table td,
+  .vehicle-performance-table tfoot th,
+  .vehicle-performance-table tfoot td {
+    display: grid;
+    grid-template-columns: minmax(108px, 0.8fr) minmax(0, 1fr);
+    gap: 12px;
+    align-items: start;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line);
+    text-align: right;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .vehicle-performance-table th::before,
+  .vehicle-performance-table td::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.4;
+    text-align: left;
+    text-transform: uppercase;
+  }
+
+  .vehicle-performance-table tr > :last-child {
+    border-bottom: 0;
+  }
+
+  .vehicle-performance-table tfoot th,
+  .vehicle-performance-table tfoot td {
+    border-top: 0;
+    background: var(--surface-3);
+  }
+
+  .financial-results-header .header-actions {
+    width: 100%;
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .incidentals-main {
