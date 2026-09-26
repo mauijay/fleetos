@@ -133,14 +133,28 @@ $tripFacts ??= [
                             || (new \App\Services\Fleet\HnlGarageCatalog())->parseLegacyDetail($priorLocationDetail) === null)) {
                         $guestLocationNote = $priorLocationDetail;
                     }
+                    $recoveryTimeValue = (string) ($recoveryFormData['occurred_at'] ?? '');
+                    if ($recoveryTimeValue === '' && ! ($recoveryNeedsDeliberateTime ?? false)) {
+                        $recoveryTimeValue = date('Y-m-d\TH:i');
+                    }
                     ?>
                     <section class="section operational-facts" id="recover-vehicle-entry">
                         <div class="section-heading"><div><p class="eyebrow">Operator recovery</p><h2>Recover Vehicle</h2></div></div>
                         <p class="muted">Confirm where and when you physically recovered the vehicle. Turo's return-photo and inspection workflow remains separate.</p>
                         <?php if ($recoveryReport !== null): ?><p class="import-message tone-warning">Guest reported — unverified. The location below is a prefill only; verify or correct it before recording recovery.</p><?php endif; ?>
+                        <?php if ($recoveryNeedsDeliberateTime ?? false): ?>
+                            <div class="import-message tone-warning">
+                                <strong>Enter the actual recovery time.</strong> This is a historical return with later movement context, so FleetOS has not defaulted the time to now.
+                                <ul class="compact-list">
+                                    <?php if (! empty($recoveryChronology['scheduled_return_at'])): ?><li>Scheduled return: <?= esc(date('M j, Y g:i A', strtotime((string) $recoveryChronology['scheduled_return_at']))) ?></li><?php endif; ?>
+                                    <?php if (! empty($recoveryChronology['guest_reported_at'])): ?><li>Guest-reported parked time: <?= esc(date('M j, Y g:i A', strtotime((string) $recoveryChronology['guest_reported_at']))) ?></li><?php endif; ?>
+                                    <?php if (! empty($recoveryChronology['next_handoff_at'])): ?><li>Later guest handoff: <?= esc(date('M j, Y g:i A', strtotime((string) $recoveryChronology['next_handoff_at']))) ?></li><?php endif; ?>
+                                </ul>
+                            </div>
+                        <?php endif; ?>
                         <form class="issue-filters" action="/operations/checklists/<?= (int) $checklist['id'] ?>/recover-vehicle" method="post" data-recovery-location-form>
                             <?= csrf_field() ?>
-                            <label>Recovery time (Honolulu)<input type="datetime-local" name="occurred_at" required value="<?= esc((string) ($recoveryFormData['occurred_at'] ?? date('Y-m-d\TH:i')), 'attr') ?>"></label>
+                            <label>Recovery time (Honolulu)<input type="datetime-local" name="occurred_at" required value="<?= esc($recoveryTimeValue, 'attr') ?>"></label>
                             <label>Actual recovery location<select id="recovery-location-class" name="location_class" required data-recovery-location aria-controls="recovery-form-details" aria-expanded="<?= $hasRecoveryLocation ? 'true' : 'false' ?>"><option value="" <?= $recoveryLocation === '' ? 'selected' : '' ?>>Choose recovery location</option><?php foreach ($recoveryLocationOptions as $code => $label): ?><option value="<?= esc($code, 'attr') ?>" <?= $recoveryLocation === $code ? 'selected' : '' ?>><?= esc($label) ?></option><?php endforeach; ?></select></label>
                             <fieldset class="recovery-form-details" id="recovery-form-details" data-recovery-details <?= $hasRecoveryLocation ? '' : 'hidden disabled' ?>>
                             <fieldset class="hnl-parking-fields" data-hnl-parking data-location-select="recovery-location-class" <?= $isHnlRecovery ? '' : 'hidden disabled' ?>><legend>Verified HNL parking</legend>

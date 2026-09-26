@@ -14,6 +14,7 @@ class VehiclePositioningPlanWorkflowService
         private readonly ?VehiclePositioningRecommendationService $recommendationService = null,
         private readonly ?VehiclePositioningPlanService $planService = null,
         private readonly ?TripEnergyRuleResolver $energyRuleResolver = null,
+        private readonly ?CurrentVehicleCustodyService $custodyService = null,
     ) {
     }
 
@@ -28,7 +29,7 @@ class VehiclePositioningPlanWorkflowService
         $asOf ??= new \DateTimeImmutable();
         $timestamp = $asOf->format('Y-m-d H:i:s');
         $event = $this->repo()->latestActiveMovementEvent($vehicleId, $timestamp);
-        $lifecycleEvent = $this->repo()->latestActiveLifecycleEvent($vehicleId, $timestamp);
+        $lifecycleEvent = $this->custody()->resolve($vehicleId, $asOf)['basis_event'];
         $tripId = isset($lifecycleEvent['turo_trip_normalized_id']) ? (int) $lifecycleEvent['turo_trip_normalized_id'] : null;
         $schedule = $tripId === null ? null : $this->repo()->tripSchedule($tripId);
         $assessment = $this->repo()->assessmentForEventOrTrip(isset($lifecycleEvent['id']) ? (int) $lifecycleEvent['id'] : null, $tripId);
@@ -130,5 +131,10 @@ class VehiclePositioningPlanWorkflowService
     private function energyRules(): TripEnergyRuleResolver
     {
         return $this->energyRuleResolver ?? Services::tripEnergyRuleResolver();
+    }
+
+    private function custody(): CurrentVehicleCustodyService
+    {
+        return $this->custodyService ?? new CurrentVehicleCustodyService($this->repo());
     }
 }

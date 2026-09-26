@@ -23,6 +23,7 @@ class MovementOperationalFactService
         private readonly ?VehiclePositioningPlanService $positioningPlans = null,
         private readonly MovementIntelligence $movementConfig = new MovementIntelligence(),
         private readonly ?VehicleRecoveryExceptionRepository $recoveryExceptions = null,
+        private readonly ?CurrentVehicleCustodyService $custodyService = null,
     ) {
         $this->db = $db ?? Database::connect();
     }
@@ -40,8 +41,14 @@ class MovementOperationalFactService
         if ($eventCode === 'actual_handoff') {
             $this->rejectDuplicateHandoff($checklist);
             $this->requireEarlyHandoffConfirmation($checklist, $data);
-        } elseif ($this->events->activeForTrip((int) $checklist['turo_trip_normalized_id'], ['actual_return', 'vehicle_recovered']) !== null) {
-            throw new \InvalidArgumentException('This return is already complete. Correct or void the existing fact instead.');
+        } else {
+            if ($this->events->activeForTrip((int) $checklist['turo_trip_normalized_id'], ['actual_return', 'vehicle_recovered']) !== null) {
+                throw new \InvalidArgumentException('This return is already complete. Correct or void the existing fact instead.');
+            }
+            $occurredAt = trim((string) ($data['occurred_at'] ?? ''));
+            if ($occurredAt !== '') {
+                $this->rejectLaterHandoffConflict((int) $checklist['fleet_vehicle_id'], (int) $checklist['turo_trip_normalized_id'], $occurredAt);
+            }
         }
 
         return $this->recordObservation($checklist, $data, $actorUserId, $eventCode);
@@ -213,6 +220,7 @@ class MovementOperationalFactService
             throw new \InvalidArgumentException('Confirm the actual recovery location before recording recovery.');
         }
         $occurredAt = $this->requiredPastTimestamp($data, 'Recovery time');
+        $this->rejectLaterHandoffConflict($vehicleId, $tripId, $occurredAt);
         $locationClass = trim((string) ($data['location_class'] ?? ''));
         if (! (new LocationClassificationService())->isRecoveryLocation($locationClass)) {
             throw new \InvalidArgumentException('Choose the actual recovery location.');
@@ -267,13 +275,15 @@ class MovementOperationalFactService
 
         $this->db->transBegin();
         try {
+            $this->rejectLaterHandoffConflict($vehicleId, $tripId, $occurredAt);
             if ($this->events->activeForTrip($tripId, ['actual_return', 'vehicle_recovered']) !== null) {
                 throw new \InvalidArgumentException('This return is already complete. Correct or void the existing fact instead.');
             }
-            $custody = $this->repo()->latestActiveLifecycleEvent($vehicleId);
-            if ((int) ($custody['turo_trip_normalized_id'] ?? 0) !== $tripId
-                || ! in_array($custody['event_code'] ?? null, ['actual_handoff', 'guest_return_staged'], true)
-                || (string) $custody['occurred_at'] > (new \DateTimeImmutable($occurredAt))->format('Y-m-d H:i:s')) {
+            $custody = $this->custody()->resolve($vehicleId, new \DateTimeImmutable($occurredAt));
+            $basis = $custody['basis_event'] ?? null;
+            if ((int) ($custody['active_trip_id'] ?? 0) !== $tripId
+                || ! in_array($basis['event_code'] ?? null, ['actual_handoff', 'guest_return_staged'], true)
+                || (string) ($basis['occurred_at'] ?? '') > (new \DateTimeImmutable($occurredAt))->format('Y-m-d H:i:s')) {
                 throw new \InvalidArgumentException('This trip is not awaiting operator recovery at the selected time.');
             }
             $locationNote = trim((string) ($data['recovery_location_note'] ?? ''));
@@ -364,6 +374,10 @@ class MovementOperationalFactService
         if (! in_array($data['cleanliness'] ?? null, ['clean', 'dirty'], true) || ($data['energy_percent'] ?? '') === '') {
             throw new \InvalidArgumentException('Capture cleanliness and charge or fuel before staging at HNL.');
         }
+        $this->rejectOtherTripGuestPossession(
+            (int) $checklist['fleet_vehicle_id'],
+            (int) $checklist['turo_trip_normalized_id'],
+        );
         $active = $this->events->latestForTrip((int) $checklist['turo_trip_normalized_id']);
         if (in_array($active['event_code'] ?? null, ['vehicle_staged', 'actual_handoff'], true)) {
             throw new \InvalidArgumentException('This pickup is already staged or confirmed.');
@@ -394,6 +408,7 @@ class MovementOperationalFactService
         if (($active['event_code'] ?? null) === 'actual_handoff') {
             throw new \InvalidArgumentException('Record the actual return before recording a parked vehicle position.');
         }
+        $this->rejectGuestPossession((int) $checklist['fleet_vehicle_id']);
         if (($checklist['movement_type'] ?? null) === 'pickup' && $locationClass === 'airport_hnl') {
             throw new \InvalidArgumentException('Use Stage at HNL for an Airport HNL pickup.');
         }
@@ -596,9 +611,16 @@ class MovementOperationalFactService
 
     private function rejectGuestPossession(int $vehicleId): void
     {
-        $lifecycle = $this->repo()->latestActiveLifecycleEvent($vehicleId);
-        if (in_array($lifecycle['event_code'] ?? null, ['actual_handoff', 'guest_return_staged'], true)) {
+        if ($this->custody()->resolve($vehicleId)['custody'] === 'guest') {
             throw new \InvalidArgumentException('Record the actual return or recovery before updating current vehicle state.');
+        }
+    }
+
+    private function rejectOtherTripGuestPossession(int $vehicleId, int $tripId): void
+    {
+        $custody = $this->custody()->resolve($vehicleId);
+        if ($custody['custody'] === 'guest' && (int) ($custody['active_trip_id'] ?? 0) !== $tripId) {
+            throw new \InvalidArgumentException('This vehicle is currently in guest possession on another trip. Record the return or recovery before staging or confirming another pickup.');
         }
     }
 
@@ -628,6 +650,10 @@ class MovementOperationalFactService
         if (($checklist['movement_type'] ?? null) !== 'pickup') {
             throw new \InvalidArgumentException('Guest pickup can only be confirmed for a pickup movement.');
         }
+        $this->rejectOtherTripGuestPossession(
+            (int) $checklist['fleet_vehicle_id'],
+            (int) $checklist['turo_trip_normalized_id'],
+        );
         $this->rejectDuplicateHandoff($checklist);
         $active = $this->events->latestForTrip((int) $checklist['turo_trip_normalized_id']);
         if (($active['event_code'] ?? null) !== 'vehicle_staged') {
@@ -641,6 +667,10 @@ class MovementOperationalFactService
 
         $this->db->transBegin();
         try {
+            $this->rejectOtherTripGuestPossession(
+                (int) $checklist['fleet_vehicle_id'],
+                (int) $checklist['turo_trip_normalized_id'],
+            );
             $this->rejectDuplicateHandoff($checklist);
             $this->events->record(
                 (int) $checklist['fleet_vehicle_id'],
@@ -726,9 +756,7 @@ class MovementOperationalFactService
             throw new \InvalidArgumentException('This pickup is staged. Use the existing Confirm Guest Pickup action.');
         }
 
-        $lifecycle = $this->repo()->latestActiveLifecycleEvent($vehicleId);
-        if ($lifecycle !== null && (string) ($lifecycle['occurred_at'] ?? '') > $occurredAt
-            && (int) ($lifecycle['turo_trip_normalized_id'] ?? 0) !== $tripId) {
+        if ($this->custody()->hasLaterTripLifecycle($vehicleId, $tripId)) {
             throw new \InvalidArgumentException('A later authoritative vehicle lifecycle fact belongs to another trip. Review the trip assignment before recording handoff.');
         }
     }
@@ -743,10 +771,19 @@ class MovementOperationalFactService
 
         $this->db->transBegin();
         try {
+            if ($eventCode === 'vehicle_staged') {
+                $this->rejectOtherTripGuestPossession(
+                    (int) $checklist['fleet_vehicle_id'],
+                    (int) $checklist['turo_trip_normalized_id'],
+                );
+            }
             if ($eventCode === 'actual_handoff') {
                 $this->rejectDuplicateHandoff($checklist);
             } elseif ($eventCode === 'actual_return' && $this->events->activeForTrip((int) $checklist['turo_trip_normalized_id'], ['actual_return', 'vehicle_recovered']) !== null) {
                 throw new \InvalidArgumentException('This return is already complete. Correct or void the existing fact instead.');
+            }
+            if ($eventCode === 'actual_return') {
+                $this->rejectLaterHandoffConflict((int) $checklist['fleet_vehicle_id'], (int) $checklist['turo_trip_normalized_id'], $occurredAt);
             }
             $eventId = $this->events->record(
                 (int) $checklist['fleet_vehicle_id'],
@@ -1068,6 +1105,18 @@ class MovementOperationalFactService
     private function plans(): VehiclePositioningPlanService
     {
         return $this->positioningPlans ?? new VehiclePositioningPlanService(new \App\Repositories\OperationalFactsRepository($this->db));
+    }
+
+    private function rejectLaterHandoffConflict(int $vehicleId, int $tripId, string $occurredAt): void
+    {
+        if ($this->custody()->laterHandoffConflict($vehicleId, $tripId, $occurredAt) !== null) {
+            throw new \InvalidArgumentException('This return or recovery time conflicts with a later guest handoff already recorded for this vehicle. Enter the actual time or correct the later movement first.');
+        }
+    }
+
+    private function custody(): CurrentVehicleCustodyService
+    {
+        return $this->custodyService ?? new CurrentVehicleCustodyService($this->repo());
     }
 
     private function repo(): \App\Repositories\OperationalFactsRepository

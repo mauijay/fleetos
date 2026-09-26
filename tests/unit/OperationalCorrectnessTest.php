@@ -3,6 +3,7 @@
 use App\Repositories\FleetIntelligenceRepository;
 use App\Repositories\OperationalFactsRepository;
 use App\Services\Fleet\ChecklistActionFocusService;
+use App\Services\Fleet\CurrentVehicleCustodyService;
 use App\Services\Fleet\DailyOperationsDashboardService;
 use App\Services\Fleet\FleetCommandCenterViewModelService;
 use App\Services\Fleet\FleetHealthService;
@@ -73,7 +74,15 @@ final class OperationalCorrectnessTest extends CIUnitTestCase
             'minimum_percent' => 70, 'preferred_max_percent' => 80, 'target_percent' => null,
             'hard_max_percent' => null, 'required' => true,
         ]);
-        $work = new OperationalMovementWorkService($repo, $nextTrips, $rules);
+        $custody = $this->createStub(CurrentVehicleCustodyService::class);
+        $custody->method('forCompany')->willReturn([10 => [
+            'custody' => 'operator',
+            'basis_event' => [
+                'id' => 301, 'event_code' => 'vehicle_recovered', 'occurred_at' => '2026-09-22 06:45:00',
+                'turo_trip_normalized_id' => 691,
+            ],
+        ]]);
+        $work = new OperationalMovementWorkService($repo, $nextTrips, $rules, $custody);
 
         $sameDayNeed = $work->energyNeedsForCompany(1, new DateTimeImmutable('2026-09-22 07:00:00'))[0];
         $this->assertSame('charge_required', $sameDayNeed['condition_code']);
@@ -177,9 +186,10 @@ final class OperationalCorrectnessTest extends CIUnitTestCase
             ['turo_trip_normalized_id' => 12, 'event_code' => 'actual_return', 'created_at' => '2026-09-17 08:30:00'],
             ['turo_trip_normalized_id' => 13, 'event_code' => 'vehicle_positioned', 'created_at' => '2026-09-17 08:30:00'],
         ]);
-        $work = $this->getMockBuilder(OperationalMovementWorkService::class)->setConstructorArgs([$facts])->onlyMethods(['singleActiveCompanyId', 'energyNeedsForCompany'])->getMock();
+        $work = $this->getMockBuilder(OperationalMovementWorkService::class)->setConstructorArgs([$facts])->onlyMethods(['singleActiveCompanyId', 'energyNeedsForCompany', 'awaitingRecoveryForCompany'])->getMock();
         $work->method('singleActiveCompanyId')->willReturn(1);
         $work->method('energyNeedsForCompany')->willReturn([]);
+        $work->method('awaitingRecoveryForCompany')->willReturn([]);
         $tasks = new TaskService($repo, $health, $work);
 
         $today = $tasks->today(new DateTimeImmutable('2026-09-17 12:00:00'));
@@ -207,12 +217,22 @@ final class OperationalCorrectnessTest extends CIUnitTestCase
         $facts->method('awaitingRecoveryForCompany')->willReturn([[
             'id' => 15, 'turo_trip_normalized_id' => 71, 'fleet_vehicle_id' => 9,
             'display_name' => 'Synthetic EV', 'fleet_code' => 'Synthetic EV',
+            'fleet_label' => 'Synthetic EV',
             'event_code' => 'guest_return_staged', 'occurred_at' => '2026-09-17 18:00:00',
             'airport_garage_code' => 'international', 'airport_parking_level' => 7, 'airport_parking_row' => 'G',
         ]]);
-        $work = $this->getMockBuilder(OperationalMovementWorkService::class)->setConstructorArgs([$facts])->onlyMethods(['singleActiveCompanyId', 'energyNeedsForCompany'])->getMock();
+        $work = $this->getMockBuilder(OperationalMovementWorkService::class)->setConstructorArgs([$facts])->onlyMethods(['singleActiveCompanyId', 'energyNeedsForCompany', 'awaitingRecoveryForCompany'])->getMock();
         $work->method('singleActiveCompanyId')->willReturn(1);
         $work->method('energyNeedsForCompany')->willReturn([]);
+        $work->method('awaitingRecoveryForCompany')->willReturn([[
+            'id' => 15, 'turo_trip_normalized_id' => 71, 'fleet_vehicle_id' => 9,
+            'display_name' => 'Synthetic EV', 'fleet_code' => 'Synthetic EV',
+            'fleet_label' => 'Synthetic EV',
+            'event_code' => 'guest_return_staged', 'occurred_at' => '2026-09-17 18:00:00',
+            'airport_garage_code' => 'international', 'airport_parking_level' => 7, 'airport_parking_row' => 'G',
+            'reported_location_label' => 'Level 7 · Row G · International Garage · unverified',
+            'href' => '/operations/checklists/41#recover-vehicle-entry',
+        ]]);
         $tasks = new TaskService($schedules, $health, $work);
         $today = $tasks->today(new DateTimeImmutable('2026-09-17 20:00:00'));
         $nextDay = $tasks->today(new DateTimeImmutable('2026-09-18 08:00:00'));
@@ -299,7 +319,19 @@ final class OperationalCorrectnessTest extends CIUnitTestCase
         $repo->method('latestCleanlinessForCompany')->willReturnCallback(static function () use (&$cleanliness): array {
             return $cleanliness;
         });
-        $work = new OperationalMovementWorkService($repo);
+        $presentCustody = static function (array $event): array {
+            $eventCode = (string) ($event['event_code'] ?? '');
+
+            return [
+                'custody' => in_array($eventCode, ['actual_handoff', 'guest_return_staged'], true) ? 'guest' : 'operator',
+                'basis_event' => $event,
+            ];
+        };
+        $custodyService = $this->createStub(CurrentVehicleCustodyService::class);
+        $custodyService->method('forCompany')->willReturnCallback(static function () use (&$custody, $presentCustody): array {
+            return array_map($presentCustody, $custody);
+        });
+        $work = new OperationalMovementWorkService($repo, custodyService: $custodyService);
         $asOf = new DateTimeImmutable('2026-09-17 12:00:00');
 
         $this->assertSame([1, 2], array_column($work->cleaningNeedsForCompany(1, $asOf), 'fleet_vehicle_id'));

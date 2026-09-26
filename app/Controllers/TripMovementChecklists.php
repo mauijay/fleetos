@@ -21,6 +21,10 @@ class TripMovementChecklists extends BaseController
         $tripSchedule = ($checklist['exists'] ?? false)
             ? Services::operationalFactsRepository()->tripSchedule((int) $checklist['turo_trip_normalized_id'])
             : null;
+        $custodyState = ($checklist['exists'] ?? false)
+            ? Services::currentVehicleCustodyService()->resolve((int) $checklist['fleet_vehicle_id'])
+            : null;
+        $custody = $custodyState['basis_event'] ?? null;
         $tripIsOperational = ! ($checklist['exists'] ?? false)
             || ($tripSchedule !== null && Services::tripCommitmentService()->tripIsOperational($tripSchedule));
         $readiness = ($checklist['exists'] ?? false) && $companyId > 0
@@ -34,10 +38,9 @@ class TripMovementChecklists extends BaseController
             ? Services::movementEventService()->activeForTrip((int) $checklist['turo_trip_normalized_id'], ['guest_return_staged'])
             : null;
         $guestReturnActive = $guestReturn !== null && ($checklist['exists'] ?? false)
-            && (int) (Services::operationalFactsRepository()->latestActiveLifecycleEvent((int) $checklist['fleet_vehicle_id'])['id'] ?? 0) === (int) $guestReturn['id'];
+            && (int) ($custody['id'] ?? 0) === (int) $guestReturn['id'];
         $returnCompleted = ($checklist['exists'] ?? false) && ($checklist['movement_type'] ?? null) === 'return'
             && Services::movementEventService()->activeForTrip((int) $checklist['turo_trip_normalized_id'], ['actual_return', 'vehicle_recovered']) !== null;
-        $custody = ($checklist['exists'] ?? false) ? Services::operationalFactsRepository()->latestActiveLifecycleEvent((int) $checklist['fleet_vehicle_id']) : null;
         $canRecover = $tripIsOperational && ($checklist['movement_type'] ?? null) === 'return' && ! $returnCompleted
             && (int) ($custody['turo_trip_normalized_id'] ?? 0) === (int) ($checklist['turo_trip_normalized_id'] ?? 0)
             && in_array($custody['event_code'] ?? null, ['actual_handoff', 'guest_return_staged'], true);
@@ -110,6 +113,13 @@ class TripMovementChecklists extends BaseController
         $recoveryLocationPrefill = ($checklist['movement_type'] ?? null) === 'return'
             ? $locationClassifier->recoveryLocationFromPlannedReturn($tripSchedule['return_location_class'] ?? null)
             : null;
+        $tripContext = ($checklist['exists'] ?? false) ? Services::operationalFactsRepository()->tripContext((int) $checklist['turo_trip_normalized_id']) : null;
+        $laterHandoff = ($checklist['exists'] ?? false)
+            ? Services::currentVehicleCustodyService()->laterTripHandoff((int) $checklist['fleet_vehicle_id'], (int) $checklist['turo_trip_normalized_id'])
+            : null;
+        $nextTripStartsAt = trim((string) ($tripContext['next']['starts_at'] ?? ''));
+        $recoveryNeedsDeliberateTime = ($checklist['movement_type'] ?? null) === 'return'
+            && ($laterHandoff !== null || ($nextTripStartsAt !== '' && new \DateTimeImmutable($nextTripStartsAt) <= new \DateTimeImmutable()));
         $canRecordRetroactiveHandoff = $tripIsOperational && ($checklist['exists'] ?? false)
             && $tripFacts['pickup'] === null
             && $tripFacts['return'] === null
@@ -122,7 +132,7 @@ class TripMovementChecklists extends BaseController
             'checklist' => $checklist,
             'readiness' => $readiness,
             'currentLocation' => ($checklist['exists'] ?? false) ? Services::currentVehicleLocationService()->resolve((int) $checklist['fleet_vehicle_id']) : null,
-            'tripContext' => ($checklist['exists'] ?? false) ? Services::operationalFactsRepository()->tripContext((int) $checklist['turo_trip_normalized_id']) : null,
+            'tripContext' => $tripContext,
             'latestFacts' => $selectedFacts,
             'tripFacts' => $tripFacts,
             'tripIsOperational' => $tripIsOperational,
@@ -142,6 +152,12 @@ class TripMovementChecklists extends BaseController
             'recoveryFormData' => is_array($recoveryFormData) ? $recoveryFormData : [],
             'recoveryLocationOptions' => $recoveryLocationOptions,
             'recoveryLocationPrefill' => $recoveryLocationPrefill,
+            'recoveryNeedsDeliberateTime' => $recoveryNeedsDeliberateTime,
+            'recoveryChronology' => [
+                'scheduled_return_at' => $tripSchedule['ends_at'] ?? null,
+                'guest_reported_at' => $guestReturn['occurred_at'] ?? null,
+                'next_handoff_at' => $laterHandoff['occurred_at'] ?? null,
+            ],
             'isStagedPickup' => $isStagedPickup,
             'isPickupConfirmed' => $isPickupConfirmed,
             'pickupConfirmedAt' => $handoffRequirement['basis_at'] ?? null,

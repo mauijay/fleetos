@@ -14,6 +14,7 @@ class OperationalMovementWorkService
         private readonly ?OperationalFactsRepository $repository = null,
         private readonly ?NextConfirmedTripService $nextTripService = null,
         private readonly ?TripEnergyRuleResolver $energyRuleResolver = null,
+        private readonly ?CurrentVehicleCustodyService $custodyService = null,
     ) {
     }
 
@@ -64,6 +65,15 @@ class OperationalMovementWorkService
     /** @return list<array<string, mixed>> */
     public function awaitingRecoveryForCompany(int $companyId, DateTimeImmutable $asOf): array
     {
+        $vehicles = $this->repo()->activeFleetVehiclesForCompany($companyId, $asOf->format('Y-m-d'));
+        $custody = $this->custody()->forCompany($companyId, array_map('intval', array_column($vehicles, 'id')), $asOf);
+        $events = [];
+        foreach ($custody as $state) {
+            if (($state['basis_event_code'] ?? null) === 'guest_return_staged' && is_array($state['basis_event'] ?? null)) {
+                $events[] = $state['basis_event'];
+            }
+        }
+
         return array_map(function (array $event): array {
             $tripId = (int) $event['turo_trip_normalized_id'];
             $garage = (new HnlGarageCatalog())->presentation($event['airport_garage_code'] ?? null, $event['airport_parking_level'] ?? null, $event['airport_parking_row'] ?? null);
@@ -74,7 +84,7 @@ class OperationalMovementWorkService
                 'reported_location_label' => $garage === null ? 'HNL location unverified' : $garage['location_label'] . ' · unverified',
                 'href' => ($this->repo()->movementChecklistHref($tripId, 'return') ?? '/operations/vehicles/' . (int) $event['fleet_vehicle_id'] . '/trip-history?trip=' . $tripId) . '#recover-vehicle-entry',
             ]);
-        }, $this->repo()->awaitingRecoveryForCompany($companyId, $asOf->format('Y-m-d H:i:s')));
+        }, $events);
     }
 
     /** @return list<array<string, mixed>>
@@ -85,12 +95,12 @@ class OperationalMovementWorkService
         $vehicles = $this->repo()->activeFleetVehiclesForCompany($companyId);
         $vehicleIds = array_map('intval', array_column($vehicles, 'id'));
         $timestamp = $asOf->format('Y-m-d H:i:s');
-        $custody = $this->repo()->latestCustodyEventsForCompany($companyId, $vehicleIds, $timestamp);
+        $custody = $this->custody()->forCompany($companyId, $vehicleIds, $asOf);
         $cleanliness = $this->repo()->latestCleanlinessForCompany($companyId, $vehicleIds, $timestamp);
         $needs = [];
         foreach ($vehicles as $vehicle) {
             $id = (int) $vehicle['id'];
-            $event = $custody[$id] ?? null;
+            $event = $custody[$id]['basis_event'] ?? null;
             $assessment = $cleanliness[$id] ?? null;
             if (! in_array($event['event_code'] ?? null, ['actual_return', 'vehicle_recovered'], true)
                 || (($assessment['cleanliness'] ?? null) === 'clean'
@@ -117,12 +127,12 @@ class OperationalMovementWorkService
         $vehicles = $this->repo()->activeFleetVehiclesForCompany($companyId);
         $vehicleIds = array_map('intval', array_column($vehicles, 'id'));
         $timestamp = $asOf->format('Y-m-d H:i:s');
-        $custody = $this->repo()->latestCustodyEventsForCompany($companyId, $vehicleIds, $timestamp);
+        $custody = $this->custody()->forCompany($companyId, $vehicleIds, $asOf);
         $measurements = $this->repo()->latestEnergyForCompany($companyId, $vehicleIds, $timestamp);
         $needs = [];
         foreach ($vehicles as $vehicle) {
             $id = (int) $vehicle['id'];
-            $event = $custody[$id] ?? null;
+            $event = $custody[$id]['basis_event'] ?? null;
             if (! in_array($event['event_code'] ?? null, ['actual_return', 'vehicle_recovered'], true)) {
                 continue;
             }
@@ -197,6 +207,11 @@ class OperationalMovementWorkService
     private function energyRules(): TripEnergyRuleResolver
     {
         return $this->energyRuleResolver ?? Services::tripEnergyRuleResolver();
+    }
+
+    private function custody(): CurrentVehicleCustodyService
+    {
+        return $this->custodyService ?? new CurrentVehicleCustodyService($this->repo());
     }
 
     /** @param array<string, mixed> $rule */

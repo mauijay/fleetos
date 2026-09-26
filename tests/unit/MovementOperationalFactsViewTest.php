@@ -127,6 +127,34 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
         $this->assertStringNotContainsString('Mark Awaiting Recovery', $completed);
     }
 
+    public function testHistoricalRecoveryWithLaterMovementRequiresDeliberateTimeEntry(): void
+    {
+        $html = $this->render('return', $this->facts(), false, [], [
+            'canRecover' => true,
+            'recoveryLocationPrefill' => 'home',
+            'recoveryNeedsDeliberateTime' => true,
+            'recoveryChronology' => [
+                'scheduled_return_at' => '2026-09-22 21:00:00',
+                'guest_reported_at' => '2026-09-22 20:30:00',
+                'next_handoff_at' => '2026-09-23 08:30:00',
+            ],
+        ]);
+
+        $this->assertStringContainsString('Enter the actual recovery time.', $html);
+        $this->assertStringContainsString('Scheduled return:', $html);
+        $this->assertStringContainsString('Guest-reported parked time:', $html);
+        $this->assertStringContainsString('Later guest handoff:', $html);
+        $this->assertMatchesRegularExpression('/name="occurred_at" required value=""/', $html);
+
+        $ordinary = $this->render('return', $this->facts(), false, [], [
+            'canRecover' => true,
+            'recoveryLocationPrefill' => 'home',
+            'recoveryNeedsDeliberateTime' => false,
+        ]);
+        $this->assertDoesNotMatchRegularExpression('/name="occurred_at" required value=""/', $ordinary);
+        $this->assertStringNotContainsString('Enter the actual recovery time.', $ordinary);
+    }
+
     public function testRecoverVehicleUsesSelectedTripHomePrefillInsteadOfCurrentPosition(): void
     {
         $html = $this->render('return', $this->facts(), false, [], [

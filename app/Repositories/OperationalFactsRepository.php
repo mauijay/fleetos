@@ -71,6 +71,74 @@ class OperationalFactsRepository
             ->getResultArray();
     }
 
+    /**
+     * Active trip-scoped lifecycle facts used by the shared custody authority.
+     *
+     * @param list<int> $vehicleIds
+     * @return list<array<string, mixed>>
+     */
+    public function activeCustodyTimelineEvents(array $vehicleIds, string $asOf, ?int $companyId = null): array
+    {
+        $vehicleIds = array_values(array_unique(array_filter(array_map('intval', $vehicleIds), static fn (int $id): bool => $id > 0)));
+        if ($vehicleIds === [] || ($companyId !== null && $companyId < 1)) {
+            return [];
+        }
+
+        $builder = $this->db->table('trip_movement_events events')
+            ->select('events.*, trips.starts_at AS custody_trip_starts_at, trips.ends_at AS custody_trip_ends_at, trips.canceled_at AS custody_trip_canceled_at')
+            ->select('trip_statuses.code AS custody_trip_status_code')
+            ->select('vehicles.fleet_code, vehicles.display_name')
+            ->join('turo_trips_normalized trips', 'trips.id = events.turo_trip_normalized_id AND trips.fleet_vehicle_id = events.fleet_vehicle_id')
+            ->join('fleet_vehicles vehicles', 'vehicles.id = events.fleet_vehicle_id AND vehicles.company_id = events.company_id')
+            ->join('lookup_values trip_statuses', 'trip_statuses.id = trips.trip_status_lookup_value_id', 'left')
+            ->whereIn('events.fleet_vehicle_id', $vehicleIds)
+            ->whereIn('events.event_code', ['vehicle_staged', 'actual_handoff', 'guest_return_staged', 'actual_return', 'vehicle_recovered'])
+            ->where('events.voided_at', null)
+            ->where('trips.deleted_at', null)
+            ->where('vehicles.deleted_at', null)
+            ->where('events.occurred_at <=', $asOf);
+        if ($companyId !== null) {
+            $builder->where('events.company_id', $companyId);
+        }
+
+        return $builder
+            ->orderBy('trips.starts_at', 'ASC')
+            ->orderBy('trips.id', 'ASC')
+            ->orderBy('events.occurred_at', 'ASC')
+            ->orderBy('events.id', 'ASC')
+            ->get()
+            ->getResultArray();
+    }
+
+    /** @return array<int, array<string, mixed>> keyed by fleet vehicle id */
+    public function latestLocationEventsForCompany(int $companyId, array $vehicleIds, string $asOf): array
+    {
+        $vehicleIds = array_values(array_unique(array_filter(array_map('intval', $vehicleIds), static fn (int $id): bool => $id > 0)));
+        if ($companyId < 1 || $vehicleIds === []) {
+            return [];
+        }
+
+        $rows = $this->db->table('trip_movement_events events')
+            ->select('events.*')
+            ->join('fleet_vehicles vehicles', 'vehicles.id = events.fleet_vehicle_id AND vehicles.company_id = events.company_id')
+            ->where('events.company_id', $companyId)
+            ->whereIn('events.fleet_vehicle_id', $vehicleIds)
+            ->where('events.location_class IS NOT NULL')
+            ->where('events.voided_at', null)
+            ->where('events.occurred_at <=', $asOf)
+            ->orderBy('events.occurred_at', 'DESC')
+            ->orderBy('events.id', 'DESC')
+            ->get()
+            ->getResultArray();
+
+        $latest = [];
+        foreach ($rows as $row) {
+            $latest[(int) $row['fleet_vehicle_id']] ??= $this->normalizeMovementEvent($row);
+        }
+
+        return $latest;
+    }
+
     /** @return array<int, array<string, mixed>> keyed by fleet vehicle id */
     public function latestCurrentStateEventsForCompany(int $companyId, array $vehicleIds, string $asOf): array
     {
