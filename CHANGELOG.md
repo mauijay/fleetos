@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.23.1 — Movement Integrity Hotfix
+
+Release date: 2026-09-27
+
+### Fixed
+
+- Resolve competing guest-custody states by authoritative movement-event chronology before reservation schedule.
+- Prevent stale historical staging from remaining actionable after later vehicle lifecycle activity.
+- Apply shared cross-trip possession guards to all live handoff paths.
+- Allow audited correction, relinking, or voiding of event-only movement facts.
+- Add an audited historical handoff path for in-progress trips missing an authoritative pickup record.
+- Surface movement-data conflicts on the Movement Board and affected checklist views.
+
+### Release Boundaries
+
+- This release requires no migration or schema change.
+- Existing operational facts are not rewritten automatically by deployment.
+- Known production movement-data repair is not included in deployment and remains separately authorized.
+
 ## v0.23.0 — Supercharger Reimbursement Reconciliation
 
 Release date: 2026-09-26
