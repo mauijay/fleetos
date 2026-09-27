@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.23.0 — Supercharger Reimbursement Reconciliation
+
+Release date: 2026-09-26
+
+### Added
+
+- Add Tesla Supercharger history import with replay-safe source provenance and line-item detail.
+- Add custody-based matching of Tesla charging costs to Turo trips.
+- Add trip-level reconciliation of eligible Tesla charging costs against Turo On-trip EV charging.
+- Add workflow tracking for reimbursement submission, waiver, and no-invoice-needed decisions.
+- Add operations views for attention, reconciled, host-expense, review, and all charging cases.
+
+### Changed
+
+- Normalize Turo On-trip and Post-trip EV charging separately.
+- Preserve Tesla charging, congestion, and idle-fee detail while continuing to use `charging_sessions` as the single charging-expense authority.
+- Treat charging outside authoritative guest custody as host expense or review rather than automatically assigning it to a reservation.
+
+### Release Boundaries
+
+- This release includes migration `000028`.
+- Post-trip EV charging remains a separate low-return-SOC workflow and is not part of Tesla Supercharger reimbursement matching.
+- Historical Tesla reconciliation and backfill are not included in deployment.
+- Automatic Turo invoice submission, Tesla API integration, reimbursement deadlines, and payment collection remain deferred.
+
 ## v0.22.0 — Admin Vehicle Performance Report
 
 Release date: 2026-09-26
