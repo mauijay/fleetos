@@ -68,7 +68,8 @@ class MovementBoardIntelligenceService
     {
         $vehicleId = (int) ($card['fleet_vehicle_id'] ?? 0);
         $event = $this->repo()->latestActiveMovementEvent($vehicleId, $asOf->format('Y-m-d H:i:s'));
-        $latestLifecycleEvent = ($custodyState ?? $this->custody()->resolve($vehicleId, $asOf))['basis_event'] ?? null;
+        $custodyState ??= $this->custody()->resolve($vehicleId, $asOf);
+        $latestLifecycleEvent = $custodyState['basis_event'] ?? null;
         $commitment = $this->activeOperationalCommitment($latestLifecycleEvent, $card, $asOf);
         $lifecycleEvent = $commitment['event'];
         $awaitingRecovery = ($lifecycleEvent['event_code'] ?? null) === 'guest_return_staged';
@@ -249,6 +250,12 @@ class MovementBoardIntelligenceService
                 'preview' => $guestCommitmentPreview,
                 'required' => array_any($guestCommitments, static fn (array $row): bool => (bool) ($row['is_blocking'] ?? false)),
                 'href' => $commitmentTripId > 0 ? '/operations/trips/' . $commitmentTripId . '/commitments' : null,
+            ],
+            'movement_integrity' => [
+                'has_conflict' => (bool) ($custodyState['integrity_conflict'] ?? false),
+                'basis_trip_id' => $custodyState['basis_trip_id'] ?? null,
+                'basis_event_id' => $custodyState['basis_event_id'] ?? null,
+                'guest_states' => $custodyState['conflicting_guest_states'] ?? [],
             ],
         ]);
     }

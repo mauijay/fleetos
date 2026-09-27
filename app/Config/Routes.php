@@ -81,6 +81,7 @@ $routes->group('', ['filter' => 'session'], static function (RouteCollection $ro
     $routes->post('operations/checklists/(:num)/vehicle-position', 'TripMovementChecklists::recordVehiclePosition/$1', ['filter' => 'permission:admin.access']);
     $routes->post('operations/checklists/(:num)/facts/correct', 'TripMovementChecklists::correctFacts/$1', ['filter' => 'permission:admin.access']);
     $routes->post('operations/checklists/(:num)/facts/repair-trip', 'TripMovementChecklists::repairWrongTrip/$1', ['filter' => 'permission:admin.access']);
+    $routes->post('operations/checklists/(:num)/facts/void', 'TripMovementChecklists::voidInvalidFact/$1', ['filter' => 'permission:admin.access']);
     $routes->post('operations/checklists/(:num)/complete', 'TripMovementChecklists::complete/$1', ['filter' => 'permission:admin.access']);
     $routes->post('operations/checklists/(:num)/reopen', 'TripMovementChecklists::reopen/$1', ['filter' => 'permission:admin.access']);
     $routes->post('operations/checklist-items/(:num)/complete', 'TripMovementChecklists::completeItem/$1', ['filter' => 'permission:admin.access']);

@@ -559,6 +559,68 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
         $this->assertNotSame('Confirm Guest Pickup', $card['action']['label'] ?? null);
     }
 
+    public function testLaterGuestReturnStageControlsBoardUntilOlderFarFutureHandoffIsAuditedVoided(): void
+    {
+        $this->connection->table('lookup_values')->insertBatch([
+            ['id' => 31, 'code' => 'in_progress'],
+            ['id' => 32, 'code' => 'booked'],
+        ]);
+        $this->connection->table('turo_trips_normalized')->where('id', 100)->update([
+            'trip_status_lookup_value_id' => 31,
+            'guest_name' => 'Current Guest',
+            'starts_at' => '2026-09-19 23:00:00',
+            'ends_at' => '2026-09-26 17:00:00',
+        ]);
+        $this->connection->table('turo_trips_normalized')->insertBatch([
+            ['id' => 101, 'fleet_vehicle_id' => 10, 'trip_status_lookup_value_id' => 32, 'guest_name' => 'Far Future Guest', 'starts_at' => '2026-10-07 10:00:00', 'ends_at' => '2026-10-13 10:00:00', 'deleted_at' => null],
+            ['id' => 102, 'fleet_vehicle_id' => 10, 'trip_status_lookup_value_id' => 32, 'guest_name' => 'Next Guest', 'starts_at' => '2026-09-27 10:00:00', 'ends_at' => '2026-09-29 10:00:00', 'deleted_at' => null],
+        ]);
+        $badHandoffId = $this->events->record(10, 101, 'actual_handoff', 'pickup', '2026-09-19 21:05:00', 'airport_hnl', null, 'checklist_operator', 7);
+        $this->events->record(10, 100, 'actual_handoff', 'pickup', '2026-09-19 23:15:00', 'home', null, 'checklist_operator', 7);
+        $returnStageId = $this->events->record(10, 100, 'guest_return_staged', 'return', '2026-09-26 17:00:00', 'airport_hnl', null, 'guest_report_received', 7);
+        $asOf = new DateTimeImmutable('2026-09-26 18:00:00');
+        $custodyService = new CurrentVehicleCustodyService($this->repository);
+
+        $custody = $custodyService->resolve(10, $asOf);
+        $this->assertSame('guest', $custody['custody']);
+        $this->assertSame(100, $custody['active_trip_id']);
+        $this->assertSame($returnStageId, $custody['basis_event_id']);
+        $this->assertTrue($custody['integrity_conflict']);
+        $this->assertSame([101, 100], array_column($custody['conflicting_guest_states'], 'trip_id'));
+
+        $plans = $this->createStub(VehiclePositioningPlanService::class);
+        $plans->method('active')->willReturn(null);
+        $board = new MovementBoardIntelligenceService(
+            $this->repository,
+            new NextConfirmedTripService($this->repository, custodyService: $custodyService),
+            new ImportFreshnessService(),
+            new MovementStateResolver(),
+            new VehiclePositioningRecommendationService(),
+            $plans,
+            custodyService: $custodyService,
+        );
+        $card = $board->enrich([['fleet_vehicle_id' => 10, 'fleet_code' => 'Synthetic Conflict Vehicle', 'status' => 'in_progress', 'flags' => [], 'actions' => []]], $asOf, 1)[0];
+        $this->assertSame('awaiting_recovery', $card['state']['code']);
+        $this->assertSame(100, $card['current_trip']['id']);
+        $this->assertSame(102, (int) $card['next_trip']['id']);
+        $this->assertTrue($card['movement_integrity']['has_conflict']);
+        $this->assertContains('Recover Vehicle', $card['actions']);
+
+        $repair = new MovementOperationalFactService($this->connection, $this->events, $this->assessments);
+        $this->assertTrue($repair->voidInvalidFact([
+            'exists' => true,
+            'company_id' => 1,
+            'fleet_vehicle_id' => 10,
+            'turo_trip_normalized_id' => 101,
+            'movement_type' => 'pickup',
+        ], ['event_id' => $badHandoffId, 'void_reason' => 'Synthetic wrong-trip event.'], 8));
+
+        $after = $custodyService->resolve(10, $asOf);
+        $this->assertFalse($after['integrity_conflict']);
+        $this->assertSame($returnStageId, $after['basis_event_id']);
+        $this->assertNotNull($this->repository->event($badHandoffId)['voided_at']);
+    }
+
     public function testStagingAnotherTripIsRejectedWhileVehicleIsGuestHeld(): void
     {
         $this->seedConflictingCurrentAndFutureTrips();
@@ -597,11 +659,62 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
             $service->confirmGuestPickup($checklist, ['occurred_at' => '2026-09-24 09:00:00'], 7);
             $this->fail('Future-trip handoff confirmation must be rejected while another trip has guest possession.');
         } catch (InvalidArgumentException $exception) {
-            $this->assertStringContainsString('guest possession on another trip', $exception->getMessage());
+            $this->assertStringContainsString('staging fact is historical', $exception->getMessage());
         }
 
         $this->assertNull($this->events->activeForTrip(101, ['actual_handoff']));
         $this->assertNotNull($this->events->activeForTrip(101, ['vehicle_staged']));
+    }
+
+    public function testDirectHandoffIsRejectedWhileAnotherTripHasGuestPossession(): void
+    {
+        $this->seedConflictingCurrentAndFutureTrips();
+        $this->events->record(10, 100, 'actual_handoff', 'pickup', '2026-09-23 08:30:00', 'home', null, 'checklist_operator', 7);
+        $service = new MovementOperationalFactService($this->connection, $this->events, $this->assessments);
+        $checklist = ['exists' => true, 'movement_type' => 'pickup', 'company_id' => 1, 'fleet_vehicle_id' => 10, 'turo_trip_normalized_id' => 101];
+
+        try {
+            $service->recordForChecklist($checklist, ['occurred_at' => '2026-09-24 09:00:00', 'location_class' => 'home'], 7);
+            $this->fail('Direct handoff must be rejected while another trip has guest possession.');
+        } catch (InvalidArgumentException $exception) {
+            $this->assertStringContainsString('guest possession on another trip', $exception->getMessage());
+        }
+
+        $this->assertNull($this->events->activeForTrip(101, ['actual_handoff']));
+    }
+
+    public function testDirectHandoffRechecksPossessionInsideTransaction(): void
+    {
+        $custody = $this->createMock(CurrentVehicleCustodyService::class);
+        $custody->expects($this->exactly(2))->method('resolve')->willReturnOnConsecutiveCalls(
+            ['custody' => 'operator', 'active_trip_id' => null],
+            ['custody' => 'guest', 'active_trip_id' => 999],
+        );
+        $custody->method('laterOtherTripLifecycle')->willReturn(null);
+        $service = new MovementOperationalFactService($this->connection, $this->events, $this->assessments, custodyService: $custody);
+        $checklist = ['exists' => true, 'movement_type' => 'pickup', 'company_id' => 1, 'fleet_vehicle_id' => 10, 'turo_trip_normalized_id' => 100];
+
+        try {
+            $service->recordForChecklist($checklist, ['occurred_at' => '2026-09-24 09:00:00', 'location_class' => 'home'], 7);
+            $this->fail('Transaction-time custody conflict must be rejected.');
+        } catch (InvalidArgumentException $exception) {
+            $this->assertStringContainsString('guest possession on another trip', $exception->getMessage());
+        }
+
+        $this->assertSame(0, $this->connection->table('trip_movement_events')->countAllResults());
+        $this->assertSame(0, $this->connection->table('movement_assessments')->countAllResults());
+    }
+
+    public function testDirectHandoffIsAllowedAfterPriorGuestCustodyEnds(): void
+    {
+        $this->seedConflictingCurrentAndFutureTrips();
+        $this->events->record(10, 100, 'actual_handoff', 'pickup', '2026-09-23 08:30:00', 'home', null, 'checklist_operator', 7);
+        $this->events->record(10, 100, 'vehicle_recovered', 'return', '2026-09-24 08:30:00', 'home', null, 'checklist_operator', 7);
+        $service = new MovementOperationalFactService($this->connection, $this->events, $this->assessments);
+        $checklist = ['exists' => true, 'movement_type' => 'pickup', 'company_id' => 1, 'fleet_vehicle_id' => 10, 'turo_trip_normalized_id' => 101, 'scheduled_at' => '2026-09-30 13:00:00'];
+
+        $this->assertTrue($service->recordForChecklist($checklist, ['occurred_at' => '2026-09-24 09:00:00', 'location_class' => 'home', 'confirm_early_handoff' => '1'], 7));
+        $this->assertSame('actual_handoff', $this->events->activeForTrip(101, ['actual_handoff'])['event_code']);
     }
 
     public function testPositioningAnotherTripIsRejectedWhileVehicleIsGuestHeld(): void
@@ -1625,6 +1738,107 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
         $service->repairWrongTrip($checklist, ['event_id' => $event['id'], 'assessment_id' => $assessment['id'], 'target_trip_id' => 101, 'repair_reason' => 'Wrong reservation.'], 8);
     }
 
+    public function testEventOnlyWrongTripHandoffCanBeRelinkedWithAuditHistory(): void
+    {
+        $this->connection->table('turo_trips_normalized')->where('id', 100)->update(['starts_at' => '2026-09-03 08:00:00']);
+        $this->connection->table('turo_trips_normalized')->insert(['id' => 101, 'fleet_vehicle_id' => 10, 'starts_at' => '2026-09-03 09:00:00', 'ends_at' => '2026-09-04 09:00:00', 'deleted_at' => null]);
+        $eventId = $this->events->record(10, 100, 'actual_handoff', 'pickup', '2026-09-03 09:02:00', 'home', null, 'checklist_operator', 7);
+        $service = new MovementOperationalFactService($this->connection, $this->events, $this->assessments);
+        $checklist = ['exists' => true, 'company_id' => 1, 'fleet_vehicle_id' => 10, 'turo_trip_normalized_id' => 100, 'movement_type' => 'pickup'];
+
+        $this->assertSame([101], array_map(static fn (array $trip): int => (int) $trip['id'], $service->wrongTripCandidates($checklist, $eventId)));
+        $this->assertTrue($service->repairWrongTrip($checklist, [
+            'event_id' => $eventId,
+            'assessment_id' => 0,
+            'target_trip_id' => 101,
+            'repair_reason' => 'Selected the adjacent reservation.',
+        ], 8));
+
+        $original = $this->repository->event($eventId);
+        $replacement = $this->repository->latestActiveEventForTrip(101);
+        $this->assertNotNull($original['voided_at']);
+        $this->assertSame('actual_handoff', $replacement['event_code']);
+        $this->assertSame($eventId, (int) $replacement['supersedes_event_id']);
+        $this->assertNull($this->repository->assessmentForEventOrTrip((int) $replacement['id'], 101));
+        $this->assertSame(1, $this->connection->table('operational_fact_audits')->where(['table_name' => 'trip_movement_events', 'action' => 'superseded', 'actor_user_id' => 8])->countAllResults());
+    }
+
+    public function testEventOnlyInvalidHandoffCanBeVoidedAndImmediatelyLeavesCustodyAuthority(): void
+    {
+        $eventId = $this->events->record(10, 100, 'actual_handoff', 'pickup', '2026-09-03 09:02:00', 'home', null, 'checklist_operator', 7);
+        $service = new MovementOperationalFactService($this->connection, $this->events, $this->assessments);
+        $checklist = ['exists' => true, 'company_id' => 1, 'fleet_vehicle_id' => 10, 'turo_trip_normalized_id' => 100, 'movement_type' => 'pickup'];
+        $this->assertSame('guest', (new CurrentVehicleCustodyService($this->repository))->resolve(10, new DateTimeImmutable('2026-09-03 10:00:00'))['custody']);
+
+        try {
+            $service->voidInvalidFact($checklist, ['event_id' => $eventId], 8);
+            $this->fail('Expected a reason to be required.');
+        } catch (InvalidArgumentException $exception) {
+            $this->assertStringContainsString('reason is required', $exception->getMessage());
+        }
+        $this->assertTrue($service->voidInvalidFact($checklist, [
+            'event_id' => $eventId,
+            'assessment_id' => 0,
+            'void_reason' => 'The handoff was recorded on the wrong future reservation.',
+        ], 8));
+
+        $original = $this->repository->event($eventId);
+        $this->assertNotNull($original['voided_at']);
+        $this->assertSame(8, (int) $original['voided_by_user_id']);
+        $this->assertStringContainsString('wrong future reservation', (string) $original['void_reason']);
+        $this->assertNull($this->repository->latestActiveEventForTrip(100));
+        $this->assertSame('unknown', (new CurrentVehicleCustodyService($this->repository))->resolve(10, new DateTimeImmutable('2026-09-03 10:00:00'))['custody']);
+        $this->assertSame(1, $this->connection->table('operational_fact_audits')->where(['table_name' => 'trip_movement_events', 'action' => 'voided', 'actor_user_id' => 8])->countAllResults());
+    }
+
+    public function testEventOnlyRelinkRejectsConflictingTargetAndCrossCompanyContext(): void
+    {
+        $this->connection->table('turo_trips_normalized')->where('id', 100)->update(['starts_at' => '2026-09-03 08:00:00']);
+        $this->connection->table('turo_trips_normalized')->insert(['id' => 101, 'fleet_vehicle_id' => 10, 'starts_at' => '2026-09-03 09:00:00', 'ends_at' => '2026-09-04 09:00:00', 'deleted_at' => null]);
+        $eventId = $this->events->record(10, 100, 'actual_handoff', 'pickup', '2026-09-03 09:02:00', 'home', null, 'checklist_operator', 7);
+        $this->events->record(10, 101, 'actual_handoff', 'pickup', '2026-09-03 09:01:00', 'home', null, 'checklist_operator', 7);
+        $service = new MovementOperationalFactService($this->connection, $this->events, $this->assessments);
+        $checklist = ['exists' => true, 'company_id' => 1, 'fleet_vehicle_id' => 10, 'turo_trip_normalized_id' => 100, 'movement_type' => 'pickup'];
+
+        $this->assertSame([], $service->wrongTripCandidates($checklist, $eventId));
+        try {
+            $service->repairWrongTrip($checklist, ['event_id' => $eventId, 'assessment_id' => 0, 'target_trip_id' => 101, 'repair_reason' => 'Wrong reservation.'], 8);
+            $this->fail('A conflicting target must be rejected.');
+        } catch (InvalidArgumentException $exception) {
+            $this->assertStringContainsString('already has an active guest handoff', $exception->getMessage());
+        }
+
+        $checklist['company_id'] = 2;
+        try {
+            $service->repairWrongTrip($checklist, ['event_id' => $eventId, 'assessment_id' => 0, 'target_trip_id' => 101, 'repair_reason' => 'Forged company.'], 8);
+            $this->fail('Cross-company repair must be rejected.');
+        } catch (InvalidArgumentException $exception) {
+            $this->assertStringContainsString('do not belong', $exception->getMessage());
+        }
+
+        $this->assertNull($this->repository->event($eventId)['voided_at']);
+    }
+
+    public function testInvalidFactVoidRejectsCrossCompanyAndWrongVehicleContext(): void
+    {
+        $eventId = $this->events->record(10, 100, 'actual_handoff', 'pickup', '2026-09-03 09:02:00', 'home', null, 'checklist_operator', 7);
+        $service = new MovementOperationalFactService($this->connection, $this->events, $this->assessments);
+
+        foreach ([
+            ['exists' => true, 'company_id' => 2, 'fleet_vehicle_id' => 10, 'turo_trip_normalized_id' => 100, 'movement_type' => 'pickup'],
+            ['exists' => true, 'company_id' => 1, 'fleet_vehicle_id' => 20, 'turo_trip_normalized_id' => 100, 'movement_type' => 'pickup'],
+        ] as $checklist) {
+            try {
+                $service->voidInvalidFact($checklist, ['event_id' => $eventId, 'void_reason' => 'Forged request.'], 8);
+                $this->fail('Expected forged ownership to be rejected.');
+            } catch (InvalidArgumentException $exception) {
+                $this->assertStringContainsString('does not belong', $exception->getMessage());
+            }
+        }
+
+        $this->assertNull($this->repository->event($eventId)['voided_at']);
+    }
+
     public function testWrongTripCandidatesExcludeOtherVehiclesAndDistantTrips(): void
     {
         $this->connection->table('turo_trips_normalized')->where('id', 100)->update(['starts_at' => '2026-09-03 08:00:00']);
@@ -1874,6 +2088,59 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
         $this->assertSame(100, (int) $location['trip_id']);
         $this->assertSame('rented', $location['operational_state']);
         $this->assertSame('unknown', $location['location_class']);
+    }
+
+    public function testHistoricalStageSupersededByInterveningRecoveryAllowsExplicitMissingHandoff(): void
+    {
+        $this->connection->table('lookup_values')->insert(['id' => 90, 'code' => 'in_progress']);
+        $this->connection->table('turo_trips_normalized')->where('id', 100)->update([
+            'trip_status_lookup_value_id' => 90,
+            'starts_at' => '2026-09-25 10:00:00',
+            'ends_at' => '2026-09-27 10:00:00',
+        ]);
+        $this->connection->table('turo_trips_normalized')->insert([
+            'id' => 101,
+            'fleet_vehicle_id' => 10,
+            'trip_status_lookup_value_id' => 90,
+            'starts_at' => '2026-09-23 07:00:00',
+            'ends_at' => '2026-09-25 06:00:00',
+            'deleted_at' => null,
+        ]);
+        $stageId = $this->events->record(10, 100, 'vehicle_staged', 'pickup', '2026-09-19 21:00:00', 'airport_hnl', 'Early storage', 'checklist_operator', 7);
+        $this->events->record(10, 101, 'actual_handoff', 'pickup', '2026-09-23 07:10:00', 'home', null, 'checklist_operator', 7);
+        $recoveryId = $this->events->record(10, 101, 'vehicle_recovered', 'return', '2026-09-25 06:15:00', 'home', 'Fleet driveway', 'checklist_operator', 7);
+        $custodyService = new CurrentVehicleCustodyService($this->repository);
+        $before = $custodyService->resolve(10, new DateTimeImmutable('2026-09-25 10:00:00'));
+        $this->assertSame('operator', $before['custody']);
+        $this->assertSame($recoveryId, $before['basis_event_id']);
+        $this->assertNotSame($stageId, $before['basis_event_id']);
+
+        $service = new MovementOperationalFactService($this->connection, $this->events, $this->assessments);
+        try {
+            $service->confirmGuestPickup([
+                'exists' => true,
+                'company_id' => 1,
+                'fleet_vehicle_id' => 10,
+                'turo_trip_normalized_id' => 100,
+                'movement_type' => 'pickup',
+            ], ['occurred_at' => '2026-09-25 10:15:00'], 7);
+            $this->fail('Historical staging must not remain confirmable.');
+        } catch (InvalidArgumentException $exception) {
+            $this->assertStringContainsString('staging fact is historical', $exception->getMessage());
+        }
+        $handoffId = $service->recordRetroactiveHandoff(1, 100, [
+            'occurred_at' => '2026-09-25T10:15',
+            'location_class' => 'home',
+            'note' => 'Operator confirmed the previously missing handoff.',
+        ], 7);
+
+        $after = $custodyService->resolve(10, new DateTimeImmutable('2026-09-25 11:00:00'));
+        $this->assertSame('guest', $after['custody']);
+        $this->assertSame(100, $after['active_trip_id']);
+        $this->assertSame($handoffId, $after['basis_event_id']);
+        $this->assertNull($this->repository->event($stageId)['voided_at']);
+        $this->assertSame('retroactive_trip_operator', $this->repository->event($handoffId)['source']);
+        $this->assertSame(0, $this->connection->table('movement_assessments')->countAllResults());
     }
 
     public function testRetroactiveHandoffCreatesLinkedAssessmentOnlyWhenReadinessWasObserved(): void

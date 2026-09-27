@@ -9,6 +9,7 @@
 /** @var array{pickup:array<string, mixed>|null,return:array<string, mixed>|null} $tripFacts */
 /** @var bool $correctingFacts */
 /** @var bool $isStagedPickup */
+/** @var bool $isHistoricalStagedPickup */
 /** @var bool $isPickupConfirmed */
 /** @var string|null $pickupConfirmedAt */
 /** @var bool $repairingFacts */
@@ -47,6 +48,7 @@ $recoveryExceptions ??= [];
 $turnaroundWork ??= ['cleaning' => null, 'energy' => null];
 $navigation ??= [];
 $isStagedPickup ??= false;
+$isHistoricalStagedPickup ??= false;
 $isPickupConfirmed ??= false;
 $pickupConfirmedAt ??= null;
 $repairingFacts ??= false;
@@ -60,6 +62,7 @@ $positionFormData ??= [];
 $showPositionForm ??= false;
 $canRecordRetroactiveHandoff ??= false;
 $showRetroactiveHandoffForm ??= false;
+$movementIntegrity ??= ['has_conflict' => false, 'basis_trip_id' => null, 'basis_event_id' => null, 'guest_states' => []];
 $retroactiveHandoffData ??= [];
 $factTarget ??= null;
 $vehicleDamage ??= ['current' => [], 'history' => [], 'has_unsafe' => false, 'zones' => [], 'damage_types' => [], 'severities' => [], 'statuses' => []];
@@ -103,6 +106,22 @@ $tripFacts ??= [
         <?php if (! ($checklist['exists'] ?? false)): ?>
             <section class="section"><div class="empty-state">Checklist not found.</div></section>
         <?php else: ?>
+            <?php if ($movementIntegrity['has_conflict'] ?? false): ?>
+                <section class="section import-message tone-danger" aria-label="Movement data conflict">
+                    <strong>Movement data conflict</strong>
+                    <span>More than one trip contains unresolved guest-possession facts. FleetOS is using the latest authoritative lifecycle fact for current custody.</span>
+                    <details class="secondary-disclosure">
+                        <summary>Review <?= count($movementIntegrity['guest_states']) ?> lifecycle facts</summary>
+                        <span>Current basis: Trip <?= (int) $movementIntegrity['basis_trip_id'] ?> / event <?= (int) $movementIntegrity['basis_event_id'] ?></span>
+                        <ul class="compact-list">
+                            <?php foreach ($movementIntegrity['guest_states'] as $guestState): ?>
+                                <li>Trip <?= (int) $guestState['trip_id'] ?> &middot; event <?= (int) $guestState['event_id'] ?> &middot; <?= esc(ucwords(str_replace('_', ' ', (string) $guestState['event_code']))) ?><?= $guestState['is_basis'] ? ' &middot; current basis' : '' ?></li>
+                            <?php endforeach; ?>
+                        </ul>
+                    </details>
+                    <a class="action-link" href="#trip-facts">Review movement facts</a>
+                </section>
+            <?php endif; ?>
             <?php if (! $tripIsOperational): ?>
                 <?= view('trip_movement_checklists/_inactive', ['checklist' => $checklist, 'tripStatusCode' => $tripStatusCode]) ?>
             <?php else: ?>
@@ -281,6 +300,7 @@ $tripFacts ??= [
                 </section>
             <?php endif; ?>
 
+            <span id="trip-facts"></span>
             <section class="section operational-facts">
                 <div class="section-heading"><div><p class="eyebrow">Observed</p><h2>Trip facts</h2></div></div>
                 <div class="trip-facts-grid">
@@ -296,9 +316,15 @@ $tripFacts ??= [
                                     </div>
                                 <?php endif; ?>
                             </div>
-                            <?php if ($tripIsOperational && $factType === 'pickup' && $fact === null && $canRecordRetroactiveHandoff): ?>
+                            <?php if ($tripIsOperational && $factType === 'pickup' && $canRecordRetroactiveHandoff && ($fact === null || $isHistoricalStagedPickup)): ?>
+                                <?php if ($isHistoricalStagedPickup): ?>
+                                    <div class="import-message tone-warning">
+                                        <strong>Prior staging is historical</strong>
+                                        <span>Later vehicle activity superseded this staging as the current operational basis. Normal staged pickup confirmation is no longer available from this record.</span>
+                                    </div>
+                                <?php endif; ?>
                                 <?php if (! $showRetroactiveHandoffForm): ?>
-                                    <a class="action-link" href="?action=record-handoff#pickup-fact-heading">Record pickup / handoff</a>
+                                    <a class="action-link" href="?action=record-handoff#pickup-fact-heading"><?= $isHistoricalStagedPickup ? 'Record missing handoff' : 'Record pickup / handoff' ?></a>
                                 <?php else: ?>
                                     <form class="issue-filters" action="/operations/trips/<?= (int) $checklist['turo_trip_normalized_id'] ?>/actual-handoff" method="post">
                                         <?= csrf_field() ?>
@@ -385,6 +411,18 @@ $movementType = (string) (($correctingFacts || $repairingFacts) ? ($latestFacts[
                         <button class="primary-action" type="submit" <?= $repairCandidates === [] ? 'disabled' : '' ?>>Move Recorded Facts</button>
                         <a class="action-link" href="/operations/checklists/<?= (int) $checklist['id'] ?>">Cancel repair</a>
                     </form>
+                    <details class="secondary-disclosure"><summary>Void invalid movement fact</summary>
+                        <form class="issue-filters" action="/operations/checklists/<?= (int) $checklist['id'] ?>/facts/void" method="post">
+                            <?= csrf_field() ?>
+                            <input type="hidden" name="event_id" value="<?= (int) ($latestFacts['event_id'] ?? 0) ?>">
+                            <input type="hidden" name="assessment_id" value="<?= (int) ($latestFacts['assessment_id'] ?? 0) ?>">
+                            <input type="hidden" name="fact_target" value="<?= esc((string) ($factTarget ?? $movementType), 'attr') ?>">
+                            <p class="muted">Use this only when the fact is invalid and must not be moved to another trip. The original record and audit trail are preserved.</p>
+                            <label>Void reason<textarea name="void_reason" rows="2" required></textarea></label>
+                            <label class="checkbox-row"><input type="checkbox" required><span>Confirm this movement fact is invalid or attached to the wrong trip and should not remain authoritative.</span></label>
+                            <button class="secondary-action" type="submit">Void Invalid Fact</button>
+                        </form>
+                    </details>
                 <?php elseif ($movementType === 'pickup' && $isPickupConfirmed && ! $correctingFacts): ?>
                     <div class="import-message tone-success">
                         <strong>Guest pickup confirmed</strong>
@@ -398,9 +436,14 @@ $movementType = (string) (($correctingFacts || $repairingFacts) ? ($latestFacts[
                         <?php if ($isEarlyHandoffWarning): ?><label class="checkbox-row"><input type="checkbox" name="confirm_early_handoff" value="1" required><span>I reviewed the selected reservation and confirm this early guest pickup time is correct.</span></label><?php endif; ?>
                         <button class="primary-action" type="submit">Confirm Guest Pickup</button>
                     </form>
+                <?php elseif ($movementType === 'pickup' && $isHistoricalStagedPickup && ! $correctingFacts): ?>
+                    <div class="import-message tone-warning">
+                        <strong>Historical staging only</strong>
+                        <span>This stage no longer establishes the vehicle's current pickup state. Use Record missing handoff above only when the guest actually received the vehicle.</span>
+                    </div>
                 <?php elseif (! $correctingFacts && ($tripFacts[$movementType] ?? null) !== null): ?>
                     <div class="import-message tone-success">
-                            <strong><?= $movementType === 'return' ? (($tripFacts['return']['event_code'] ?? null) === 'vehicle_recovered' ? 'Vehicle recovery recorded' : 'Actual return recorded') : 'Guest pickup recorded' ?></strong>
+                            <strong><?php if ($movementType !== 'return'): ?>Guest pickup recorded<?php elseif (($tripFacts['return']['event_code'] ?? null) === 'vehicle_recovered'): ?>Vehicle recovery recorded<?php elseif (($tripFacts['return']['event_code'] ?? null) === 'guest_return_staged'): ?>Guest return report recorded<?php else: ?>Actual return recorded<?php endif; ?></strong>
                         <span>Use the <?= esc($movementType) ?> fact actions above to correct or repair this observation.</span>
                     </div>
                 <?php elseif ($movementType === 'return' && ! $correctingFacts): ?>

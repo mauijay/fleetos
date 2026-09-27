@@ -134,6 +134,29 @@ final class MovementBoardCardViewTest extends CIUnitTestCase
         $this->assertStringNotContainsString('<strong></strong>', $html);
     }
 
+    public function testCardShowsMovementIntegrityConflictWithReviewLink(): void
+    {
+        $vehicle = $this->vehicle();
+        $vehicle['current_movement_href'] = '/operations/checklists/192';
+        $vehicle['movement_integrity'] = [
+            'has_conflict' => true,
+            'basis_trip_id' => 8802,
+            'basis_event_id' => 9902,
+            'guest_states' => [
+                ['trip_id' => 8801, 'event_id' => 9901],
+                ['trip_id' => 8802, 'event_id' => 9902],
+            ],
+        ];
+
+        $html = $this->render($vehicle);
+
+        $this->assertStringContainsString('Movement data conflict', $html);
+        $this->assertStringContainsString('latest authoritative lifecycle fact for current custody', $html);
+        $this->assertStringContainsString('Review 2 lifecycle facts', $html);
+        $this->assertStringContainsString('Current basis: Trip 8802 / event 9902', $html);
+        $this->assertStringContainsString('/operations/checklists/192#trip-facts', html_entity_decode($html));
+    }
+
     /** @param array<string, mixed> $vehicle */
     private function render(array $vehicle): string
     {

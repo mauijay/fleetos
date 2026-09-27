@@ -24,6 +24,24 @@ $statusLabel = ($state['code'] ?? null) === 'on_trip' ? 'Rented' : (string) $sta
         <span class="status-badge tone-<?= esc($state['tone'], 'attr') ?>"><?= esc($statusLabel) ?></span>
     </header>
 
+    <?php $movementIntegrity = $vehicle['movement_integrity'] ?? ['has_conflict' => false, 'guest_states' => []]; ?>
+    <?php if ($movementIntegrity['has_conflict'] ?? false): ?>
+        <section class="import-message tone-danger" aria-label="Movement data conflict">
+            <strong>Movement data conflict</strong>
+            <span>Multiple trips contain unresolved guest-possession facts. FleetOS is using the latest authoritative lifecycle fact for current custody.</span>
+            <details class="secondary-disclosure">
+                <summary>Review <?= count($movementIntegrity['guest_states'] ?? []) ?> lifecycle facts</summary>
+                <span>Current basis: Trip <?= (int) ($movementIntegrity['basis_trip_id'] ?? 0) ?> / event <?= (int) ($movementIntegrity['basis_event_id'] ?? 0) ?></span>
+                <ul class="compact-list">
+                    <?php foreach ($movementIntegrity['guest_states'] ?? [] as $guestState): ?>
+                        <li>Trip <?= (int) ($guestState['trip_id'] ?? 0) ?> &middot; event <?= (int) ($guestState['event_id'] ?? 0) ?><?= ($guestState['is_basis'] ?? false) ? ' &middot; current basis' : '' ?></li>
+                    <?php endforeach; ?>
+                </ul>
+            </details>
+            <?php if ($currentMovementHref !== null): ?><a class="text-link" href="<?= esc((string) $currentMovementHref, 'attr') ?>#trip-facts">Review movement facts</a><?php endif; ?>
+        </section>
+    <?php endif; ?>
+
     <div class="movement-card__commitment">
         <p class="movement-card__primary"><?= esc($vehicle['primary_line']) ?></p>
         <?php if ($currentTrip !== null): ?>

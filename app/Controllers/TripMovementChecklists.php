@@ -55,7 +55,12 @@ class TripMovementChecklists extends BaseController
             $energy = array_column($work->energyNeedsForCompany($companyId, new \DateTimeImmutable()), null, 'fleet_vehicle_id');
             $turnaroundWork = ['cleaning' => $cleaning[$vehicleId] ?? null, 'energy' => $energy[$vehicleId] ?? null];
         }
-        $isStagedPickup = ($tripFacts['pickup']['event_code'] ?? null) === 'vehicle_staged';
+        $pickupFact = $tripFacts['pickup'] ?? null;
+        $hasStagedPickup = ($pickupFact['event_code'] ?? null) === 'vehicle_staged';
+        $isStagedPickup = $hasStagedPickup
+            && (int) ($custodyState['basis_trip_id'] ?? 0) === (int) ($checklist['turo_trip_normalized_id'] ?? 0)
+            && (int) ($custodyState['basis_event_id'] ?? 0) === (int) ($pickupFact['event_id'] ?? 0);
+        $isHistoricalStagedPickup = $hasStagedPickup && ! $isStagedPickup;
         $handoffRequirement = array_values(array_filter(
             $readiness['requirements'] ?? [],
             static fn (array $requirement): bool => ($requirement['code'] ?? null) === 'guest_handoff',
@@ -121,9 +126,10 @@ class TripMovementChecklists extends BaseController
         $recoveryNeedsDeliberateTime = ($checklist['movement_type'] ?? null) === 'return'
             && ($laterHandoff !== null || ($nextTripStartsAt !== '' && new \DateTimeImmutable($nextTripStartsAt) <= new \DateTimeImmutable()));
         $canRecordRetroactiveHandoff = $tripIsOperational && ($checklist['exists'] ?? false)
-            && $tripFacts['pickup'] === null
             && $tripFacts['return'] === null
-            && in_array($tripSchedule['trip_status_code'] ?? null, ['booked', 'in_progress'], true);
+            && in_array($tripSchedule['trip_status_code'] ?? null, ['booked', 'in_progress'], true)
+            && ($tripFacts['pickup'] === null
+                || ($isHistoricalStagedPickup && $tripSchedule['trip_status_code'] === 'in_progress'));
         $checklistNotice = session()->getFlashdata('movement_checklist_notice');
         $checklistError = session()->getFlashdata('movement_checklist_error');
         $vehicleDamage = ($checklist['exists'] ?? false) && $companyId > 0
@@ -170,6 +176,7 @@ class TripMovementChecklists extends BaseController
                 'next_handoff_at' => $laterHandoff['occurred_at'] ?? null,
             ],
             'isStagedPickup' => $isStagedPickup,
+            'isHistoricalStagedPickup' => $isHistoricalStagedPickup,
             'isPickupConfirmed' => $isPickupConfirmed,
             'pickupConfirmedAt' => $handoffRequirement['basis_at'] ?? null,
             'correctingFacts' => $correctingFacts,
@@ -182,6 +189,12 @@ class TripMovementChecklists extends BaseController
                 && ($this->request->getGet('action') === 'record-handoff' || is_array($retroactiveHandoffData)),
             'retroactiveHandoffData' => is_array($retroactiveHandoffData) ? $retroactiveHandoffData : [],
             'isEarlyHandoffWarning' => $isEarlyHandoffWarning,
+            'movementIntegrity' => [
+                'has_conflict' => (bool) ($custodyState['integrity_conflict'] ?? false),
+                'basis_trip_id' => $custodyState['basis_trip_id'] ?? null,
+                'basis_event_id' => $custodyState['basis_event_id'] ?? null,
+                'guest_states' => $custodyState['conflicting_guest_states'] ?? [],
+            ],
             'positionFormData' => is_array($positionFormData) ? $positionFormData : [],
             'showPositionForm' => $this->request->getGet('action') === 'position',
             'hnlGarages' => (new \App\Services\Fleet\HnlGarageCatalog())->definitions(),
@@ -575,12 +588,37 @@ class TripMovementChecklists extends BaseController
         $target = $this->factTarget((string) ($data['fact_target'] ?? ''));
         $repairHref = '/operations/checklists/' . $id . '?repair=1' . ($target === null ? '' : '&fact=' . $target);
         try {
-            $ok = Services::movementOperationalFactService()->repairWrongTrip(Services::tripMovementChecklistService()->checklist($id), $data, $this->actorUserId());
+            $checklist = Services::tripMovementChecklistService()->checklistForCompany($this->activeCompanyId(), $id);
+            if ($checklist === null) {
+                throw new \InvalidArgumentException('Movement not found in the active company.');
+            }
+            $ok = Services::movementOperationalFactService()->repairWrongTrip($checklist, $data, $this->actorUserId());
             if ($ok) {
                 return $this->back($id, true, 'Recorded facts moved to the correct trip.', '');
             }
 
             return CoreServices::redirectresponse()->to($repairHref . '#handoff-entry')->with('movement_checklist_error', 'Those facts could not be repaired.');
+        } catch (\InvalidArgumentException $exception) {
+            return CoreServices::redirectresponse()->to($repairHref . '#handoff-entry')->with('movement_checklist_error', $exception->getMessage());
+        }
+    }
+
+    public function voidInvalidFact(int $id): RedirectResponse
+    {
+        $data = $this->request->getPost();
+        $target = $this->factTarget((string) ($data['fact_target'] ?? ''));
+        $repairHref = '/operations/checklists/' . $id . '?repair=1' . ($target === null ? '' : '&fact=' . $target);
+        try {
+            $checklist = Services::tripMovementChecklistService()->checklistForCompany($this->activeCompanyId(), $id);
+            if ($checklist === null) {
+                throw new \InvalidArgumentException('Movement not found in the active company.');
+            }
+            $ok = Services::movementOperationalFactService()->voidInvalidFact($checklist, $data, $this->actorUserId());
+            if ($ok) {
+                return $this->back($id, true, 'Invalid movement fact voided. Its audit history was preserved.', '');
+            }
+
+            return CoreServices::redirectresponse()->to($repairHref . '#handoff-entry')->with('movement_checklist_error', 'That movement fact could not be voided.');
         } catch (\InvalidArgumentException $exception) {
             return CoreServices::redirectresponse()->to($repairHref . '#handoff-entry')->with('movement_checklist_error', $exception->getMessage());
         }

@@ -56,6 +56,17 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
         $this->assertStringContainsString('Use the return fact actions above', $html);
     }
 
+    public function testGuestReturnStageDoesNotClaimActualReturnWasRecorded(): void
+    {
+        $html = $this->render('return', $this->facts([
+            'event_code' => 'guest_return_staged',
+            'event_title' => 'Guest Return Staged recorded',
+        ]));
+
+        $this->assertStringContainsString('Guest return report recorded', $html);
+        $this->assertStringNotContainsString('<strong>Actual return recorded</strong>', $html);
+    }
+
     public function testReturnChecklistShowsUnverifiedGuestReportAndScopedActions(): void
     {
         $guestReturn = [
@@ -393,6 +404,46 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
         $this->assertStringContainsString('Confirm Guest Pickup', $html);
     }
 
+    public function testHistoricalStageSuppressesConfirmationAndOffersMissingHandoffPath(): void
+    {
+        $staged = $this->facts(['event_code' => 'vehicle_staged', 'event_title' => 'Staged for pickup', 'location_label' => 'Staging location']);
+        $html = $this->render('pickup', $staged, false, [], [
+            'tripFacts' => ['pickup' => $staged, 'return' => null],
+            'isStagedPickup' => false,
+            'isHistoricalStagedPickup' => true,
+            'canRecordRetroactiveHandoff' => true,
+        ]);
+
+        $this->assertStringContainsString('Prior staging is historical', $html);
+        $this->assertStringContainsString('Record missing handoff', $html);
+        $this->assertStringContainsString('Historical staging only', $html);
+        $this->assertStringNotContainsString('Confirm Guest Pickup', $html);
+        $this->assertStringNotContainsString('<strong>Guest pickup recorded</strong>', $html);
+    }
+
+    public function testChecklistShowsDerivedMultipleGuestStateIntegrityWarning(): void
+    {
+        $html = $this->render('return', $this->facts(), false, [], [
+            'movementIntegrity' => [
+                'has_conflict' => true,
+                'basis_trip_id' => 8802,
+                'basis_event_id' => 9902,
+                'guest_states' => [
+                    ['trip_id' => 8801, 'event_id' => 9901, 'event_code' => 'actual_handoff', 'is_basis' => false],
+                    ['trip_id' => 8802, 'event_id' => 9902, 'event_code' => 'guest_return_staged', 'is_basis' => true],
+                ],
+            ],
+        ]);
+
+        $this->assertStringContainsString('Movement data conflict', $html);
+        $this->assertStringContainsString('latest authoritative lifecycle fact for current custody', $html);
+        $this->assertStringContainsString('Review 2 lifecycle facts', $html);
+        $this->assertStringContainsString('Current basis: Trip 8802 / event 9902', $html);
+        $this->assertStringContainsString('Trip 8801', $html);
+        $this->assertStringContainsString('event 9901', $html);
+        $this->assertStringContainsString('Review movement facts', $html);
+    }
+
     public function testConfirmedHandoffRepairModeShowsFromToPreview(): void
     {
         $candidate = ['id' => 90, 'turo_trip_id' => 900090, 'guest_name' => 'Prior Guest', 'starts_at' => '2026-10-02 08:00:00', 'trip_status_code' => 'booked'];
@@ -421,6 +472,21 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
         $this->assertStringContainsString('Conflicting movement facts', $html);
         $this->assertStringContainsString('Historical Guest · Trip 900090 already has an active guest handoff.', $html);
         $this->assertStringNotContainsString('<option value="90"', $html);
+    }
+
+    public function testRepairModeOffersAuditedVoidForEventOnlyFact(): void
+    {
+        $facts = $this->facts(['event_id' => 9903, 'assessment_id' => null]);
+        $html = $this->render('pickup', $facts, false, [], [
+            'repairingFacts' => true,
+            'repairCandidates' => [],
+        ]);
+
+        $this->assertStringContainsString('/operations/checklists/4/facts/void', $html);
+        $this->assertStringContainsString('name="event_id" value="9903"', $html);
+        $this->assertStringContainsString('name="assessment_id" value="0"', $html);
+        $this->assertStringContainsString('Void Invalid Fact', $html);
+        $this->assertStringContainsString('original record and audit trail are preserved', $html);
     }
 
     public function testTripContextLabelsAndLinksTheSelectedReservation(): void

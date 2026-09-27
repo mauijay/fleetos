@@ -41,6 +41,14 @@ class MovementOperationalFactService
         if ($eventCode === 'actual_handoff') {
             $this->rejectDuplicateHandoff($checklist);
             $this->requireEarlyHandoffConfirmation($checklist, $data);
+            $occurredAt = trim((string) ($data['occurred_at'] ?? ''));
+            if ($occurredAt !== '') {
+                $this->rejectHandoffPossessionConflict(
+                    (int) $checklist['fleet_vehicle_id'],
+                    (int) $checklist['turo_trip_normalized_id'],
+                    $occurredAt,
+                );
+            }
         } else {
             if ($this->events->activeForTrip((int) $checklist['turo_trip_normalized_id'], ['actual_return', 'vehicle_recovered']) !== null) {
                 throw new \InvalidArgumentException('This return is already complete. Correct or void the existing fact instead.');
@@ -94,6 +102,8 @@ class MovementOperationalFactService
         if (mb_strlen($note) > 2000) {
             throw new \InvalidArgumentException('Note must be 2000 characters or fewer.');
         }
+
+        $this->rejectRetroactiveHandoffConflict($tripId, $vehicleId, $occurredAt);
 
         $this->db->transBegin();
         try {
@@ -624,6 +634,23 @@ class MovementOperationalFactService
         }
     }
 
+    private function rejectHandoffPossessionConflict(int $vehicleId, int $tripId, string $occurredAt, bool $historical = false): void
+    {
+        $custody = $historical
+            ? $this->custody()->resolve($vehicleId, new DateTimeImmutable($occurredAt))
+            : $this->custody()->resolve($vehicleId);
+        if ($custody['custody'] === 'guest' && (int) ($custody['active_trip_id'] ?? 0) !== $tripId) {
+            throw new \InvalidArgumentException($historical
+                ? 'Another trip has authoritative guest possession at that time. Review the movement chronology before recording this historical handoff.'
+                : 'This vehicle is currently in guest possession on another trip. Record the return or recovery before confirming another pickup.');
+        }
+        if ($this->custody()->laterOtherTripLifecycle($vehicleId, $tripId, $occurredAt) !== null) {
+            throw new \InvalidArgumentException($historical
+                ? 'A later authoritative lifecycle on another trip conflicts with this historical handoff. Review the movement chronology first.'
+                : 'Another trip has later authoritative vehicle activity. Use the audited historical handoff or correction workflow instead of normal pickup confirmation.');
+        }
+    }
+
     private function requiredPastTimestamp(array $data, string $label): string
     {
         $value = trim((string) ($data['occurred_at'] ?? ''));
@@ -650,28 +677,36 @@ class MovementOperationalFactService
         if (($checklist['movement_type'] ?? null) !== 'pickup') {
             throw new \InvalidArgumentException('Guest pickup can only be confirmed for a pickup movement.');
         }
-        $this->rejectOtherTripGuestPossession(
-            (int) $checklist['fleet_vehicle_id'],
-            (int) $checklist['turo_trip_normalized_id'],
-        );
         $this->rejectDuplicateHandoff($checklist);
         $active = $this->events->latestForTrip((int) $checklist['turo_trip_normalized_id']);
         if (($active['event_code'] ?? null) !== 'vehicle_staged') {
             throw new \InvalidArgumentException('Stage the vehicle at HNL before confirming guest pickup.');
         }
+        $this->requireCurrentStage($checklist, $active);
         $occurredAt = trim((string) ($data['occurred_at'] ?? ''));
         if ($occurredAt === '') {
             throw new \InvalidArgumentException('Guest pickup time is required.');
         }
+        $this->rejectHandoffPossessionConflict(
+            (int) $checklist['fleet_vehicle_id'],
+            (int) $checklist['turo_trip_normalized_id'],
+            $occurredAt,
+        );
         $this->requireEarlyHandoffConfirmation($checklist, $data);
 
         $this->db->transBegin();
         try {
-            $this->rejectOtherTripGuestPossession(
+            $this->rejectHandoffPossessionConflict(
                 (int) $checklist['fleet_vehicle_id'],
                 (int) $checklist['turo_trip_normalized_id'],
+                $occurredAt,
             );
             $this->rejectDuplicateHandoff($checklist);
+            $active = $this->events->latestForTrip((int) $checklist['turo_trip_normalized_id']);
+            if (($active['event_code'] ?? null) !== 'vehicle_staged') {
+                throw new \InvalidArgumentException('The staging state changed; reload this movement.');
+            }
+            $this->requireCurrentStage($checklist, $active);
             $this->events->record(
                 (int) $checklist['fleet_vehicle_id'],
                 (int) $checklist['turo_trip_normalized_id'],
@@ -714,6 +749,17 @@ class MovementOperationalFactService
         }
     }
 
+    /** @param array<string, mixed> $stage */
+    private function requireCurrentStage(array $checklist, array $stage): void
+    {
+        $custody = $this->custody()->resolve((int) $checklist['fleet_vehicle_id']);
+        if ((int) ($custody['basis_trip_id'] ?? 0) !== (int) $checklist['turo_trip_normalized_id']
+            || (int) ($custody['basis_event_id'] ?? 0) !== (int) ($stage['id'] ?? 0)
+            || ($custody['basis_event_code'] ?? null) !== 'vehicle_staged') {
+            throw new \InvalidArgumentException('This staging fact is historical because later vehicle activity superseded it. Record a missing historical handoff only if the guest actually received the vehicle.');
+        }
+    }
+
     /** @param array<string, mixed> $schedule */
     private function retroactiveHandoffTime(array $data, array $schedule): string
     {
@@ -752,10 +798,15 @@ class MovementOperationalFactService
         if ($this->events->activeForTrip($tripId, ['actual_return', 'vehicle_recovered', 'guest_return_staged']) !== null) {
             throw new \InvalidArgumentException('A later return or recovery fact already exists. Review the trip facts instead of inserting a handoff.');
         }
-        if ($this->events->activeForTrip($tripId, ['vehicle_staged']) !== null) {
+        $stage = $this->events->activeForTrip($tripId, ['vehicle_staged']);
+        $custody = $this->custody()->resolve($vehicleId);
+        if ($stage !== null
+            && (int) ($custody['basis_trip_id'] ?? 0) === $tripId
+            && (int) ($custody['basis_event_id'] ?? 0) === (int) $stage['id']) {
             throw new \InvalidArgumentException('This pickup is staged. Use the existing Confirm Guest Pickup action.');
         }
 
+        $this->rejectHandoffPossessionConflict($vehicleId, $tripId, $occurredAt, true);
         if ($this->custody()->hasLaterTripLifecycle($vehicleId, $tripId)) {
             throw new \InvalidArgumentException('A later authoritative vehicle lifecycle fact belongs to another trip. Review the trip assignment before recording handoff.');
         }
@@ -779,6 +830,11 @@ class MovementOperationalFactService
             }
             if ($eventCode === 'actual_handoff') {
                 $this->rejectDuplicateHandoff($checklist);
+                $this->rejectHandoffPossessionConflict(
+                    (int) $checklist['fleet_vehicle_id'],
+                    (int) $checklist['turo_trip_normalized_id'],
+                    $occurredAt,
+                );
             } elseif ($eventCode === 'actual_return' && $this->events->activeForTrip((int) $checklist['turo_trip_normalized_id'], ['actual_return', 'vehicle_recovered']) !== null) {
                 throw new \InvalidArgumentException('This return is already complete. Correct or void the existing fact instead.');
             }
@@ -906,7 +962,7 @@ class MovementOperationalFactService
     public function wrongTripCandidates(array $checklist, int $eventId): array
     {
         $event = $this->events->find($eventId);
-        if (! ($checklist['exists'] ?? false) || $event === null || (int) $event['turo_trip_normalized_id'] !== (int) $checklist['turo_trip_normalized_id']) {
+        if (! $this->eventBelongsToChecklist($checklist, $event)) {
             return [];
         }
         $movementType = (string) $event['movement_type'];
@@ -921,6 +977,7 @@ class MovementOperationalFactService
         return array_values(array_filter(
             $this->repo()->vehicleTripHistory((int) $event['fleet_vehicle_id'], 100),
             fn (array $trip): bool => $this->isPlausibleRepairTarget($trip, (int) $checklist['turo_trip_normalized_id'], $scheduleField, $occurredAt, $windowHours)
+                && (int) ($this->repo()->trip((int) $trip['id'])['company_id'] ?? 0) === (int) $event['company_id']
                 && $this->repo()->activeMovementConflict((int) $trip['id'], $this->conflictingEventCodes($eventCode)) === null,
         ));
     }
@@ -929,7 +986,7 @@ class MovementOperationalFactService
     public function wrongTripConflicts(array $checklist, int $eventId): array
     {
         $event = $this->events->find($eventId);
-        if (! ($checklist['exists'] ?? false) || $event === null || (int) $event['turo_trip_normalized_id'] !== (int) $checklist['turo_trip_normalized_id']) {
+        if (! $this->eventBelongsToChecklist($checklist, $event)) {
             return [];
         }
         $movementType = (string) $event['movement_type'];
@@ -942,7 +999,8 @@ class MovementOperationalFactService
         $windowHours = $this->movementConfig->repairCandidateWindowHours;
         $conflicts = [];
         foreach ($this->repo()->vehicleTripHistory((int) $event['fleet_vehicle_id'], 100) as $trip) {
-            if (! $this->isPlausibleRepairTarget($trip, (int) $checklist['turo_trip_normalized_id'], $scheduleField, $occurredAt, $windowHours)) {
+            if (! $this->isPlausibleRepairTarget($trip, (int) $checklist['turo_trip_normalized_id'], $scheduleField, $occurredAt, $windowHours)
+                || (int) ($this->repo()->trip((int) $trip['id'])['company_id'] ?? 0) !== (int) $event['company_id']) {
                 continue;
             }
             $conflict = $this->repo()->activeMovementConflict((int) $trip['id'], $this->conflictingEventCodes($eventCode));
@@ -959,6 +1017,9 @@ class MovementOperationalFactService
         if (! ($checklist['exists'] ?? false)) {
             return false;
         }
+        if ($actorUserId < 1) {
+            throw new \InvalidArgumentException('An authenticated operator is required.');
+        }
         $eventId = (int) ($data['event_id'] ?? 0);
         $assessmentId = (int) ($data['assessment_id'] ?? 0);
         $targetTripId = (int) ($data['target_trip_id'] ?? 0);
@@ -967,10 +1028,15 @@ class MovementOperationalFactService
             throw new \InvalidArgumentException('A repair reason is required.');
         }
         $event = $this->events->find($eventId);
-        $assessment = $this->assessments->find($assessmentId);
-        if ($event === null || $assessment === null
-            || (int) $event['turo_trip_normalized_id'] !== (int) $checklist['turo_trip_normalized_id']
-            || (int) $assessment['trip_movement_event_id'] !== $eventId) {
+        $assessment = $assessmentId > 0 ? $this->assessments->find($assessmentId) : null;
+        $linkedAssessment = $this->repo()->assessmentForEventOrTrip($eventId, null);
+        if (! $this->eventBelongsToChecklist($checklist, $event)
+            || ($assessmentId > 0 && ($assessment === null
+                || (int) $assessment['company_id'] !== (int) ($event['company_id'] ?? 0)
+                || (int) $assessment['fleet_vehicle_id'] !== (int) $checklist['fleet_vehicle_id']
+                || (int) $assessment['turo_trip_normalized_id'] !== (int) $checklist['turo_trip_normalized_id']
+                || (int) $assessment['trip_movement_event_id'] !== $eventId))
+            || ($assessmentId <= 0 && $linkedAssessment !== null)) {
             throw new \InvalidArgumentException('The recorded facts do not belong to this movement.');
         }
         $compatibleEvents = $this->compatibleEventCodes((string) $event['movement_type']);
@@ -981,6 +1047,7 @@ class MovementOperationalFactService
         $scheduleField = (string) $event['movement_type'] === 'pickup' ? 'starts_at' : 'ends_at';
         $isPlausibleTarget = $targetTrip !== null
             && (int) $targetTrip['fleet_vehicle_id'] === (int) $event['fleet_vehicle_id']
+            && (int) ($this->repo()->trip($targetTripId)['company_id'] ?? 0) === (int) $event['company_id']
             && $this->isPlausibleRepairTarget(
                 $targetTrip,
                 (int) $checklist['turo_trip_normalized_id'],
@@ -1007,12 +1074,14 @@ class MovementOperationalFactService
                 'source' => $event['source'],
                 'actor_user_id' => $event['actor_user_id'],
             ], $actorUserId, $auditReason, false);
-            $this->assessments->correct($assessmentId, [
-                'turo_trip_normalized_id' => $targetTripId,
-                'trip_movement_event_id' => $replacementEventId,
-                'source' => $assessment['source'],
-                'actor_user_id' => $assessment['actor_user_id'],
-            ], $actorUserId, $auditReason, false);
+            if ($assessment !== null) {
+                $this->assessments->correct($assessmentId, [
+                    'turo_trip_normalized_id' => $targetTripId,
+                    'trip_movement_event_id' => $replacementEventId,
+                    'source' => $assessment['source'],
+                    'actor_user_id' => $assessment['actor_user_id'],
+                ], $actorUserId, $auditReason, false);
+            }
             $this->plans()->invalidateForWrite((int) $checklist['fleet_vehicle_id'], 'repaired_actual_movement_event', $actorUserId);
             if ($this->db->transStatus() === false) {
                 throw new RuntimeException('Wrong-trip repair transaction failed.');
@@ -1024,6 +1093,69 @@ class MovementOperationalFactService
             $this->db->transRollback();
             throw $exception;
         }
+    }
+
+    public function voidInvalidFact(array $checklist, array $data, int $actorUserId): bool
+    {
+        if (! ($checklist['exists'] ?? false)) {
+            return false;
+        }
+        if ($actorUserId < 1) {
+            throw new \InvalidArgumentException('An authenticated operator is required.');
+        }
+        $eventId = (int) ($data['event_id'] ?? 0);
+        $postedAssessmentId = (int) ($data['assessment_id'] ?? 0);
+        $reason = trim((string) ($data['void_reason'] ?? ''));
+        if ($reason === '') {
+            throw new \InvalidArgumentException('A reason is required to void an invalid movement fact.');
+        }
+        $event = $this->events->find($eventId);
+        if (! $this->eventBelongsToChecklist($checklist, $event)
+            || ! in_array($event['event_code'] ?? null, $this->compatibleEventCodes((string) ($event['movement_type'] ?? '')), true)
+            || ($event['voided_at'] ?? null) !== null) {
+            throw new \InvalidArgumentException('The recorded fact does not belong to this movement.');
+        }
+        $assessment = $this->repo()->assessmentForEventOrTrip($eventId, null);
+        if ($postedAssessmentId > 0 && (int) ($assessment['id'] ?? 0) !== $postedAssessmentId) {
+            throw new \InvalidArgumentException('The recorded assessment does not belong to this movement fact.');
+        }
+
+        $auditReason = 'Invalid or wrong-trip movement fact: ' . $reason;
+        $this->db->transBegin();
+        try {
+            if ($assessment !== null && ! $this->assessments->void((int) $assessment['id'], $actorUserId, $auditReason)) {
+                throw new RuntimeException('The linked assessment could not be voided.');
+            }
+            if (! $this->events->void($eventId, $actorUserId, $auditReason)) {
+                throw new RuntimeException('The movement fact could not be voided.');
+            }
+            $this->plans()->invalidateForWrite((int) $checklist['fleet_vehicle_id'], 'voided_actual_movement_event', $actorUserId);
+            if ($this->db->transStatus() === false) {
+                throw new RuntimeException('Movement fact void transaction failed.');
+            }
+            $this->db->transCommit();
+
+            return true;
+        } catch (\Throwable $exception) {
+            $this->db->transRollback();
+            throw $exception;
+        }
+    }
+
+    /** @param array<string, mixed>|null $event */
+    private function eventBelongsToChecklist(array $checklist, ?array $event): bool
+    {
+        $trip = $this->repo()->trip((int) ($checklist['turo_trip_normalized_id'] ?? 0));
+        $companyId = (int) ($checklist['company_id'] ?? $trip['company_id'] ?? 0);
+
+        return ($checklist['exists'] ?? false)
+            && $event !== null
+            && $trip !== null
+            && $companyId > 0
+            && (int) ($trip['company_id'] ?? 0) === $companyId
+            && (int) ($event['company_id'] ?? 0) === $companyId
+            && (int) ($event['fleet_vehicle_id'] ?? 0) === (int) ($checklist['fleet_vehicle_id'] ?? 0)
+            && (int) ($event['turo_trip_normalized_id'] ?? 0) === (int) ($checklist['turo_trip_normalized_id'] ?? 0);
     }
 
     /** @param array<string, mixed> $trip */

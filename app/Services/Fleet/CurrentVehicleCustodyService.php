@@ -12,7 +12,7 @@ class CurrentVehicleCustodyService
     {
     }
 
-    /** @return array{custody:string,active_trip_id:?int,basis_trip_id:?int,basis_event_id:?int,basis_event_code:?string,occurred_at:?string,basis_event:?array<string,mixed>} */
+    /** @return array{custody:string,active_trip_id:?int,basis_trip_id:?int,basis_event_id:?int,basis_event_code:?string,occurred_at:?string,basis_event:?array<string,mixed>,integrity_conflict:bool,conflicting_guest_states:list<array<string,mixed>>} */
     public function resolve(int $vehicleId, ?\DateTimeImmutable $asOf = null): array
     {
         if ($vehicleId < 1) {
@@ -106,8 +106,37 @@ class CurrentVehicleCustodyService
     }
 
     /**
+     * Finds a different trip's authoritative lifecycle after a proposed handoff.
+     * This is a chronology guard, not a schedule-based early-handoff rule.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function laterOtherTripLifecycle(int $vehicleId, int $tripId, string $proposedAt, ?\DateTimeImmutable $asOf = null): ?array
+    {
+        if ($vehicleId < 1 || $tripId < 1 || trim($proposedAt) === '') {
+            return null;
+        }
+        try {
+            $proposedAt = (new \DateTimeImmutable($proposedAt))->format('Y-m-d H:i:s');
+        } catch (\Exception) {
+            return null;
+        }
+        $asOf ??= new \DateTimeImmutable();
+        $events = array_values(array_filter(
+            $this->repo()->activeCustodyTimelineEvents([$vehicleId], $asOf->format('Y-m-d H:i:s')),
+            fn (array $event): bool => (int) ($event['turo_trip_normalized_id'] ?? 0) !== $tripId
+                && in_array($event['event_code'] ?? null, ['actual_handoff', 'guest_return_staged', 'actual_return', 'vehicle_recovered'], true)
+                && $this->tripIsOperational($event)
+                && $this->compareEventChronology($event, ['occurred_at' => $proposedAt, 'id' => 0]) > 0,
+        ));
+        usort($events, $this->compareEventChronology(...));
+
+        return $events[0] ?? null;
+    }
+
+    /**
      * @param list<array<string, mixed>> $events
-     * @return array{custody:string,active_trip_id:?int,basis_trip_id:?int,basis_event_id:?int,basis_event_code:?string,occurred_at:?string,basis_event:?array<string,mixed>}
+     * @return array{custody:string,active_trip_id:?int,basis_trip_id:?int,basis_event_id:?int,basis_event_code:?string,occurred_at:?string,basis_event:?array<string,mixed>,integrity_conflict:bool,conflicting_guest_states:list<array<string,mixed>>}
      */
     public function resolveEvents(array $events): array
     {
@@ -135,11 +164,11 @@ class CurrentVehicleCustodyService
 
         if ($guestStates !== []) {
             usort($guestStates, function (array $left, array $right): int {
-                $tripComparison = $this->compareTripChronology($left['basis'], $right['basis']);
+                $eventComparison = $this->compareEventChronology($left['basis'], $right['basis']);
 
-                return $tripComparison !== 0
-                    ? $tripComparison
-                    : $this->compareEventChronology($left['basis'], $right['basis']);
+                return $eventComparison !== 0
+                    ? $eventComparison
+                    : $this->compareTripChronology($left['basis'], $right['basis']);
             });
             $basis = $guestStates[count($guestStates) - 1]['basis'];
         } else {
@@ -159,6 +188,17 @@ class CurrentVehicleCustodyService
             : (in_array($code, ['vehicle_staged', 'actual_return', 'vehicle_recovered'], true) ? 'operator' : 'unknown');
         $tripId = (int) ($basis['turo_trip_normalized_id'] ?? 0) ?: null;
         $activeTripId = in_array($code, ['vehicle_staged', 'actual_handoff', 'guest_return_staged'], true) ? $tripId : null;
+        $conflictingGuestStates = count($guestStates) < 2 ? [] : array_map(
+            static fn (array $state): array => [
+                'trip_id' => (int) ($state['basis']['turo_trip_normalized_id'] ?? 0),
+                'event_id' => (int) ($state['basis']['id'] ?? 0),
+                'event_code' => (string) ($state['basis']['event_code'] ?? ''),
+                'occurred_at' => $state['basis']['occurred_at'] ?? null,
+                'trip_starts_at' => $state['basis']['custody_trip_starts_at'] ?? null,
+                'is_basis' => (int) ($state['basis']['id'] ?? 0) === (int) ($basis['id'] ?? 0),
+            ],
+            $guestStates,
+        );
 
         return [
             'custody' => $custody,
@@ -168,6 +208,8 @@ class CurrentVehicleCustodyService
             'basis_event_code' => $code === '' ? null : $code,
             'occurred_at' => $basis['occurred_at'] ?? null,
             'basis_event' => $basis,
+            'integrity_conflict' => $conflictingGuestStates !== [],
+            'conflicting_guest_states' => $conflictingGuestStates,
         ];
     }
 
@@ -230,7 +272,7 @@ class CurrentVehicleCustodyService
         return (int) ($left['id'] ?? 0) <=> (int) ($right['id'] ?? 0);
     }
 
-    /** @return array{custody:string,active_trip_id:null,basis_trip_id:null,basis_event_id:null,basis_event_code:null,occurred_at:null,basis_event:null} */
+    /** @return array{custody:string,active_trip_id:null,basis_trip_id:null,basis_event_id:null,basis_event_code:null,occurred_at:null,basis_event:null,integrity_conflict:false,conflicting_guest_states:list<array<string,mixed>>} */
     private function unknown(): array
     {
         return [
@@ -241,6 +283,8 @@ class CurrentVehicleCustodyService
             'basis_event_code' => null,
             'occurred_at' => null,
             'basis_event' => null,
+            'integrity_conflict' => false,
+            'conflicting_guest_states' => [],
         ];
     }
 
