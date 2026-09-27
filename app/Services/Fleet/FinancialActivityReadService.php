@@ -151,7 +151,7 @@ class FinancialActivityReadService
                 $companyId,
                 (int) $row['fleet_vehicle_id'],
                 $this->nullableId($row['turo_trip_normalized_id'] ?? null),
-                (new DateTimeImmutable((string) $row['ended_at'], new DateTimeZone('Pacific/Honolulu')))
+                (new DateTimeImmutable((string) $row['occurred_at'], new DateTimeZone('Pacific/Honolulu')))
                     ->setTimezone(new DateTimeZone('Pacific/Honolulu'))
                     ->format('Y-m-d'),
                 (string) $row['cost_amount'],

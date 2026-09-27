@@ -97,6 +97,7 @@ class TuroImports extends BaseController
             ['label' => 'Fleet Activity', 'href' => '/#fleet-activity', 'active' => 'false'],
             ['label' => 'Vehicles', 'href' => '/fleet/vehicles', 'active' => 'false'],
             ['label' => 'Turo Import', 'href' => '/turo/imports', 'active' => 'true'],
+            ['label' => 'Supercharger Reimbursements', 'href' => '/operations/supercharger-reimbursements', 'active' => 'false'],
             ['label' => 'Extras Import', 'href' => '/turo/extras', 'active' => 'false'],
             ['label' => 'Import Issues', 'href' => '/turo/import-issues', 'active' => 'false'],
             ['label' => 'Vehicle Matching', 'href' => '/turo/vehicle-matches', 'active' => 'false'],

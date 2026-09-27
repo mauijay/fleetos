@@ -94,6 +94,7 @@ class FleetCommandCenterViewModelService
             ['label' => 'Fleet Activity', 'href' => '#fleet-activity', 'active' => 'false'],
             ['label' => 'Vehicles', 'href' => '/fleet/vehicles', 'active' => 'false'],
             ['label' => 'Incidentals Review', 'href' => '/operations/incidentals', 'active' => 'false'],
+            ['label' => 'Supercharger Reimbursements', 'href' => '/operations/supercharger-reimbursements', 'active' => 'false'],
             ['label' => 'Location Aliases', 'href' => '/operations/movement-locations', 'active' => 'false'],
             ['label' => 'Turo Import', 'href' => '/turo/imports', 'active' => 'false'],
             ['label' => 'Extras Import', 'href' => '/turo/extras', 'active' => 'false'],

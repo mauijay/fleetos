@@ -15,6 +15,7 @@ use App\Repositories\MovementChecklistRepository;
 use App\Repositories\MovementReadinessReadModelRepository;
 use App\Repositories\OperatingExpenseRepository;
 use App\Repositories\OperationalFactsRepository;
+use App\Repositories\SuperchargerReconciliationRepository;
 use App\Repositories\TripCommitmentRepository;
 use App\Repositories\TripExtraFulfillmentRepository;
 use App\Repositories\TripIncidentalReviewRepository;
@@ -72,6 +73,7 @@ use App\Services\Fleet\PlanningHorizonService;
 use App\Services\Fleet\RevenueService;
 use App\Services\Fleet\ScheduledLocationBackfillService;
 use App\Services\Fleet\ScheduledMovementLocationService;
+use App\Services\Fleet\SuperchargerReconciliationService;
 use App\Services\Fleet\TaskService;
 use App\Services\Fleet\TripAnalyticsService;
 use App\Services\Fleet\TripCommitmentService;
@@ -93,6 +95,7 @@ use App\Services\Fleet\VehiclePerformanceReportService;
 use App\Services\Fleet\VehiclePositioningPlanService;
 use App\Services\Fleet\VehiclePositioningPlanWorkflowService;
 use App\Services\Fleet\VehiclePositioningRecommendationService;
+use App\Services\Tesla\TeslaChargingImportService;
 use App\Services\Turo\TuroEarningsImportService;
 use App\Services\Turo\TuroExtrasImportService;
 use App\Services\Turo\TuroImportIssueService;
@@ -242,6 +245,37 @@ class Services extends BaseService
         }
 
         return new ChargingCostRepository();
+    }
+
+    public static function superchargerReconciliationRepository(bool $getShared = true): SuperchargerReconciliationRepository
+    {
+        if ($getShared) {
+            return static::getSharedInstance('superchargerReconciliationRepository');
+        }
+
+        return new SuperchargerReconciliationRepository();
+    }
+
+    public static function teslaChargingImportService(bool $getShared = true): TeslaChargingImportService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('teslaChargingImportService');
+        }
+
+        return new TeslaChargingImportService(
+            static::superchargerReconciliationRepository(),
+            static::currentVehicleCustodyService(),
+            new LookupRepository(),
+        );
+    }
+
+    public static function superchargerReconciliationService(bool $getShared = true): SuperchargerReconciliationService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('superchargerReconciliationService');
+        }
+
+        return new SuperchargerReconciliationService(static::superchargerReconciliationRepository());
     }
 
     public static function financialActivityReadService(bool $getShared = true): FinancialActivityReadService

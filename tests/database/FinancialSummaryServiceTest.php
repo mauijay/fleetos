@@ -61,6 +61,40 @@ final class FinancialSummaryServiceTest extends CIUnitTestCase
         $this->assertNotSame($companyA['recorded_operating_costs'], $companyB['recorded_operating_costs']);
     }
 
+    public function testImportedTeslaSessionWithoutFabricatedEndIsOneChargingExpense(): void
+    {
+        $this->connection->table('charging_sessions')->insert([
+            'id' => 6,
+            'fleet_vehicle_id' => 1,
+            'turo_trip_normalized_id' => 1,
+            'started_at' => '2026-09-14 12:00:00',
+            'ended_at' => null,
+            'source_type' => 'tesla_invoice_csv',
+            'cost_amount' => '7.25',
+            'charging_location' => 'Synthetic Supercharger',
+            'deleted_at' => null,
+        ]);
+        $this->connection->table('charging_sessions')->insert([
+            'id' => 7,
+            'fleet_vehicle_id' => 1,
+            'started_at' => '2026-09-14 13:00:00',
+            'ended_at' => null,
+            'source_type' => null,
+            'cost_amount' => '99.00',
+            'charging_location' => 'Still charging',
+            'deleted_at' => null,
+        ]);
+
+        $summary = $this->service()->period(1, '2026-09-01', '2026-10-01');
+        $rows = array_values(array_filter($summary['activities'], static fn (array $row): bool => $row['source_type'] === 'charging_session' && $row['source_id'] === 6));
+        $identities = array_map(static fn (array $row): string => $row['source_type'] . ':' . $row['source_id'], $summary['activities']);
+
+        $this->assertCount(1, $rows);
+        $this->assertSame('7.25', $rows[0]['amount']);
+        $this->assertSame('2026-09-14', $rows[0]['occurred_on']);
+        $this->assertNotContains('charging_session:7', $identities);
+    }
+
     /** @param list<string> $validatedRecoveryTypes */
     private function service(array $validatedRecoveryTypes = []): FinancialSummaryService
     {
@@ -95,7 +129,7 @@ final class FinancialSummaryServiceTest extends CIUnitTestCase
         $this->connection->query('CREATE TABLE ' . $this->table('trip_month_allocations') . ' (id INTEGER PRIMARY KEY, turo_trip_normalized_id INTEGER, fleet_vehicle_id INTEGER, allocation_month DATE, allocated_host_payout_amount DECIMAL(10,2), is_forecast INTEGER)');
         $this->connection->query('CREATE TABLE ' . $this->table('operating_expenses') . ' (id INTEGER PRIMARY KEY, company_id INTEGER, fleet_vehicle_id INTEGER NULL, turo_trip_normalized_id INTEGER NULL, expense_category_lookup_value_id INTEGER NULL, expense_date DATE, amount DECIMAL(10,2), business_purpose TEXT NULL, vendor VARCHAR(190) NULL, status_code VARCHAR(40), archived_at DATETIME NULL)');
         $this->connection->query('CREATE TABLE ' . $this->table('maintenance_logs') . ' (id INTEGER PRIMARY KEY, fleet_vehicle_id INTEGER, maintenance_status_lookup_value_id INTEGER, service_on DATE, total_amount DECIMAL(10,2), description TEXT NULL, deleted_at DATETIME NULL)');
-        $this->connection->query('CREATE TABLE ' . $this->table('charging_sessions') . ' (id INTEGER PRIMARY KEY, fleet_vehicle_id INTEGER, turo_trip_normalized_id INTEGER NULL, ended_at DATETIME NULL, cost_amount DECIMAL(10,2), charging_location VARCHAR(190) NULL, deleted_at DATETIME NULL)');
+        $this->connection->query('CREATE TABLE ' . $this->table('charging_sessions') . ' (id INTEGER PRIMARY KEY, fleet_vehicle_id INTEGER, turo_trip_normalized_id INTEGER NULL, started_at DATETIME NULL, ended_at DATETIME NULL, cost_amount DECIMAL(10,2), charging_location VARCHAR(190) NULL, source_type VARCHAR(40) NULL, deleted_at DATETIME NULL)');
         $this->connection->query('CREATE TABLE ' . $this->table('airport_turo_access_receipts') . ' (id INTEGER PRIMARY KEY, company_id INTEGER)');
         $this->connection->query('CREATE TABLE ' . $this->table('airport_operations_runs') . ' (id INTEGER PRIMARY KEY, company_id INTEGER)');
         $this->connection->query('CREATE TABLE ' . $this->table('airport_operations_expenses') . ' (id INTEGER PRIMARY KEY, airport_operations_run_id INTEGER NULL, airport_turo_access_receipt_id INTEGER, expense_category VARCHAR(60), amount DECIMAL(10,2), expense_date DATE, business_purpose_note TEXT, accounting_status VARCHAR(60))');

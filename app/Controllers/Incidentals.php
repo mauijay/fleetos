@@ -90,6 +90,7 @@ class Incidentals extends BaseController
             ['label' => 'Vehicles', 'href' => '/fleet/vehicles', 'active' => 'false'],
             ['label' => 'Expenses & Receipts', 'href' => '/operations/expenses?view=needs_attention', 'active' => 'false'],
             ['label' => 'Incidentals Review', 'href' => '/operations/incidentals', 'active' => 'true'],
+            ['label' => 'Supercharger Reimbursements', 'href' => '/operations/supercharger-reimbursements', 'active' => 'false'],
             ['label' => 'Policy Setup', 'href' => '/operations/incidentals#policy-setup', 'active' => 'false'],
             ['label' => 'Turo Import', 'href' => '/turo/imports', 'active' => 'false'],
         ];

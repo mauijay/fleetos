@@ -38,7 +38,7 @@ class TuroTripCsvValidator
             $issues[] = new ValidationIssue('invalid_date_range', 'Trip end must be after trip start.', 'ends_at');
         }
 
-        foreach (['gross_revenue', 'host_payout', 'delivery_fee', 'discount', 'reimbursement', 'airport_fee'] as $field) {
+        foreach (['gross_revenue', 'host_payout', 'delivery_fee', 'discount', 'reimbursement', 'airport_fee', 'on_trip_ev_charging', 'post_trip_ev_charging'] as $field) {
             $value = $this->value($row, $this->moneyAliases($field));
             if ($value !== null && $this->money($value) === null) {
                 $issues[] = new ValidationIssue('invalid_money', "Money value in {$field} could not be read. Use a format like 100.00 or $100.00; received '{$this->preview($value)}'.", $field);
@@ -92,6 +92,8 @@ class TuroTripCsvValidator
             'discount' => ['discount', 'discount_amount'],
             'reimbursement' => ['reimbursement', 'reimbursement_amount'],
             'airport_fee' => ['airport_fee', 'airport_fee_amount'],
+            'on_trip_ev_charging' => ['on_trip_ev_charging', 'on_trip_ev_charging_amount'],
+            'post_trip_ev_charging' => ['post_trip_ev_charging', 'post_trip_ev_charging_amount'],
             default => [$field],
         };
     }

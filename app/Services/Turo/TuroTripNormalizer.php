@@ -46,6 +46,8 @@ class TuroTripNormalizer
             discountAmount: $this->money($this->value($row, $this->moneyAliases('discount'))),
             reimbursementAmount: $this->money($this->value($row, $this->moneyAliases('reimbursement'))),
             airportFeeAmount: $this->money($this->value($row, $this->moneyAliases('airport_fee'))),
+            onTripEvChargingAmount: $this->money($this->value($row, $this->moneyAliases('on_trip_ev_charging'))),
+            postTripEvChargingAmount: $this->money($this->value($row, $this->moneyAliases('post_trip_ev_charging'))),
             currencyCode: strtoupper($this->value($row, ['currency', 'currency_code']) ?? 'USD'),
             isForecast: $statusCode === 'booked',
         );
@@ -98,6 +100,8 @@ class TuroTripNormalizer
             'discount' => ['discount', 'discount_amount'],
             'reimbursement' => ['reimbursement', 'reimbursement_amount'],
             'airport_fee' => ['airport_fee', 'airport_fee_amount'],
+            'on_trip_ev_charging' => ['on_trip_ev_charging', 'on_trip_ev_charging_amount'],
+            'post_trip_ev_charging' => ['post_trip_ev_charging', 'post_trip_ev_charging_amount'],
             default => [$field],
         };
     }

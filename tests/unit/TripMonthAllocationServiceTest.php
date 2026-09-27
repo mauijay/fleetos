@@ -30,6 +30,8 @@ final class TripMonthAllocationServiceTest extends CIUnitTestCase
             discountAmount: '0.00',
             reimbursementAmount: '10.00',
             airportFeeAmount: '0.00',
+            onTripEvChargingAmount: '0.00',
+            postTripEvChargingAmount: '0.00',
             currencyCode: 'USD',
             isForecast: false,
         );
@@ -102,6 +104,8 @@ final class TripMonthAllocationServiceTest extends CIUnitTestCase
             discountAmount: '0.00',
             reimbursementAmount: '10.00',
             airportFeeAmount: '0.00',
+            onTripEvChargingAmount: '0.00',
+            postTripEvChargingAmount: '0.00',
             currencyCode: 'USD',
             isForecast: false,
         );

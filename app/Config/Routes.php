@@ -99,6 +99,9 @@ $routes->group('', ['filter' => 'session'], static function (RouteCollection $ro
     $routes->post('operations/incidentals/(:num)/plan', 'Incidentals::confirmPlan/$1', ['filter' => 'permission:admin.access']);
     $routes->post('operations/incidentals/(:num)/invoice-sent', 'Incidentals::invoiceSent/$1', ['filter' => 'permission:admin.access']);
     $routes->post('operations/incidentals/(:num)/no-invoice-needed', 'Incidentals::noInvoiceNeeded/$1', ['filter' => 'permission:admin.access']);
+    $routes->get('operations/supercharger-reimbursements', 'SuperchargerReconciliation::index', ['filter' => 'permission:admin.access']);
+    $routes->post('operations/supercharger-reimbursements/import', 'SuperchargerReconciliation::import', ['filter' => 'permission:admin.access']);
+    $routes->post('operations/supercharger-reimbursements/(:num)/workflow', 'SuperchargerReconciliation::workflow/$1', ['filter' => 'permission:admin.access']);
     $routes->group('operations/expenses', ['filter' => 'permission:admin.access'], static function (RouteCollection $routes): void {
         $routes->get('', 'OperatingExpenses::index');
         $routes->post('', 'OperatingExpenses::create');

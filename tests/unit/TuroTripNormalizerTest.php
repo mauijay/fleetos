@@ -94,6 +94,21 @@ final class TuroTripNormalizerTest extends CIUnitTestCase
         $this->assertSame(8, $trip->fleetVehicleId);
     }
 
+    public function testNormalizesOnTripAndPostTripEvChargingSeparately(): void
+    {
+        $trip = $this->normalizer()->normalize($this->rawRow([
+            'trip_id' => 'trip-charging',
+            'status' => 'Completed',
+            'starts_at' => '2026-09-25 10:00:00',
+            'ends_at' => '2026-09-26 10:00:00',
+            'on_trip_ev_charging' => '$12.75',
+            'post_trip_ev_charging' => '$30.00',
+        ]), 45);
+
+        $this->assertSame('12.75', $trip->onTripEvChargingAmount);
+        $this->assertSame('30.00', $trip->postTripEvChargingAmount);
+    }
+
     private function normalizer(?int $matchedVehicleId = 9, ?callable $matcherCallback = null): TuroTripNormalizer
     {
         $lookups = $this->getMockBuilder(LookupRepository::class)

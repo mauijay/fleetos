@@ -23,6 +23,8 @@ class NormalizedTripData
         public readonly string $discountAmount,
         public readonly string $reimbursementAmount,
         public readonly string $airportFeeAmount,
+        public readonly string $onTripEvChargingAmount,
+        public readonly string $postTripEvChargingAmount,
         public readonly string $currencyCode,
         public readonly bool $isForecast,
     ) {

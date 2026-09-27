@@ -37,6 +37,8 @@ class TuroNormalizedTripRepository
             'discount_amount' => $trip->discountAmount,
             'reimbursement_amount' => $trip->reimbursementAmount,
             'airport_fee_amount' => $trip->airportFeeAmount,
+            'on_trip_ev_charging_amount' => $trip->onTripEvChargingAmount,
+            'post_trip_ev_charging_amount' => $trip->postTripEvChargingAmount,
             'currency_code' => $trip->currencyCode,
             'is_forecast' => $trip->isForecast,
             'normalized_at' => $now,
