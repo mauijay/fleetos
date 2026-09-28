@@ -133,3 +133,10 @@ _modules/*
 
 /results/
 /phpunit.xml
+
+# Private operational import sources and generated local conversion artifacts
+/supercharger2026.xlsx
+/supercharger2026.csv
+/Tesla_Charging_History_*.xlsx
+/Tesla_Charging_History_*.csv
+/trip_earnings_export_*.csv

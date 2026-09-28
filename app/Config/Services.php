@@ -21,6 +21,7 @@ use App\Repositories\TripExtraFulfillmentRepository;
 use App\Repositories\TripIncidentalReviewRepository;
 use App\Repositories\TripMonthAllocationRepository;
 use App\Repositories\TuroAccessReimbursementRepository;
+use App\Repositories\TuroEvChargingUpdateRepository;
 use App\Repositories\TuroImportErrorRepository;
 use App\Repositories\TuroNormalizedTransactionRepository;
 use App\Repositories\TuroNormalizedTripRepository;
@@ -96,7 +97,11 @@ use App\Services\Fleet\VehiclePositioningPlanService;
 use App\Services\Fleet\VehiclePositioningPlanWorkflowService;
 use App\Services\Fleet\VehiclePositioningRecommendationService;
 use App\Services\Tesla\TeslaChargingImportService;
+use App\Services\Tesla\TeslaChargingSourceAnalyzer;
+use App\Services\Tesla\TeslaChargingSourceIdentityService;
+use App\Services\Tesla\TeslaChargingWorkbookConverter;
 use App\Services\Turo\TuroEarningsImportService;
+use App\Services\Turo\TuroEvChargingUpdateService;
 use App\Services\Turo\TuroExtrasImportService;
 use App\Services\Turo\TuroImportIssueService;
 use App\Services\Turo\TuroOdometerIngestionService;
@@ -266,7 +271,35 @@ class Services extends BaseService
             static::superchargerReconciliationRepository(),
             static::currentVehicleCustodyService(),
             new LookupRepository(),
+            identity: static::teslaChargingSourceIdentityService(),
         );
+    }
+
+    public static function teslaChargingSourceIdentityService(bool $getShared = true): TeslaChargingSourceIdentityService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('teslaChargingSourceIdentityService');
+        }
+
+        return new TeslaChargingSourceIdentityService();
+    }
+
+    public static function teslaChargingSourceAnalyzer(bool $getShared = true): TeslaChargingSourceAnalyzer
+    {
+        if ($getShared) {
+            return static::getSharedInstance('teslaChargingSourceAnalyzer');
+        }
+
+        return new TeslaChargingSourceAnalyzer(identity: static::teslaChargingSourceIdentityService());
+    }
+
+    public static function teslaChargingWorkbookConverter(bool $getShared = true): TeslaChargingWorkbookConverter
+    {
+        if ($getShared) {
+            return static::getSharedInstance('teslaChargingWorkbookConverter');
+        }
+
+        return new TeslaChargingWorkbookConverter();
     }
 
     public static function superchargerReconciliationService(bool $getShared = true): SuperchargerReconciliationService
@@ -892,6 +925,24 @@ class Services extends BaseService
         }
 
         return new TuroNormalizedTripRepository();
+    }
+
+    public static function turoEvChargingUpdateRepository(bool $getShared = true): TuroEvChargingUpdateRepository
+    {
+        if ($getShared) {
+            return static::getSharedInstance('turoEvChargingUpdateRepository');
+        }
+
+        return new TuroEvChargingUpdateRepository();
+    }
+
+    public static function turoEvChargingUpdateService(bool $getShared = true): TuroEvChargingUpdateService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('turoEvChargingUpdateService');
+        }
+
+        return new TuroEvChargingUpdateService(static::turoEvChargingUpdateRepository());
     }
 
     public static function vehicleTuroListingRepository(bool $getShared = true): VehicleTuroListingRepository

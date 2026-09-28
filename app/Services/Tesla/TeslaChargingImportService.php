@@ -12,24 +12,12 @@ use RuntimeException;
 
 class TeslaChargingImportService
 {
-    private const REQUIRED_HEADERS = [
-        'charge_start_date_time',
-        'vin',
-        'invoice_number',
-        'site_location_name',
-        'description',
-        'total_inc_vat',
-        'invoice',
-    ];
-
-    private const QUANTITY_FIELDS = ['quantity_base', 'quantity_tier1', 'quantity_tier2', 'quantity_tier3', 'quantity_tier4'];
-    private const UNIT_COST_FIELDS = ['unit_cost_base', 'unit_cost_tier1', 'unit_cost_tier2', 'unit_cost_tier3', 'unit_cost_tier4'];
-
     public function __construct(
         private readonly SuperchargerReconciliationRepository $repository = new SuperchargerReconciliationRepository(),
         private readonly CurrentVehicleCustodyService $custody = new CurrentVehicleCustodyService(),
         private readonly LookupRepository $lookups = new LookupRepository(),
         private readonly TuroCsvReader $reader = new TuroCsvReader(),
+        private readonly TeslaChargingSourceIdentityService $identity = new TeslaChargingSourceIdentityService(),
     ) {
     }
 
@@ -39,8 +27,8 @@ class TeslaChargingImportService
         if ($companyId < 1 || $actorUserId < 1) {
             throw new RuntimeException('An active company and authenticated operator are required.');
         }
-        $headers = array_map($this->canonicalHeader(...), $this->reader->headers($filePath));
-        $missing = array_values(array_diff(self::REQUIRED_HEADERS, $headers));
+        $headers = array_map($this->identity->canonicalHeader(...), $this->reader->headers($filePath));
+        $missing = array_values(array_diff(TeslaChargingSourceIdentityService::REQUIRED_HEADERS, $headers));
         if ($missing !== []) {
             throw new RuntimeException('Tesla CSV is missing required headers: ' . implode(', ', $missing) . '.');
         }
@@ -59,8 +47,8 @@ class TeslaChargingImportService
             foreach ($this->reader->read($filePath) as $csvRow) {
                 $counts['rows']++;
                 $rawPayload = $csvRow->row;
-                $payload = $this->canonicalPayload($rawPayload);
-                $rowHash = hash('sha256', $this->canonicalJson($payload));
+                $payload = $this->identity->canonicalPayload($rawPayload);
+                $rowHash = hash('sha256', $this->identity->canonicalJson($payload));
                 $rawRowId = $this->repository->createImportRow($companyId, $batchId, $csvRow->rowNumber, $rowHash, $rawPayload, 'processing');
                 $result = $this->importRow($companyId, $rawRowId, $payload);
                 $counts[$result['counter']]++;
@@ -83,7 +71,7 @@ class TeslaChargingImportService
         $sourceStartedAt = trim((string) ($payload['charge_start_date_time'] ?? ''));
         $site = trim((string) ($payload['site_location_name'] ?? ''));
         $description = strtoupper(trim((string) ($payload['description'] ?? '')));
-        $invoiceUrl = $this->invoiceUrl($payload['invoice'] ?? null);
+        $invoiceUrl = $this->identity->invoiceUrl($payload['invoice'] ?? null);
 
         if ($vin === '' || $invoice === '' || $sourceStartedAt === '' || $description === '') {
             return $this->result('rejected', 'rejected', 'missing_identity', 'VIN, invoice number, charge timestamp, and description are required.');
@@ -96,7 +84,7 @@ class TeslaChargingImportService
         } catch (\Throwable) {
             return $this->result('rejected', 'rejected', 'invalid_timestamp', 'ChargeStartDateTime could not be parsed.');
         }
-        $amountCents = $this->moneyCents($payload['total_inc_vat'] ?? null);
+        $amountCents = $this->identity->moneyCents($payload['total_inc_vat'] ?? null);
         if ($amountCents === null || $amountCents < 0) {
             return $this->result('rejected', 'rejected', 'invalid_total_inc_vat', 'Total Inc. VAT must be a non-negative amount with at most two decimal places.');
         }
@@ -113,20 +101,10 @@ class TeslaChargingImportService
         $vehicleId = (int) $vehicles[0]['id'];
         $localDate = $sourceDate->setTimezone(new DateTimeZone('Pacific/Honolulu'));
         $startedAt = $localDate->format('Y-m-d H:i:s');
-        $quantity = $this->sourceFields($payload, self::QUANTITY_FIELDS);
-        $unitCost = $this->sourceFields($payload, self::UNIT_COST_FIELDS);
-        $lineFingerprint = hash('sha256', $this->canonicalJson([
-            'company_id' => $companyId,
-            'vin' => $vin,
-            'invoice' => $invoice,
-            'started_at' => $sourceStartedAt,
-            'site' => $site,
-            'description' => $description,
-            'quantity' => $quantity,
-            'unit_cost' => $unitCost,
-            'total_inc_vat_cents' => $amountCents,
-            'invoice_url' => $invoiceUrl,
-        ]));
+        $quantity = $this->identity->quantityFields($payload);
+        $unitCost = $this->identity->unitCostFields($payload);
+        $fingerprints = $this->identity->fingerprints($companyId, $payload);
+        $lineFingerprint = $fingerprints['line_fingerprint'];
         if ($this->repository->lineExists($companyId, $lineFingerprint)) {
             return $this->result('duplicate', 'duplicate', 'source_line_replayed', 'This exact Tesla line item was already imported.');
         }
@@ -141,13 +119,7 @@ class TeslaChargingImportService
             $classification['custody_classification'] = 'review';
             $classification['custody_basis_code'] = 'unknown_fee_description';
         }
-        $sessionFingerprint = hash('sha256', $this->canonicalJson([
-            'company_id' => $companyId,
-            'vin' => $vin,
-            'invoice' => $invoice,
-            'started_at' => $sourceStartedAt,
-            'site' => $site,
-        ]));
+        $sessionFingerprint = $fingerprints['session_fingerprint'];
         $session = $this->repository->sessionByFingerprint($sessionFingerprint);
         if ($session === null) {
             $sessionId = $this->repository->createSession([
@@ -290,84 +262,9 @@ class TeslaChargingImportService
         ];
     }
 
-    private function moneyCents(mixed $value): ?int
-    {
-        $text = trim((string) $value);
-        $text = str_replace([',', '$'], '', $text);
-        if (! preg_match('/^\d+(?:\.\d{1,2})?$/', $text)) {
-            return null;
-        }
-        [$whole, $fraction] = array_pad(explode('.', $text, 2), 2, '');
-
-        return ((int) $whole * 100) + (int) str_pad($fraction, 2, '0');
-    }
-
     private function decimalFromCents(int $cents): string
     {
         return sprintf('%d.%02d', intdiv($cents, 100), $cents % 100);
-    }
-
-    private function invoiceUrl(mixed $value): ?string
-    {
-        $url = trim((string) $value);
-        if ($url === '') {
-            return null;
-        }
-        $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
-
-        return in_array($scheme, ['http', 'https'], true) ? $url : null;
-    }
-
-    /** @param array<string, mixed> $payload @param list<string> $fields @return array<string, string> */
-    private function sourceFields(array $payload, array $fields): array
-    {
-        $result = [];
-        foreach ($fields as $field) {
-            $value = trim((string) ($payload[$field] ?? ''));
-            if ($value !== '') {
-                $result[$field] = $value;
-            }
-        }
-
-        return $result;
-    }
-
-    private function canonicalJson(array $value): string
-    {
-        ksort($value);
-
-        return json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
-    }
-
-    /** @param array<string, mixed> $payload @return array<string, mixed> */
-    private function canonicalPayload(array $payload): array
-    {
-        $canonical = [];
-        foreach ($payload as $header => $value) {
-            $canonical[$this->canonicalHeader((string) $header)] = $value;
-        }
-
-        return $canonical;
-    }
-
-    private function canonicalHeader(string $header): string
-    {
-        return match ($header) {
-            'chargestartdatetime' => 'charge_start_date_time',
-            'sitelocationname' => 'site_location_name',
-            'invoicenumber' => 'invoice_number',
-            'quantitybase' => 'quantity_base',
-            'quantitytier1' => 'quantity_tier1',
-            'quantitytier2' => 'quantity_tier2',
-            'quantitytier3' => 'quantity_tier3',
-            'quantitytier4' => 'quantity_tier4',
-            'unitcostbase' => 'unit_cost_base',
-            'unitcosttier1' => 'unit_cost_tier1',
-            'unitcosttier2' => 'unit_cost_tier2',
-            'unitcosttier3' => 'unit_cost_tier3',
-            'unitcosttier4' => 'unit_cost_tier4',
-            default => $header,
-        };
     }
 
     /** @return array{status:string,counter:string,issue_code:?string,issue_detail:?string} */
