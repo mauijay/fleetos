@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.24.0 — Guarded Supercharger Import Tooling
+
+Release date: 2026-09-27
+
+### Added
+
+- Add a dry-run-first Turo EV charging updater limited to On-trip and Post-trip EV charging fields.
+- Add deterministic Tesla charging-history XLSX-to-CSV conversion with decimal-safe serialization and offset timestamp preservation.
+- Add Tesla source analysis and shared replay-safe identity tooling.
+- Add privacy safeguards preventing operational Tesla/Turo source exports from entering Git.
+
+### Changed
+
+- Tesla charging import and analysis now share one canonical source-identity implementation.
+
+### Release Boundaries
+
+- This release requires no migration or schema change.
+- Deployment performs no historical import, replay, reconciliation, or business-data update.
+- Production EV-field updates and Tesla-history imports remain separately authorized operational actions.
+
 ## v0.23.1 — Movement Integrity Hotfix
 
 Release date: 2026-09-27
