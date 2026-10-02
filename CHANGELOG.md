@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.25.0 — Trip Extras Refresh & Movement Visibility
+
+Release date: 2026-10-01
+
+### Added
+
+- Add repeat Extras verification for upcoming and active reservations, including previously observed trips.
+- Add exact-reservation Extras lookup for operator-assisted refresh.
+- Add verification freshness states for never-observed, empty, nonempty, and incomplete observations.
+- Show purchased Extras directly in Movement Checklist guest context.
+- Keep unmapped purchased Extras visible with an explicit operational mapping-required state.
+
+### Changed
+
+- Preserve purchased Extra visibility independently from Fleet Extra mapping.
+- Reuse existing fulfillment configuration as the sole readiness and preparation authority.
+- Harden Extras observation handling for partial snapshots and equal-time conflicts.
+- Allow previously unmatched Extras evidence to attach to a normalized trip without replaying the source file.
+- Clarify Purchased Extras versus manual Special Instructions in the Movement Checklist.
+- Harden privacy around operator-generated Extras source exports and synthetic test fixtures.
+
+### Release Boundaries
+
+- No migration or schema change.
+- No unattended Turo access is introduced.
+- Deployment alone does not refresh or import any Extras.
+- Live reservation refresh and source-product mapping remain explicit operator actions.
+
 ## v0.24.0 — Guarded Supercharger Import Tooling
 
 Release date: 2026-09-27
