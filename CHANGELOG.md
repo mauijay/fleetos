@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.25.1 — Cross-Trip Readiness Scoping Fix
+
+Release date: 2026-10-01
+
+### Fixed
+
+- Keep unresolved blocking preparation requirements in readiness even when operator actions are temporarily unavailable.
+- Prevent custody from another trip from suppressing target-trip readiness blockers.
+- Separate future-trip preparation from the current trip's primary preparation workspace and readiness calculation.
+- Keep dashboard and Movement Board readiness consistent with pending next-trip preparation.
+- Prevent "no movement workflow today" from being treated as equivalent to "ready for the next trip."
+- Preserve target-trip ownership for Extra fulfillment and manual commitment requirements through deferred/action-suppressed states.
+- Treat stale staging and preparation facts appropriately after intervening vehicle use without rewriting historical evidence.
+- Preserve same-trip handoff and inactive-trip lifecycle closure behavior.
+
+### Release Boundaries
+
+- No migration or schema change.
+- No live Extras or fulfillment changes occur on deployment.
+- Existing movement and readiness history is preserved.
+- Live FSD and booster-seat cases remain separate post-deployment acceptance checks.
+
 ## v0.25.0 — Trip Extras Refresh & Movement Visibility
 
 Release date: 2026-10-01
