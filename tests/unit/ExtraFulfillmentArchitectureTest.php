@@ -57,7 +57,7 @@ final class ExtraFulfillmentArchitectureTest extends CIUnitTestCase
     public function testRemovedFulfillmentRendersHistoryWithoutOperationalAction(): void
     {
         $html = Services::renderer()->setData([
-            'checklist' => ['id' => 668],
+            'checklist' => ['id' => 668, 'turo_trip_normalized_id' => 333],
             'extraPreparation' => [
                 [
                     'fulfillment_id' => 8,
@@ -102,7 +102,7 @@ final class ExtraFulfillmentArchitectureTest extends CIUnitTestCase
     public function testWorkflowRendersTypedConfirmationAndKeepsInstructionAsDetail(): void
     {
         $html = Services::renderer()->setData([
-            'checklist' => ['id' => 668],
+            'checklist' => ['id' => 668, 'turo_trip_normalized_id' => 333],
             'extraPreparation' => [[
                 'fulfillment_id' => 8,
                 'turo_trip_normalized_id' => 333,
@@ -127,7 +127,7 @@ final class ExtraFulfillmentArchitectureTest extends CIUnitTestCase
     public function testInformationalFulfillmentHasNoConfirmationControl(): void
     {
         $html = Services::renderer()->setData([
-            'checklist' => ['id' => 668],
+            'checklist' => ['id' => 668, 'turo_trip_normalized_id' => 333],
             'extraPreparation' => [[
                 'fulfillment_id' => 10,
                 'turo_trip_normalized_id' => 333,

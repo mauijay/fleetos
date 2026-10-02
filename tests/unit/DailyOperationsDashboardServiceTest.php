@@ -9,8 +9,10 @@ use App\Services\Fleet\FleetStatisticsService;
 use App\Services\Fleet\MorningBriefingService;
 use App\Services\Fleet\MovementBoardIntelligenceService;
 use App\Services\Fleet\MovementReadinessReadService;
+use App\Services\Fleet\OperatingExpenseService;
 use App\Services\Fleet\RevenueService;
 use App\Services\Fleet\TaskService;
+use App\Services\Fleet\TripIncidentalReviewService;
 use App\Services\Fleet\TripMovementChecklistService;
 use App\Services\Fleet\TuroAccessReimbursementService;
 use App\Services\Fleet\VehicleAvailabilityService;
@@ -19,12 +21,93 @@ use App\Services\Turo\TuroImportIssueService;
 use App\Services\Turo\TuroTripReconciliationService;
 use App\Services\Turo\TuroVehicleMappingService;
 use CodeIgniter\Test\CIUnitTestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 /**
  * @internal
  */
 final class DailyOperationsDashboardServiceTest extends CIUnitTestCase
 {
+    public function testNoWorkflowTodayStillQueuesTomorrowsPendingSeatInstallation(): void
+    {
+        $asOf = new DateTimeImmutable('2030-01-02 12:00:00');
+        $tasks = $this->createStub(TaskService::class);
+        $tasks->method('today')->willReturn(['todays_pickups' => [], 'todays_returns' => [], 'airport_deliveries' => [], 'cleaning_tasks' => [], 'charging_tasks' => []]);
+        $availability = $this->createStub(VehicleAvailabilityService::class);
+        $availability->method('vehicleStatus')->willReturn([$this->vehicle(9)]);
+        $health = $this->createStub(FleetHealthService::class);
+        $health->method('summary')->willReturn($this->emptyHealth());
+        $statistics = $this->createStub(FleetStatisticsService::class);
+        $statistics->method('currentMonth')->willReturn(['fleet_utilization' => 0.0]);
+        $snapshot = $this->createStub(FleetSnapshotService::class);
+        $snapshot->method('forSingleFleetCompany')->willReturn(['company_id' => 1, 'total' => 1, 'buckets' => [], 'vehicles' => []]);
+        $financial = $this->createStub(FinancialSummaryService::class);
+        $financial->method('currentMonth')->willReturn(['realized_operating_revenue' => 0.0, 'realized_recoveries' => 0.0, 'recorded_operating_costs' => 0.0, 'net_realized_operating_result' => 0.0, 'forecast_host_payout' => 0.0]);
+        $imports = $this->createStub(TuroImportIssueService::class);
+        $imports->method('attentionSummary')->willReturn(['total_unresolved' => 0, 'href' => '#imports']);
+        $mappings = $this->createStub(TuroVehicleMappingService::class);
+        $mappings->method('attentionSummary')->willReturn(['unique_unmatched_vehicles' => 0, 'affected_issues' => 0, 'href' => '#mappings']);
+        $reconciliation = $this->createStub(TuroTripReconciliationService::class);
+        $reconciliation->method('attentionSummary')->willReturn(['awaiting_reconciliation' => 0, 'href' => '#reconciliation']);
+        $airport = $this->createStub(AirportMovementWorkflowService::class);
+        $airport->method('attentionSummary')->willReturn(['airport_workflows_requiring_action' => 0, 'href' => '#airport']);
+        $reimbursements = $this->createStub(TuroAccessReimbursementService::class);
+        $reimbursements->method('attentionSummary')->willReturn(['total_actionable' => 0, 'ready_to_file' => 0, 'needs_setup' => 0, 'filed_pending' => 0, 'href' => '#reimbursements']);
+        $checklists = $this->createMock(TripMovementChecklistService::class);
+        $checklists->expects($this->never())->method('ensureForDay');
+        $checklists->expects($this->exactly(2))->method('summariesForDay')->willReturn([]);
+        $readiness = $this->createMock(MovementReadinessReadService::class);
+        $readiness->expects($this->never())->method('forCompany');
+        $incidentals = $this->createStub(TripIncidentalReviewService::class);
+        $incidentals->method('attentionSummaryForSingleCompany')->willReturn(['total' => 0, 'href' => '#incidentals']);
+        $expenses = $this->createStub(OperatingExpenseService::class);
+        $expenses->method('attentionSummary')->willReturn(['total' => 0, 'href' => '#expenses']);
+        $pendingStates = [true, false];
+        $intelligence = $this->createMock(MovementBoardIntelligenceService::class);
+        $intelligence->expects($this->exactly(2))->method('enrich')->willReturnCallback(static function (array $board) use (&$pendingStates): array {
+            $pending = array_shift($pendingStates);
+            $projection = (new \App\Services\Fleet\MovementReadinessProjectionService())->projectTripPreparation([
+                'company_id' => 1, 'turo_trip_normalized_id' => 502, 'fleet_vehicle_id' => 9,
+                'extra_fulfillments' => [['company_id' => 1, 'turo_trip_normalized_id' => 502, 'fulfillment_id' => 702, 'selection_id' => 602,
+                    'title' => 'Synthetic booster seat', 'fulfillment_type' => 'install', 'fulfillment_phase' => 'preparation', 'requires_operator_confirmation' => true,
+                    'readiness_blocking' => true, 'is_actionable' => $pending, 'is_completed' => ! $pending, 'action_label' => 'Install the synthetic seat']],
+            ]);
+            $projection['href'] = '/operations/trips/502/commitments';
+            $board[0]['next_trip_preparation'] = $projection;
+            $board[0]['readiness_blocking_remaining'] = $projection['blocking_remaining_count'];
+            $board[0]['readiness_display_remaining'] = $projection['blocking_remaining_count'];
+            return $board;
+        });
+        $dashboard = new DailyOperationsDashboardService(
+            taskService: $tasks,
+            availabilityService: $availability,
+            healthService: $health,
+            statisticsService: $statistics,
+            importIssueService: $imports,
+            vehicleMappingService: $mappings,
+            reconciliationService: $reconciliation,
+            checklistService: $checklists,
+            airportWorkflowService: $airport,
+            turoAccessReimbursementService: $reimbursements,
+            movementBoardIntelligenceService: $intelligence,
+            movementReadinessReadService: $readiness,
+            fleetSnapshotService: $snapshot,
+            financialSummaryService: $financial,
+            incidentalReviewService: $incidentals,
+            operatingExpenseService: $expenses,
+        );
+        $result = $dashboard->forToday($asOf);
+        $this->assertSame([], $result['timeline']);
+        $this->assertSame([], $result['movement_board'][0]['checklists']);
+        $queue = array_column($result['operational_queue'], null, 'code');
+        $this->assertSame(1, $queue['readiness']['count']);
+        $this->assertArrayNotHasKey('pickup', $queue);
+        $this->assertCount(1, $dashboard->filterMovementBoard($result['movement_board'], 'readiness'));
+        $completed = $dashboard->forToday($asOf);
+        $this->assertArrayNotHasKey('readiness', array_column($completed['operational_queue'], null, 'code'));
+        $this->assertSame([], $dashboard->filterMovementBoard($completed['movement_board'], 'readiness'));
+    }
+
     private VehicleDailyStateService $states;
     private MorningBriefingService $briefing;
 
@@ -179,7 +262,8 @@ final class DailyOperationsDashboardServiceTest extends CIUnitTestCase
         $this->assertSame('Location not captured', $board[0]['location_label']);
     }
 
-    public function testOperationalQueueEmitsOnlyMeasuredPendingWork(): void
+    #[DataProvider('recoveryScenarios')]
+    public function testOperationalQueueEmitsOnlyMeasuredPendingWork(bool $otherTripAwaitingRecovery): void
     {
         $tasks = $this->createStub(TaskService::class);
         $availability = $this->createStub(VehicleAvailabilityService::class);
@@ -193,6 +277,10 @@ final class DailyOperationsDashboardServiceTest extends CIUnitTestCase
         $reimbursements = $this->createMock(TuroAccessReimbursementService::class);
 
         $today = $this->today();
+        $today['awaiting_recovery'] = $otherTripAwaitingRecovery ? [[
+            'turo_trip_normalized_id' => 258, 'fleet_vehicle_id' => 1, 'fleet_label' => 'Synthetic vehicle',
+            'reported_location_label' => 'Synthetic site', 'href' => '/operations/checklists/77',
+        ]] : [];
         $today['todays_pickups'][] = [
             'id' => 274,
             ...$this->reservation(1, '2026-07-19 13:30:00', '2026-07-21 10:00:00'),
@@ -346,6 +434,11 @@ final class DailyOperationsDashboardServiceTest extends CIUnitTestCase
         $this->assertSame([106, 201], array_column($filtered, 'id'));
         $this->assertSame([274, 301], array_column($filtered, 'turo_trip_normalized_id'));
         $this->assertNotContains(77, array_column($filtered, 'id'));
+    }
+
+    public static function recoveryScenarios(): array
+    {
+        return ['no awaiting recovery' => [false], 'another trip awaiting recovery on the same vehicle' => [true]];
     }
 
     public function testTimelineReadinessAttachesByExactTripAndMovementIdentity(): void

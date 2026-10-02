@@ -6,6 +6,33 @@ use CodeIgniter\Test\CIUnitTestCase;
 /** @internal */
 final class TripCommitmentReadinessTest extends CIUnitTestCase
 {
+    public function testPreparationWithoutChecklistSharesOwnershipCustodyAndHandoffRules(): void
+    {
+        $context = $this->context([$this->commitment(921, 'task', true, 'Synthetic kit')]);
+        $extra = $this->fulfillment(922, false, true);
+        $context['extra_fulfillments'] = [$extra, $extra, array_merge($this->fulfillment(923, false, true), ['company_id' => 2]),
+            array_merge($this->fulfillment(924, false, true), ['turo_trip_normalized_id' => 202])];
+        $context['latest_custody_event'] = ['id' => 925, 'event_code' => 'actual_handoff', 'turo_trip_normalized_id' => 202];
+        $projector = new MovementReadinessProjectionService();
+        $projection = $projector->projectTripPreparation($context);
+        $this->assertSame(2, $projection['blocking_remaining_count']);
+        $this->assertFalse($projection['ready']);
+        foreach ($projection['requirements'] as $requirement) {
+            $this->assertSame(101, $requirement['trip_id']);
+            $this->assertSame('unsatisfied', $requirement['status']);
+            $this->assertTrue($requirement['relevant']);
+            $this->assertFalse($requirement['actionable']);
+            $this->assertSame('other_trip_guest_custody', $requirement['deferred_reason']);
+        }
+        $context['active_events']['actual_handoff'] = ['id' => 926];
+        $closed = $projector->projectTripPreparation($context);
+        $this->assertSame(0, $closed['blocking_remaining_count']);
+        foreach ($closed['requirements'] as $requirement) {
+            $this->assertSame('unsatisfied', $requirement['status']);
+            $this->assertSame('target_handoff', $requirement['retired_reason']);
+        }
+    }
+
     public function testRequiredTaskAddsExactlyOneBlockerAndInformationAddsNone(): void
     {
         $task = $this->commitment(501, 'task', true, 'Cooler with ice');
@@ -232,6 +259,127 @@ final class TripCommitmentReadinessTest extends CIUnitTestCase
         $this->assertSame(['energy_known'], array_column($this->energyRequirements($secondProjection), 'code'));
         $this->assertFalse($this->requirement($secondProjection, 'energy_known')['actionable']);
         $this->assertNull($this->requirement($secondProjection, 'energy_known')['action']);
+    }
+
+    public function testOtherTripCustodyDefersExtraWithoutClearingBlockerAndPreservesOwnership(): void
+    {
+        $context = $this->context([]);
+        $context['turo_reservation_id'] = '80001001';
+        $context['extra_fulfillments'] = [array_merge($this->fulfillment(901, false, true), ['selection_id' => 902, 'company_id' => 1, 'fulfillment_type' => 'configure'])];
+        $context['latest_custody_event'] = ['id' => 903, 'turo_trip_normalized_id' => 202, 'event_code' => 'actual_handoff', 'occurred_at' => '2026-11-11 13:00:00'];
+        $projection = (new MovementReadinessProjectionService())->project($context);
+        $extra = $this->requirement($projection, 'extra_fulfillment_901');
+        $this->assertFalse($projection['ready']);
+        $withoutExtra = $context;
+        $withoutExtra['extra_fulfillments'] = [];
+        $physicalBlockers = (new MovementReadinessProjectionService())->project($withoutExtra)['blocking_remaining_count'];
+        $this->assertSame($physicalBlockers + 1, $projection['blocking_remaining_count']);
+        $this->assertTrue(MovementReadinessProjectionService::isBlocking($extra));
+        $this->assertFalse($extra['actionable']);
+        $this->assertNull($extra['action']);
+        $this->assertSame('unsatisfied', $extra['status']);
+        $this->assertSame([1, 101, '80001001', 11, 902, 901], [$extra['company_id'], $extra['trip_id'], $extra['reservation_id'], $extra['vehicle_id'], $extra['selection_id'], $extra['fulfillment_id']]);
+        $this->assertSame('other_trip_guest_custody', $extra['deferred_reason']);
+        $this->assertSame([903, 202], [$extra['custody_event_id'], $extra['custody_trip_id']]);
+        $this->assertSame(1, count(array_filter($projection['requirements'], static fn ($row) => $row['code'] === 'extra_fulfillment_901')));
+    }
+
+    public function testOtherTripRecoveryRestoresAvailabilityButDoesNotFulfillExtra(): void
+    {
+        $context = $this->context([]);
+        $context['extra_fulfillments'] = [$this->fulfillment(904, false, true)];
+        $context['latest_custody_event'] = ['id' => 905, 'turo_trip_normalized_id' => 202, 'event_code' => 'vehicle_recovered', 'occurred_at' => '2026-11-11 13:00:00'];
+        $projection = (new MovementReadinessProjectionService())->project($context);
+        $extra = $this->requirement($projection, 'extra_fulfillment_904');
+        $this->assertFalse($projection['ready']);
+        $this->assertSame('unsatisfied', $extra['status']);
+        $this->assertTrue($extra['actionable']);
+        $this->assertTrue(MovementReadinessProjectionService::isBlocking($extra));
+    }
+
+    public function testCompleteExtraIsSatisfiedExactlyOnceEvenWhileAnotherTripHasCustody(): void
+    {
+        $context = $this->context([]);
+        $context['extra_fulfillments'] = [$this->fulfillment(906, true, true), $this->fulfillment(906, true, true)];
+        $context['latest_custody_event'] = ['id' => 907, 'turo_trip_normalized_id' => 202, 'event_code' => 'actual_handoff', 'occurred_at' => '2026-11-11 11:00:00'];
+        $projection = (new MovementReadinessProjectionService())->project($context);
+        $extra = $this->requirement($projection, 'extra_fulfillment_906');
+        $this->assertSame('satisfied', $extra['status']);
+        $this->assertFalse(MovementReadinessProjectionService::isBlocking($extra));
+        $this->assertTrue($projection['ready']);
+        $this->assertCount(1, array_filter($projection['requirements'], static fn ($row) => $row['code'] === 'extra_fulfillment_906'));
+    }
+
+    public function testFutureStagingDoesNotRetireTargetExtraAndOwnHandoffDoes(): void
+    {
+        $context = $this->context([]);
+        $context['extra_fulfillments'] = [$this->fulfillment(908, false, true)];
+        $context['latest_custody_event'] = ['id' => 909, 'turo_trip_normalized_id' => 303, 'event_code' => 'vehicle_staged', 'occurred_at' => '2026-11-11 13:00:00'];
+        $before = (new MovementReadinessProjectionService())->project($context);
+        $this->assertFalse($before['ready']);
+        $this->assertTrue($this->requirement($before, 'extra_fulfillment_908')['relevant']);
+        $context['active_events']['actual_handoff'] = ['id' => 910, 'occurred_at' => '2026-11-11 14:00:00'];
+        $after = (new MovementReadinessProjectionService())->project($context);
+        $extra = $this->requirement($after, 'extra_fulfillment_908');
+        $this->assertTrue($after['ready']);
+        $this->assertFalse($extra['relevant']);
+        $this->assertSame('target_handoff', $extra['retired_reason']);
+        $this->assertSame('unsatisfied', $extra['status']);
+    }
+
+    public function testManualBlockerRetainsOwnerAndCountsWhileDeferredByOtherTrip(): void
+    {
+        $context = $this->context([$this->commitment(911, 'task', true, 'Install synthetic kit')]);
+        $context['latest_custody_event'] = ['id' => 912, 'turo_trip_normalized_id' => 202, 'event_code' => 'actual_handoff', 'occurred_at' => '2026-11-11 11:00:00'];
+        $projection = (new MovementReadinessProjectionService())->project($context);
+        $manual = $this->requirement($projection, 'guest_commitment_911');
+        $this->assertFalse($projection['ready']);
+        $this->assertSame(1, $projection['blocking_remaining_count']);
+        $this->assertTrue(MovementReadinessProjectionService::isBlocking($manual));
+        $this->assertFalse($manual['actionable']);
+        $this->assertNull($manual['action']);
+        $this->assertSame([101, 911, 'trip_commitment'], [$manual['trip_id'], $manual['commitment_id'], $manual['source_type']]);
+    }
+
+    public function testForeignTripAndForeignCompanyWorkAreIgnoredDefensively(): void
+    {
+        $context = $this->context([array_merge($this->commitment(913, 'task', true, 'Foreign kit'), ['turo_trip_normalized_id' => 202])]);
+        $context['extra_fulfillments'] = [array_merge($this->fulfillment(914, false, true), ['turo_trip_normalized_id' => 202]), array_merge($this->fulfillment(915, false, true), ['company_id' => 2])];
+        $projection = (new MovementReadinessProjectionService())->project($context);
+        $this->assertTrue($projection['ready']);
+        $this->assertNotContains('guest_commitment_913', array_column($projection['requirements'], 'code'));
+        $this->assertNotContains('extra_fulfillment_914', array_column($projection['requirements'], 'code'));
+        $this->assertNotContains('extra_fulfillment_915', array_column($projection['requirements'], 'code'));
+    }
+
+    public function testInterveningUseInvalidatesOldPositivePhysicalFactsButKeepsFreshFields(): void
+    {
+        $context = $this->context([]);
+        $event = ['id' => 916, 'turo_trip_normalized_id' => 202, 'event_code' => 'actual_handoff', 'occurred_at' => '2026-11-11 13:00:00'];
+        $context['latest_custody_event'] = $event;
+        $context['vehicle_custody'] = ['basis_trip_id' => 202, 'basis_event_id' => 916, 'basis_event_code' => 'actual_handoff'];
+        $projection = (new MovementReadinessProjectionService())->project($context);
+        $this->assertSame('unsatisfied', $this->requirement($projection, 'location_confirmed')['status']);
+        $this->assertSame('unsatisfied', $this->requirement($projection, 'vehicle_clean')['status']);
+        $this->assertSame('unsatisfied', $this->requirement($projection, 'energy_known')['status']);
+        $context['current_readiness_assessment'] = ['cleanliness' => 'clean', 'energy_percent' => 88, 'captured_at' => '2026-11-11 13:05:00'];
+        $fresh = (new MovementReadinessProjectionService())->project($context);
+        $this->assertSame('satisfied', $this->requirement($fresh, 'vehicle_clean')['status']);
+        $this->assertSame('satisfied', $this->requirement($fresh, 'energy_known')['status']);
+        $this->assertSame('unsatisfied', $this->requirement($fresh, 'location_confirmed')['status']);
+    }
+
+    public function testInactiveTargetRetiresReadinessWithoutCompletingWork(): void
+    {
+        $context = $this->context([]);
+        $context['trip_is_operational'] = false;
+        $context['extra_fulfillments'] = [$this->fulfillment(917, false, true)];
+        $projection = (new MovementReadinessProjectionService())->project($context);
+        $extra = $this->requirement($projection, 'extra_fulfillment_917');
+        $this->assertSame(0, $projection['blocking_remaining_count']);
+        $this->assertSame('unsatisfied', $extra['status']);
+        $this->assertSame('target_trip_inactive', $extra['retired_reason']);
+        $this->assertFalse($extra['actionable']);
     }
 
     /** @param list<array<string, mixed>> $commitments @return array<string, mixed> */

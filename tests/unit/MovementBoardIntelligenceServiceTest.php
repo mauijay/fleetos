@@ -1,11 +1,15 @@
 <?php
 
+use App\Repositories\MovementReadinessReadModelRepository;
 use App\Repositories\OperationalFactsRepository;
 use App\Services\Fleet\CurrentVehicleCustodyService;
 use App\Services\Fleet\ImportFreshnessService;
 use App\Services\Fleet\MovementBoardIntelligenceService;
+use App\Services\Fleet\MovementReadinessReadService;
 use App\Services\Fleet\MovementStateResolver;
 use App\Services\Fleet\NextConfirmedTripService;
+use App\Services\Fleet\TripCommitmentService;
+use App\Services\Fleet\TripExtraFulfillmentService;
 use App\Services\Fleet\VehiclePositioningPlanService;
 use App\Services\Fleet\VehiclePositioningRecommendationService;
 use CodeIgniter\Test\CIUnitTestCase;
@@ -13,6 +17,70 @@ use CodeIgniter\Test\CIUnitTestCase;
 /** @internal */
 final class MovementBoardIntelligenceServiceTest extends CIUnitTestCase
 {
+    public function testNoMovementTodayPendingNextTripSeatInstallationPreventsReadyUntilFulfilled(): void
+    {
+        $nextTrip = ['id' => 502, 'fleet_vehicle_id' => 9, 'turo_reservation_id' => '80000502', 'starts_at' => '2030-01-03 09:00:00', 'pickup_location_class' => 'home'];
+        $extra = ['company_id' => 1, 'fleet_vehicle_id' => 9, 'turo_trip_normalized_id' => 502, 'selection_id' => 602, 'fulfillment_id' => 702,
+            'title' => 'Synthetic booster seat', 'fulfillment_type' => 'install', 'fulfillment_phase' => 'preparation', 'requires_operator_confirmation' => true,
+            'readiness_blocking' => true, 'is_completed' => false, 'is_actionable' => true, 'action_label' => 'Install the synthetic booster seat'];
+        $event = ['id' => 90, 'turo_trip_normalized_id' => 501, 'event_code' => 'vehicle_recovered', 'occurred_at' => '2030-01-02 08:00:00', 'location_class' => 'home'];
+        $assessment = ['cleanliness' => 'clean', 'energy_percent' => 90, 'captured_at' => '2030-01-02 10:00:00'];
+        $profile = ['energy_kind' => 'electric', 'ready_energy_target_percent' => 80, 'capabilities' => []];
+        $input = ['fleet_vehicle_id' => 9, 'status' => 'available', 'checklists' => []];
+        $asOf = new DateTimeImmutable('2030-01-02 12:00:00');
+        $card = $this->service($event, null, $assessment, $profile, $nextTrip, extras: [$extra])->enrich([$input], $asOf, 1)[0];
+
+        $this->assertSame('home', $card['location_class']);
+        $this->assertSame('Clean', $card['condition_label']);
+        $this->assertSame('90%', $card['energy_value']);
+        $this->assertSame([], $card['checklists']);
+        $this->assertNotSame('ready', $card['state']['code']);
+        $this->assertStringNotContainsString('Ready for the next trip', $card['primary_line']);
+        $this->assertFalse($card['checklist_ready']);
+        $this->assertSame(1, $card['readiness_blocking_remaining']);
+        $this->assertCount(1, $card['readiness_blockers']);
+        $this->assertStringContainsString('No movement workflow today', $card['readiness_summary']);
+        $this->assertStringContainsString('Next trip preparation incomplete', $card['readiness_summary']);
+        $this->assertSame(['Synthetic booster seat'], $card['readiness_compact']['trip_preparation_items']);
+        $this->assertSame('/operations/trips/502/commitments', $card['readiness_compact']['next_actions'][0]['href']);
+        $this->assertSame(502, $card['readiness_blockers'][0]['trip_id']);
+        $this->assertTrue($card['readiness_blockers'][0]['actionable']);
+        $this->assertSame(['code' => 'prepare_next_trip', 'label' => 'Prepare next trip', 'href' => '/operations/trips/502/commitments'], $card['action']);
+
+        $extra['is_completed'] = true;
+        $extra['is_actionable'] = false;
+        $extra['completed_at'] = '2030-01-02 11:00:00';
+        $completed = $this->service($event, null, $assessment, $profile, $nextTrip, extras: [$extra])->enrich([$input], $asOf, 1)[0];
+        $this->assertSame('ready', $completed['state']['code']);
+        $this->assertSame('Ready for the next trip.', $completed['primary_line']);
+        $this->assertSame(0, $completed['readiness_blocking_remaining']);
+        $this->assertTrue($completed['checklist_ready']);
+        $this->assertSame([], $completed['readiness_blockers']);
+    }
+
+    public function testFuturePickupUsesAuthoritativeProjectionAndDoesNotDuplicateTodaysTarget(): void
+    {
+        $nextTrip = ['id' => 502, 'starts_at' => '2030-01-03 09:00:00', 'pickup_location_class' => 'home'];
+        $requirement = ['code' => 'extra_fulfillment_702', 'trip_id' => 502, 'label' => 'Synthetic seat', 'phase' => 'pickup_preparation', 'blocking' => true, 'relevant' => true, 'status' => 'unsatisfied', 'actionable' => false, 'action' => null];
+        $projection = ['trip_id' => 502, 'vehicle_id' => 9, 'readiness_phase' => 'pickup_preparation', 'blocking_remaining_count' => 1, 'additional_actions_remaining_count' => 0, 'requirements' => [$requirement]];
+        $input = ['fleet_vehicle_id' => 9, 'status' => 'available', 'checklists' => []];
+        $service = $this->service(null, null, null, ['energy_kind' => 'unknown', 'capabilities' => []], $nextTrip, futureProjection: $projection);
+        $asOf = new DateTimeImmutable('2030-01-02 12:00:00');
+        $card = $service->enrich([$input], $asOf, 1)[0];
+        $this->assertSame('prep_required', $card['state']['code']);
+        $this->assertSame(1, $card['readiness_blocking_remaining']);
+        $this->assertSame('/operations/checklists/902', $card['readiness_blockers'][0]['href']);
+        $this->assertSame([], $card['readiness_compact']['next_actions']);
+
+        $input['checklists'] = [['turo_trip_normalized_id' => 502, 'movement_type' => 'pickup']];
+        $input['readiness_blocking_remaining'] = 1;
+        $input['readiness_blockers'] = [$requirement];
+        $card = $service->enrich([$input], $asOf, 1)[0];
+        $this->assertSame(1, $card['readiness_blocking_remaining']);
+        $this->assertCount(1, $card['readiness_blockers']);
+        $this->assertArrayNotHasKey('next_trip_preparation', $card);
+    }
+
     public function testMovementCardCompactsLargeProjectionToCountsAndHighestPriorityAction(): void
     {
         $service = $this->service(null, null, null, ['energy_kind' => 'unknown', 'capabilities' => []], null);
@@ -71,6 +139,38 @@ final class MovementBoardIntelligenceServiceTest extends CIUnitTestCase
         $this->assertSame(0, $card['readiness_compact']['blocking_count']);
         $this->assertSame([], $card['readiness_compact']['next_actions']);
         $this->assertSame([], $card['blockers']);
+    }
+
+    public function testOtherTripAwaitingRecoveryCannotEraseDeferredTargetReadiness(): void
+    {
+        $event = ['id' => 950, 'turo_trip_normalized_id' => 951, 'event_code' => 'guest_return_staged', 'occurred_at' => '2030-01-01 11:00:00', 'location_class' => 'airport_hnl'];
+        $service = $this->service($event, ['id' => 951, 'starts_at' => '2030-01-01 08:00:00', 'ends_at' => '2030-01-01 12:00:00'], null, ['energy_kind' => 'unknown', 'capabilities' => []], null);
+        $blocker = ['code' => 'extra_fulfillment_952', 'label' => 'Synthetic pending kit', 'trip_id' => 953, 'blocking' => true, 'relevant' => true, 'status' => 'unsatisfied', 'actionable' => false, 'action' => null];
+        $card = $service->enrich([[
+            'fleet_vehicle_id' => 9, 'status' => 'available', 'checklists' => [['id' => 954]],
+            'readiness_blocking_remaining' => 1, 'readiness_additional_remaining' => 0, 'readiness_blockers' => [$blocker],
+        ]], new DateTimeImmutable('2030-01-01 12:00:00'))[0];
+        $this->assertSame('awaiting_recovery', $card['state']['code']);
+        $this->assertSame(1, $card['readiness_blocking_remaining']);
+        $this->assertSame(1, $card['readiness_display_remaining']);
+        $this->assertSame(1, $card['readiness_compact']['blocking_count']);
+        $this->assertSame([$blocker], $card['readiness_blockers']);
+        $this->assertSame([], $card['readiness_compact']['next_actions']);
+        $this->assertStringContainsString('1 blocking requirement remains', $card['readiness_summary']);
+    }
+
+    public function testFutureTurnaroundWorkDoesNotInflateCurrentMovementReadiness(): void
+    {
+        $service = $this->service(null, null, null, ['energy_kind' => 'unknown', 'capabilities' => []], null);
+        $card = $service->enrich([[
+            'fleet_vehicle_id' => 9, 'status' => 'available', 'checklists' => [['id' => 954]],
+            'turnaround' => ['minutes' => 90], 'turnaround_readiness_remaining' => 3,
+            'readiness_blocking_remaining' => 0, 'readiness_blockers' => [],
+        ]], new DateTimeImmutable('2030-01-01 12:00:00'))[0];
+        $this->assertSame(0, $card['readiness_compact']['blocking_count']);
+        $this->assertSame(0, $card['readiness_display_remaining']);
+        $this->assertSame(3, $card['turnaround_readiness_remaining']);
+        $this->assertSame('Ready', $card['readiness_summary']);
     }
 
     public function testBatchedCurrentPositionOverridesOlderReturnLocationWithoutRewritingLifecycle(): void
@@ -442,7 +542,7 @@ final class MovementBoardIntelligenceServiceTest extends CIUnitTestCase
         $this->assertSame('International Garage L7 RF', $card['location_detail']);
     }
 
-    private function service(?array $event, ?array $schedule, ?array $assessment, array $profile, ?array $nextTrip, ?array $plan = null, ?array $latestCleanliness = null): MovementBoardIntelligenceService
+    private function service(?array $event, ?array $schedule, ?array $assessment, array $profile, ?array $nextTrip, ?array $plan = null, ?array $latestCleanliness = null, array $extras = [], ?array $futureProjection = null): MovementBoardIntelligenceService
     {
         $repository = $this->createStub(OperationalFactsRepository::class);
         $repository->method('latestActiveMovementEvent')->willReturn($event);
@@ -464,6 +564,14 @@ final class MovementBoardIntelligenceServiceTest extends CIUnitTestCase
         $custody = $this->createStub(CurrentVehicleCustodyService::class);
         $custody->method('resolve')->willReturn($custodyState);
         $custody->method('forCompany')->willReturn([9 => $custodyState]);
+        $extraService = $this->createStub(TripExtraFulfillmentService::class);
+        $extraService->method('forTrips')->willReturn([(int) ($nextTrip['id'] ?? 0) => $extras]);
+        $manualService = $this->createStub(TripCommitmentService::class);
+        $manualService->method('activeForTrip')->willReturn([]);
+        $readinessRepository = $this->createStub(MovementReadinessReadModelRepository::class);
+        $readinessRepository->method('pickupChecklistIdForCompany')->willReturn($futureProjection === null ? null : 902);
+        $readiness = $this->createStub(MovementReadinessReadService::class);
+        $readiness->method('forCompany')->willReturn($futureProjection === null ? [] : [902 => $futureProjection]);
 
         return new MovementBoardIntelligenceService(
             $repository,
@@ -473,6 +581,10 @@ final class MovementBoardIntelligenceServiceTest extends CIUnitTestCase
             new VehiclePositioningRecommendationService(),
             $plans,
             custodyService: $custody,
+            tripCommitmentService: $manualService,
+            extraFulfillmentService: $extraService,
+            readinessRepository: $readinessRepository,
+            movementReadinessReadService: $readiness,
         );
     }
 }

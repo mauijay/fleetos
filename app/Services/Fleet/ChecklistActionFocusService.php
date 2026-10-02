@@ -12,6 +12,9 @@ class ChecklistActionFocusService
             $projection['requirements'] ?? [],
             static fn (array $requirement): bool =>
             ($requirement['status'] ?? null) === MovementReadinessProjectionService::STATUS_UNSATISFIED
+            && ($requirement['relevant'] ?? true)
+            && ($requirement['phase'] ?? null) !== MovementReadinessProjectionService::PHASE_NEXT_PICKUP_PREPARATION
+            && (! isset($projection['trip_id'], $requirement['trip_id']) || (int) $requirement['trip_id'] === (int) $projection['trip_id'])
             && ($requirement['actionable'] ?? true)
             && ($requirement['action'] ?? null) !== null,
         ));
@@ -28,6 +31,9 @@ class ChecklistActionFocusService
 
     public function actionAnchor(string $code): string
     {
+        if (preg_match('/^extra_fulfillment_(\d+)$/', $code, $match) === 1) {
+            return 'extra-fulfillment-' . $match[1];
+        }
         return 'checklist-action-' . preg_replace('/[^a-z0-9_-]/', '-', strtolower($code));
     }
 }

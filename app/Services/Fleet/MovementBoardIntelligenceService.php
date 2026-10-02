@@ -2,6 +2,7 @@
 
 namespace App\Services\Fleet;
 
+use App\Repositories\MovementReadinessReadModelRepository;
 use App\Repositories\OperationalFactsRepository;
 use App\Repositories\VehicleRecoveryExceptionRepository;
 use Config\Services;
@@ -19,6 +20,9 @@ class MovementBoardIntelligenceService
         private readonly ?TripCommitmentService $tripCommitmentService = null,
         private readonly ?TripEnergyRuleResolver $energyRuleResolver = null,
         private readonly ?CurrentVehicleCustodyService $custodyService = null,
+        private readonly ?TripExtraFulfillmentService $extraFulfillmentService = null,
+        private readonly ?MovementReadinessReadService $movementReadinessReadService = null,
+        private readonly ?MovementReadinessReadModelRepository $readinessRepository = null,
     ) {
     }
 
@@ -98,6 +102,7 @@ class MovementBoardIntelligenceService
                 || (string) ($assessment['captured_at'] ?? '') <= (string) $lifecycleEvent['occurred_at']));
         $profile = $this->repo()->profile($vehicleId) ?? $this->emptyProfile();
         $nextTrip = $this->nextTrips()->forVehicle($vehicleId, $asOf);
+        $card = $this->attachNextTripPreparation($card, $nextTrip, $custodyState, $companyId, $asOf);
         $freshness = $this->freshness()->assess($nextTrip['import_completed_at'] ?? $schedule['import_completed_at'] ?? null, $asOf);
         $location = $this->positionBasis($lifecycleEvent ?? $event, $schedule, $card['current_position'] ?? null);
         $blockers = $this->blockers($card);
@@ -142,13 +147,11 @@ class MovementBoardIntelligenceService
         $currentTrip = $this->presentCurrentTrip($schedule, (string) $state['code']);
         $currentMovementHref = $currentTrip === null ? null : $this->movementHref($state, $card, $schedule);
         $readinessRemaining = (int) ($card['readiness_blocking_remaining'] ?? 0);
-        if (($card['turnaround'] ?? null) !== null) {
-            $readinessRemaining += (int) ($card['turnaround_readiness_remaining'] ?? 0);
-        }
         $compactReadiness = $this->compactReadiness($card, $readinessRemaining);
         if ($awaitingRecovery) {
-            $compactReadiness = ['blocking_count' => 0, 'additional_count' => 0, 'summary' => 'Physical preparation resumes after recovery', 'next_actions' => []];
-            $readinessRemaining = 0;
+            $compactReadiness['additional_count'] = 0;
+            $compactReadiness['summary'] = ($readinessRemaining > 0 ? $readinessRemaining . ' blocking requirement' . ($readinessRemaining === 1 ? ' remains. ' : 's remain. ') : '') . 'Physical preparation resumes after recovery';
+            $compactReadiness['next_actions'] = [];
         }
         $lifecycleCode = (string) ($lifecycleEvent['event_code'] ?? '');
         $commitmentTripId = match (true) {
@@ -168,7 +171,7 @@ class MovementBoardIntelligenceService
             : [];
         $guestCommitmentPreview = array_slice($guestCommitments, 0, 2);
         $hasCustodyFact = in_array($lifecycleCode, ['actual_handoff', 'guest_return_staged', 'actual_return', 'vehicle_recovered'], true);
-        $usesResolvedState = $hasCustodyFact || in_array($state['code'], ['pickup_confirmation_overdue', 'return_confirmation_overdue'], true);
+        $usesResolvedState = $hasCustodyFact || in_array($state['code'], ['pickup_confirmation_overdue', 'return_confirmation_overdue', 'prep_required'], true);
         $primaryStatus = $usesResolvedState ? match ($state['code']) {
             'on_trip' => 'currently_rented',
             'return_confirmation_overdue' => 'late_return',
@@ -230,7 +233,8 @@ class MovementBoardIntelligenceService
             'readiness_display_remaining' => $readinessRemaining,
             'readiness_blocking_remaining' => $readinessRemaining,
             'readiness_additional_remaining' => $awaitingRecovery ? 0 : ($card['readiness_additional_remaining'] ?? 0),
-            'readiness_blockers' => $awaitingRecovery ? [] : ($card['readiness_blockers'] ?? []),
+            'readiness_blockers' => $card['readiness_blockers'] ?? [],
+            'checklist_ready' => $readinessRemaining === 0,
             'flags' => $flags,
             'actions' => $awaitingRecovery ? ['Recover Vehicle'] : array_values(array_unique(array_merge(
                 $card['actions'] ?? [],
@@ -258,6 +262,56 @@ class MovementBoardIntelligenceService
                 'guest_states' => $custodyState['conflicting_guest_states'] ?? [],
             ],
         ]);
+    }
+
+    /** Keep future trip work visible on days without a movement workflow. */
+    private function attachNextTripPreparation(array $card, ?array $nextTrip, array $custody, ?int $companyId, \DateTimeImmutable $asOf): array
+    {
+        $tripId = (int) ($nextTrip['id'] ?? 0);
+        if ($tripId < 1 || $companyId === null || $companyId < 1) {
+            return $card;
+        }
+        foreach ($card['checklists'] ?? [] as $checklist) {
+            if ((int) ($checklist['turo_trip_normalized_id'] ?? 0) === $tripId && ($checklist['movement_type'] ?? null) === 'pickup') {
+                return $card;
+            }
+        }
+        $vehicleId = (int) $card['fleet_vehicle_id'];
+        $repository = $this->readinessRepository ?? new MovementReadinessReadModelRepository();
+        $checklistId = $repository->pickupChecklistIdForCompany($companyId, $tripId, $vehicleId);
+        if ($checklistId !== null) {
+            $projection = ($this->movementReadinessReadService ?? Services::movementReadinessReadService())->forCompany($companyId, [$checklistId], $asOf)[$checklistId] ?? null;
+            if ($projection === null) {
+                throw new \RuntimeException('Next-trip readiness requires a company-scoped projection.');
+            }
+            $href = '/operations/checklists/' . $checklistId;
+        } else {
+            $extras = ($this->extraFulfillmentService ?? Services::tripExtraFulfillmentService())->forTrips($companyId, [$tripId])[$tripId] ?? [];
+            $manual = ($this->tripCommitmentService ?? Services::tripCommitmentService())->activeForTrip($companyId, $tripId, ['preparation', 'pickup', 'entire_trip']);
+            $event = $custody['basis_event'] ?? null;
+            $projection = (new MovementReadinessProjectionService())->projectTripPreparation(array_merge($nextTrip, [
+                'company_id' => $companyId,
+                'turo_trip_normalized_id' => $tripId,
+                'fleet_vehicle_id' => $vehicleId,
+                'trip_is_operational' => ($nextTrip['canceled_at'] ?? null) === null && ($nextTrip['deleted_at'] ?? null) === null
+                    && ! str_starts_with((string) ($nextTrip['trip_status_code'] ?? 'booked'), 'canceled')
+                    && ($nextTrip['trip_status_code'] ?? 'booked') !== 'invalid',
+                'latest_custody_event' => $event,
+                'active_events' => ($event['event_code'] ?? null) === 'actual_handoff' && (int) ($event['turo_trip_normalized_id'] ?? 0) === $tripId ? ['actual_handoff' => $event] : [],
+                'active_commitments' => $manual,
+                'extra_fulfillments' => $extras,
+            ]));
+            $href = '/operations/trips/' . $tripId . '/commitments';
+        }
+        $projection['href'] = $href;
+        $blockers = array_values(array_filter($projection['requirements'], static fn (array $requirement): bool =>
+            $requirement['phase'] === $projection['readiness_phase'] && MovementReadinessProjectionService::isBlocking($requirement)));
+        $card['next_trip_preparation'] = $projection;
+        $card['next_trip_preparation_remaining'] = (int) $projection['blocking_remaining_count'];
+        $card['readiness_blocking_remaining'] = (int) ($card['readiness_blocking_remaining'] ?? 0) + $card['next_trip_preparation_remaining'];
+        $card['readiness_blockers'] = array_merge($card['readiness_blockers'] ?? [], array_map(static fn (array $requirement): array => array_merge($requirement, ['href' => $href]), $blockers));
+
+        return $card;
     }
 
     /** @return array{event:?array,trip_id:?int,schedule:?array} */
@@ -424,6 +478,9 @@ class MovementBoardIntelligenceService
         $tripPreparationCount = count($tripPreparationRequirements);
         $nextActions = [];
         foreach ($card['readiness_blockers'] ?? [] as $requirement) {
+            if (! ($requirement['actionable'] ?? true) || ! ($requirement['relevant'] ?? true)) {
+                continue;
+            }
             $label = trim((string) ($requirement['action']['label'] ?? ''));
             if ($label === '') {
                 continue;
@@ -436,13 +493,18 @@ class MovementBoardIntelligenceService
             break;
         }
 
+        $nextTripRemaining = (int) ($card['next_trip_preparation_remaining'] ?? 0);
         if (($card['checklists'] ?? []) === []) {
-            $summary = 'No movement workflow today';
+            $summary = 'No movement workflow today' . ($nextTripRemaining > 0 ? ' · Next trip preparation incomplete: ' . $nextTripRemaining . ' blocking requirement' . ($nextTripRemaining === 1 ? '' : 's') : '');
         } elseif ($blockingRemaining === 0) {
-            $summary = (($card['turnaround'] ?? null) !== null ? 'Ready for next pickup' : 'Ready');
+            $summary = 'Ready';
         } else {
             $summary = $blockingRemaining . ' action' . ($blockingRemaining === 1 ? '' : 's') . ' across today\'s movements'
                 . ($additional > 0 ? ' · ' . $additional . ' additional' : '');
+            if ($nextTripRemaining > 0) {
+                $currentRemaining = $blockingRemaining - $nextTripRemaining;
+                $summary = $currentRemaining . ' blocking requirement' . ($currentRemaining === 1 ? '' : 's') . ' across today\'s movements · Next trip preparation incomplete: ' . $nextTripRemaining;
+            }
         }
 
         return [
@@ -608,6 +670,12 @@ class MovementBoardIntelligenceService
     private function presentAction(array $state, array $card, int $vehicleId, ?array $schedule): ?array
     {
         $code = (string) ($state['primary_action']['code'] ?? 'none');
+        if ((int) ($card['next_trip_preparation_remaining'] ?? 0) > 0
+            && in_array($code, ['clear_blockers', 'complete_turnaround'], true)
+            && array_any($card['next_trip_preparation']['requirements'] ?? [], static fn (array $requirement): bool =>
+                MovementReadinessProjectionService::isBlocking($requirement) && ($requirement['actionable'] ?? true))) {
+            return ['code' => 'prepare_next_trip', 'label' => 'Prepare next trip', 'href' => (string) $card['next_trip_preparation']['href']];
+        }
         $checklistHref = $this->movementHref($state, $card, $schedule);
         $checklistHref ??= $card['checklist_href'] ?? null;
         $checklistLabels = [

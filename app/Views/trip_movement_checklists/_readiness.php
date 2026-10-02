@@ -12,7 +12,8 @@ $completedHuman = array_values(array_filter($requirements, static fn (array $req
     && in_array($requirement['kind'], ['human', 'hybrid'], true)
     && $requirement['status'] === 'satisfied'));
 $pending = array_values(array_filter($requirements, static fn (array $requirement): bool => $requirement['phase'] === $readinessPhase && $requirement['status'] === 'unsatisfied' && ($requirement['actionable'] ?? true)));
-$historicalDeficits = array_values(array_filter($requirements, static fn (array $requirement): bool => $requirement['phase'] === $readinessPhase && $requirement['status'] === 'unsatisfied' && ! ($requirement['actionable'] ?? true)));
+$historicalDeficits = array_values(array_filter($requirements, static fn (array $requirement): bool => $requirement['phase'] === $readinessPhase && $requirement['status'] === 'unsatisfied' && ! ($requirement['actionable'] ?? true) && ! ($requirement['relevant'] ?? true)));
+$deferredRequirements = array_values(array_filter($requirements, static fn (array $requirement): bool => $requirement['phase'] === $readinessPhase && $requirement['status'] === 'unsatisfied' && ! ($requirement['actionable'] ?? true) && ($requirement['relevant'] ?? true)));
 $blockingPending = array_values(array_filter($pending, static fn (array $requirement): bool => $requirement['blocking']));
 $requiredPending = array_values(array_filter($pending, static fn (array $requirement): bool => ! $requirement['blocking'] && ($itemsByCode[$requirement['code']]['is_required'] ?? false)));
 $additionalPending = array_values(array_filter($pending, static fn (array $requirement): bool => ! $requirement['blocking'] && ! ($itemsByCode[$requirement['code']]['is_required'] ?? false)));
@@ -20,9 +21,6 @@ $blockingRemaining = count($blockingPending);
 $totalBlockingRemaining = (int) ($readiness['blocking_remaining_count'] ?? $blockingRemaining);
 $additionalRemaining = count($requiredPending) + count($additionalPending);
 $lifecycle = array_values(array_filter($requirements, static fn (array $requirement): bool => $requirement['phase'] === 'pickup_lifecycle'));
-$nextPickupPreparation = array_values(array_filter($requirements, static fn (array $requirement): bool => $requirement['phase'] === 'next_pickup_preparation'));
-$nextPickupPending = array_values(array_filter($nextPickupPreparation, static fn (array $requirement): bool => $requirement['status'] === 'unsatisfied' && ($requirement['actionable'] ?? true)));
-$nextPickupFacts = array_values(array_filter($nextPickupPreparation, static fn (array $requirement): bool => $requirement['status'] !== 'unsatisfied' || ! ($requirement['actionable'] ?? true)));
 $exceptionalDispositions = $readiness['exceptional_dispositions'] ?? [];
 $currentDisposition = trim((string) ($checklist['vehicle_disposition'] ?? ''));
 $lastKnownVehicleFacts = $readiness['last_known_vehicle_facts'] ?? null;
@@ -70,6 +68,9 @@ $factDetail = static function (array $requirement) use ($activeFacts): ?string {
         </p>
     <?php endif; ?>
 
+    <?php if ($deferredRequirements !== []): ?>
+        <div class="readiness-subgroup"><h3>Pending, currently unavailable</h3><ul class="readiness-list"><?php foreach ($deferredRequirements as $requirement): ?><li class="wrap-anywhere"><span aria-hidden="true">○</span><div><strong><?= esc((string) $requirement['label']) ?></strong><small><?= $requirement['blocking'] ? 'Blocks readiness. ' : '' ?><?= esc((string) ($requirement['deferred_label'] ?? 'Action currently unavailable.')) ?></small></div></li><?php endforeach; ?></ul></div>
+    <?php endif; ?>
     <div class="readiness-groups">
         <div class="readiness-group">
             <h3>Action required</h3>
@@ -90,7 +91,7 @@ $factDetail = static function (array $requirement) use ($activeFacts): ?string {
                             <?php elseif (! $closed && $actionType === 'charging_adapter'): ?>
                                 <div class="readiness-action-controls"><form action="/operations/checklists/<?= (int) $checklist['id'] ?>/charging-adapter-present" method="post"><?= csrf_field() ?><button class="primary-action" type="submit">Confirm</button></form></div>
                             <?php elseif (! $closed && in_array($actionType, ['guest_commitment_complete', 'guest_commitment_acknowledge'], true)): ?>
-                                <div class="readiness-action-controls"><form action="/operations/trips/<?= (int) $requirement['action']['trip_id'] ?>/commitments/<?= (int) $requirement['action']['commitment_id'] ?>/<?= $actionType === 'guest_commitment_complete' ? 'complete' : 'acknowledge' ?>" method="post"><?= csrf_field() ?><button class="primary-action" type="submit"><?= $actionType === 'guest_commitment_complete' ? 'Complete' : 'Acknowledge' ?></button></form></div>
+                                <div class="readiness-action-controls"><a class="action-link" href="#guest-commitment-<?= (int) $requirement['action']['commitment_id'] ?>">Review instruction</a></div>
                             <?php elseif (! $closed && $actionType === 'vehicle_health'): ?>
                                 <div class="readiness-action-controls"><a class="action-link" href="<?= esc((string) $requirement['action']['href'], 'attr') ?>"><?= esc((string) $requirement['action']['label']) ?></a></div>
                             <?php elseif (! $closed && $itemId > 0): ?>
@@ -100,11 +101,6 @@ $factDetail = static function (array $requirement) use ($activeFacts): ?string {
                     <?php endforeach; ?>
                 </ul>
             <?php endforeach; ?>
-            <?php if ($nextPickupPending !== []): ?>
-                <div class="readiness-subgroup"><p class="eyebrow"><?= ($readiness['is_same_day_turnaround'] ?? false) ? 'Same-day turnaround' : 'Preparation for next pickup' ?></p>
-                    <ul class="readiness-list"><?php foreach ($nextPickupPending as $requirement): ?><li id="checklist-action-<?= esc((string) $requirement['code'], 'attr') ?>" tabindex="-1" class="is-pending"><span aria-hidden="true">○</span><div><strong><?= esc((string) $requirement['label']) ?></strong><small><?= esc((string) ($requirement['action']['label'] ?? 'Attention required')) ?></small></div><?php if (str_starts_with((string) $requirement['code'], 'guest_commitment_')): ?><a class="action-link" href="/operations/trips/<?= (int) $requirement['target_trip_id'] ?>/commitments#commitment-<?= (int) $requirement['action']['commitment_id'] ?>">Review</a><?php endif; ?></li><?php endforeach; ?></ul>
-                </div>
-            <?php endif; ?>
         </div>
         <div class="readiness-group">
             <h3>Known</h3>
@@ -118,7 +114,7 @@ $factDetail = static function (array $requirement) use ($activeFacts): ?string {
 
         <?php if ($completedHuman !== [] || $historicalDeficits !== []): ?>
         <div class="readiness-group">
-            <?php if ($historicalDeficits !== []): ?><h3>Recorded at handoff</h3><p class="muted">These facts remain below target, but preparation is no longer actionable while the guest has the vehicle.</p><ul class="readiness-list"><?php foreach ($historicalDeficits as $requirement): ?><li><div><strong><?= esc((string) $requirement['label']) ?></strong></div></li><?php endforeach; ?></ul><?php endif; ?>
+            <?php if ($historicalDeficits !== []): ?><h3>Historical preparation</h3><p class="muted">These requirements remain unconfirmed. The target trip’s preparation phase is closed.</p><ul class="readiness-list"><?php foreach ($historicalDeficits as $requirement): ?><li class="wrap-anywhere"><span aria-hidden="true">○</span><div><strong><?= esc((string) $requirement['label']) ?></strong><small><?= ($requirement['retired_reason'] ?? null) === 'target_handoff' ? 'Closed at this trip’s handoff.' : 'Target trip is inactive.' ?></small></div></li><?php endforeach; ?></ul><?php endif; ?>
             <?php if ($completedHuman !== []): ?><h3>Completed checks</h3><?php endif; ?>
             <ul class="readiness-list readiness-actions">
                 <?php foreach ($completedHuman as $requirement): ?>
@@ -146,9 +142,7 @@ $factDetail = static function (array $requirement) use ($activeFacts): ?string {
     <?php if ($lifecycle !== []): ?>
         <div class="readiness-subgroup"><p class="eyebrow">Lifecycle</p><ul class="readiness-list"><?php foreach ($lifecycle as $requirement): ?><li id="checklist-action-<?= esc((string) $requirement['code'], 'attr') ?>" tabindex="-1" class="<?= $requirement['status'] === 'satisfied' ? 'is-complete' : 'is-pending' ?>"><span aria-hidden="true"><?= $requirement['status'] === 'satisfied' ? '✓' : '○' ?></span><div><strong><?= esc((string) $requirement['label']) ?></strong><small>Does not gate pickup preparation</small></div></li><?php endforeach; ?></ul></div>
     <?php endif; ?>
-    <?php if ($nextPickupFacts !== []): ?>
-        <div class="readiness-subgroup"><p class="eyebrow">Next pickup facts</p><ul class="readiness-list"><?php foreach ($nextPickupFacts as $requirement): ?><li class="<?= $requirement['status'] === 'satisfied' ? 'is-complete' : 'is-muted' ?>"><span aria-hidden="true"><?= $requirement['status'] === 'satisfied' ? '✓' : '—' ?></span><div><strong><?= esc((string) $requirement['label']) ?></strong></div></li><?php endforeach; ?></ul></div>
-    <?php endif; ?>
+
 
     <?php if (! $closed && ($readiness['ready'] ?? false)): ?>
         <form class="workflow-close" action="/operations/checklists/<?= (int) $checklist['id'] ?>/complete" method="post"><?= csrf_field() ?><label>Completion note<textarea name="completion_note" rows="2" placeholder="Optional note"></textarea></label><button class="secondary-action" type="submit">Close Movement Workflow</button></form>

@@ -249,29 +249,99 @@ final class MovementReadinessProjectionServiceTest extends CIUnitTestCase
         $this->assertNull($differentVehicle['last_known_vehicle_facts']);
     }
 
-    public function testGuestPossessionAndCanceledTargetSuppressCrossTripPreparation(): void
+    public function testForeignGuestCustodyDefersButDoesNotRetirePreparation(): void
     {
-        $this->connection->table('lookup_values')->insertBatch([
-            ['id' => 9, 'code' => 'canceled_by_guest'],
-        ]);
         $this->connection->table('turo_trips_normalized')->insertBatch([
             ['id' => 1201, 'fleet_vehicle_id' => 11, 'trip_status_lookup_value_id' => null, 'starts_at' => '2026-09-08 19:00:00', 'ends_at' => '2026-09-08 22:00:00'],
-            ['id' => 1202, 'fleet_vehicle_id' => 12, 'trip_status_lookup_value_id' => 9, 'starts_at' => '2026-09-08 19:00:00', 'ends_at' => '2026-09-08 22:00:00'],
         ]);
         $this->insertChecklist(109, 1201, 11, 'pickup');
-        $this->insertChecklist(110, 1202, 12, 'pickup');
         $this->insertEvent(301, 1, 11, 1001, 'vehicle_recovered', 'return', '2026-09-08 18:00:00', 'home');
         $this->insertAssessment(401, 1, 11, 1001, 301, 'return', 'dirty', 43, '2026-09-08 18:00:00');
         $this->insertEvent(302, 1, 11, 1001, 'actual_handoff', 'pickup', '2026-09-08 18:05:00', 'home');
-        $this->insertEvent(303, 1, 12, 1002, 'vehicle_recovered', 'return', '2026-09-08 18:00:00', 'home');
-        $this->insertAssessment(403, 1, 12, 1002, 303, 'return', 'dirty', 43, '2026-09-08 18:00:00');
+        $projections = $this->service->forCompany(1, [109], new DateTimeImmutable('2026-09-08 18:10:00'));
 
-        $projections = $this->service->forCompany(1, [109, 110], new DateTimeImmutable('2026-09-08 18:10:00'));
-
-        $this->assertSame(0, $projections[109]['blocking_remaining_count']);
-        $this->assertSame(0, $projections[110]['blocking_remaining_count']);
+        $this->assertGreaterThan(0, $projections[109]['blocking_remaining_count']);
+        $this->assertFalse($projections[109]['ready']);
         $this->assertSame([], array_values(array_filter($projections[109]['requirements'], static fn (array $row): bool => $row['phase'] === MovementReadinessProjectionService::PHASE_PICKUP_PREPARATION && ($row['actionable'] ?? true) && $row['status'] === 'unsatisfied')));
-        $this->assertSame([], array_values(array_filter($projections[110]['requirements'], static fn (array $row): bool => ($row['actionable'] ?? true) && $row['status'] === 'unsatisfied')));
+    }
+
+    public function testCanceledTargetRetiresPendingPreparationIndependentlyOfCustody(): void
+    {
+        $this->connection->table('lookup_values')->insert(['id' => 9, 'code' => 'canceled_by_guest']);
+        $this->connection->table('turo_trips_normalized')->insert(['id' => 1202, 'fleet_vehicle_id' => 12, 'trip_status_lookup_value_id' => 9, 'starts_at' => '2026-09-08 19:00:00', 'ends_at' => '2026-09-08 22:00:00']);
+        $this->insertChecklist(110, 1202, 12, 'pickup');
+        $projection = $this->service->forCompany(1, [110], new DateTimeImmutable('2026-09-08 18:10:00'))[110];
+        $this->assertSame(0, $projection['blocking_remaining_count']);
+        $this->assertSame([], array_values(array_filter($projection['requirements'], static fn (array $row): bool => ($row['actionable'] ?? true) && $row['status'] === 'unsatisfied')));
+        $this->assertSame('target_trip_inactive', $this->requirement($projection, 'photos_complete')['retired_reason']);
+    }
+
+    public function testComposedExtraAndManualProjectionKeepsBlockersUnderCanonicalForeignCustody(): void
+    {
+        $this->connection->table('turo_trips_normalized')->insert(['id' => 1201, 'fleet_vehicle_id' => 11, 'turo_reservation_id' => '80001201', 'starts_at' => '2026-09-08 19:00:00', 'ends_at' => '2026-09-08 22:00:00']);
+        $this->insertChecklist(109, 1201, 11, 'pickup');
+        $this->insertEvent(301, 1, 11, 1001, 'actual_handoff', 'pickup', '2026-09-08 12:00:00', 'home');
+        $extras = $this->createMock(\App\Services\Fleet\TripExtraFulfillmentService::class);
+        $extras->expects($this->once())->method('forTrips')->with(1, [1201])->willReturn([1201 => [[
+            'company_id' => 1, 'turo_trip_normalized_id' => 1201, 'selection_id' => 801, 'fulfillment_id' => 802,
+            'title' => 'Synthetic configured kit', 'fulfillment_phase' => 'preparation', 'requires_operator_confirmation' => true,
+            'readiness_blocking' => true, 'is_completed' => false, 'is_actionable' => true,
+        ]]]);
+        $manual = $this->createMock(\App\Services\Fleet\TripCommitmentService::class);
+        $manual->expects($this->once())->method('activeForTrip')->with(1, 1201, ['preparation', 'pickup', 'entire_trip'])->willReturn([[
+            'company_id' => 1, 'turo_trip_normalized_id' => 1201, 'id' => 803, 'instruction' => 'Synthetic manual kit',
+            'required_before_dispatch' => true, 'handling_mode' => 'task',
+        ]]);
+        $service = new MovementReadinessReadService(new MovementReadinessReadModelRepository($this->connection), new MovementReadinessProjectionService(), $manual, null, $extras);
+        $projection = $service->forCompany(1, [109], new DateTimeImmutable('2026-09-08 18:10:00'))[109];
+        $this->assertFalse($projection['ready']);
+        foreach (['extra_fulfillment_802', 'guest_commitment_803'] as $code) {
+            $work = $this->requirement($projection, $code);
+            $this->assertTrue($work['blocking']);
+            $this->assertTrue($work['relevant']);
+            $this->assertFalse($work['actionable']);
+            $this->assertSame('unsatisfied', $work['status']);
+            $this->assertSame('other_trip_guest_custody', $work['deferred_reason']);
+            $this->assertSame([1201, '80001201', 301, 1001], [$work['trip_id'], $work['reservation_id'], $work['custody_event_id'], $work['custody_trip_id']]);
+        }
+        $this->assertCount(1, array_filter($projection['requirements'], static fn ($row) => $row['code'] === 'extra_fulfillment_802'));
+    }
+
+    public function testCanonicalCustodyRejectsFutureStageAndIgnoresVoidedSupersededForeignHandoff(): void
+    {
+        $this->connection->table('turo_trips_normalized')->insertBatch([
+            ['id' => 1201, 'fleet_vehicle_id' => 11, 'starts_at' => '2026-09-08 19:00:00', 'ends_at' => '2026-09-08 22:00:00'],
+            ['id' => 1203, 'fleet_vehicle_id' => 11, 'starts_at' => '2026-09-10 19:00:00', 'ends_at' => '2026-09-10 22:00:00'],
+        ]);
+        $this->insertChecklist(109, 1201, 11, 'pickup');
+        $this->insertEvent(301, 1, 11, 1001, 'actual_handoff', 'pickup', '2026-09-08 12:00:00', 'home');
+        $this->insertEvent(302, 1, 11, 1203, 'vehicle_staged', 'pickup', '2026-09-08 15:00:00', 'home');
+        $repo = new MovementReadinessReadModelRepository($this->connection);
+        $asOf = new DateTimeImmutable('2026-09-08 18:10:00');
+        $context = $repo->loadForCompany(1, [109], $asOf)[109];
+        $this->assertSame(301, $context['vehicle_custody']['basis_event_id']);
+        $this->connection->table('trip_movement_events')->where('id', 301)->update(['voided_at' => '2026-09-08 16:00:00']);
+        $this->insertEvent(303, 1, 11, 1001, 'vehicle_recovered', 'return', '2026-09-08 13:00:00', 'home', null, ['supersedes_event_id' => 301]);
+        $context = $repo->loadForCompany(1, [109], $asOf)[109];
+        $this->assertSame(302, $context['vehicle_custody']['basis_event_id']);
+        $this->assertSame(303, (int) $context['latest_vehicle_use_event']['id']);
+        $this->assertSame('operator', $context['vehicle_custody']['custody']);
+    }
+
+    public function testOldStagingIsHistoricalAfterInterveningUseWithoutChangingStoredEvidence(): void
+    {
+        $this->connection->table('turo_trips_normalized')->insert(['id' => 1201, 'fleet_vehicle_id' => 11, 'starts_at' => '2026-09-08 19:00:00', 'ends_at' => '2026-09-08 22:00:00']);
+        $this->insertChecklist(109, 1201, 11, 'pickup');
+        $this->insertCompletePickupItems(109);
+        $this->insertEvent(301, 1, 11, 1201, 'vehicle_staged', 'pickup', '2026-09-08 10:00:00', 'airport_hnl');
+        $this->insertAssessment(401, 1, 11, 1201, 301, 'pickup', 'clean', 88, '2026-09-08 10:00:00');
+        $before = $this->connection->table('trip_movement_events')->where('id', 301)->get()->getRowArray();
+        $this->insertEvent(302, 1, 11, 1001, 'actual_handoff', 'pickup', '2026-09-08 12:00:00', 'home');
+        $projection = $this->service->forCompany(1, [109], new DateTimeImmutable('2026-09-08 18:10:00'))[109];
+        $this->assertSame('unsatisfied', $this->requirement($projection, 'location_confirmed')['status']);
+        $this->assertSame('unsatisfied', $this->requirement($projection, 'vehicle_clean')['status']);
+        $this->assertSame('unsatisfied', $this->requirement($projection, 'energy_known')['status']);
+        $this->assertSame($before, $this->connection->table('trip_movement_events')->where('id', 301)->get()->getRowArray());
     }
 
     public function testDuplicatePickupTimesOnlyExactNextTripReceivesRecoveryEnergy(): void
@@ -619,6 +689,21 @@ final class MovementReadinessProjectionServiceTest extends CIUnitTestCase
         $this->assertArrayNotHasKey(207, $projections);
     }
 
+    public function testFuturePickupLookupRequiresExactCompanyVehicleTripAndSchedule(): void
+    {
+        $this->connection->table('turo_trips_normalized')->insert(['id' => 1201, 'fleet_vehicle_id' => 11, 'starts_at' => '2030-01-03 09:00:00', 'ends_at' => '2030-01-05 09:00:00']);
+        $this->insertChecklist(109, 1201, 11, 'pickup', ['scheduled_at' => '2030-01-03 09:00:00']);
+        $repo = new MovementReadinessReadModelRepository($this->connection);
+        $before = $this->connection->table('trip_movement_checklists')->get()->getResultArray();
+        $this->assertSame(109, $repo->pickupChecklistIdForCompany(1, 1201, 11));
+        $this->assertNull($repo->pickupChecklistIdForCompany(2, 1201, 11));
+        $this->assertNull($repo->pickupChecklistIdForCompany(1, 1201, 12));
+        $this->assertNull($repo->pickupChecklistIdForCompany(1, 1001, 11));
+        $this->assertSame($before, $this->connection->table('trip_movement_checklists')->get()->getResultArray());
+        $this->connection->table('turo_trips_normalized')->where('id', 1201)->update(['starts_at' => '2030-01-03 10:00:00']);
+        $this->assertNull($repo->pickupChecklistIdForCompany(1, 1201, 11));
+    }
+
     public function testCurrentReadinessOverridesReturnForNextPickupButNotReturnIntake(): void
     {
         $this->insertChecklist(101, 1001, 11, 'return');
@@ -760,9 +845,9 @@ final class MovementReadinessProjectionServiceTest extends CIUnitTestCase
 
     private function createTables(): void
     {
-        $this->connection->query('CREATE TABLE ' . $this->table('fleet_vehicles') . ' (id INTEGER PRIMARY KEY, company_id INTEGER NOT NULL)');
+        $this->connection->query('CREATE TABLE ' . $this->table('fleet_vehicles') . ' (id INTEGER PRIMARY KEY, company_id INTEGER NOT NULL, fleet_code VARCHAR(80) NULL, display_name VARCHAR(80) NULL, deleted_at DATETIME NULL)');
         $this->connection->query('CREATE TABLE ' . $this->table('lookup_values') . ' (id INTEGER PRIMARY KEY, code VARCHAR(80) NOT NULL)');
-        $this->connection->query('CREATE TABLE ' . $this->table('turo_trips_normalized') . ' (id INTEGER PRIMARY KEY, fleet_vehicle_id INTEGER NOT NULL, trip_status_lookup_value_id INTEGER NULL, starts_at DATETIME NULL, ends_at DATETIME NULL, canceled_at DATETIME NULL, deleted_at DATETIME NULL)');
+        $this->connection->query('CREATE TABLE ' . $this->table('turo_trips_normalized') . ' (id INTEGER PRIMARY KEY, fleet_vehicle_id INTEGER NOT NULL, turo_reservation_id VARCHAR(80) NULL, turo_trip_id VARCHAR(80) NULL, trip_status_lookup_value_id INTEGER NULL, starts_at DATETIME NULL, ends_at DATETIME NULL, canceled_at DATETIME NULL, deleted_at DATETIME NULL)');
         $this->connection->query('CREATE TABLE ' . $this->table('trip_movement_checklists') . ' (id INTEGER PRIMARY KEY, turo_trip_normalized_id INTEGER NOT NULL, fleet_vehicle_id INTEGER NOT NULL, movement_type VARCHAR(40) NOT NULL, scheduled_at DATETIME NOT NULL, readiness_status VARCHAR(40) NOT NULL DEFAULT \'not_started\', vehicle_disposition VARCHAR(40) NULL, completed_at DATETIME NULL, completion_note TEXT NULL)');
         $this->connection->query('CREATE TABLE ' . $this->table('trip_movement_checklist_items') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, trip_movement_checklist_id INTEGER NOT NULL, item_code VARCHAR(80) NOT NULL, label VARCHAR(190) NOT NULL, is_required INTEGER NOT NULL DEFAULT 1, is_critical INTEGER NOT NULL DEFAULT 1, applicability VARCHAR(40) NOT NULL DEFAULT \'applicable\', completion_state VARCHAR(40) NOT NULL DEFAULT \'open\', completion_source VARCHAR(40) NULL, completed_at DATETIME NULL, note TEXT NULL, sort_order INTEGER NOT NULL DEFAULT 0)');
         $this->connection->query('CREATE TABLE ' . $this->table('trip_movement_events') . ' (id INTEGER PRIMARY KEY, company_id INTEGER NOT NULL, fleet_vehicle_id INTEGER NOT NULL, turo_trip_normalized_id INTEGER NULL, event_code VARCHAR(40) NOT NULL, movement_type VARCHAR(20) NULL, occurred_at DATETIME NOT NULL, location_class VARCHAR(40) NULL, location_detail VARCHAR(500) NULL, airport_garage_code VARCHAR(40) NULL, airport_parking_level INTEGER NULL, airport_parking_row VARCHAR(4) NULL, source VARCHAR(40) NOT NULL, actor_user_id INTEGER NOT NULL, note TEXT NULL, supersedes_event_id INTEGER NULL, voided_at DATETIME NULL, voided_by_user_id INTEGER NULL, void_reason TEXT NULL, created_at DATETIME NULL, updated_at DATETIME NULL)');

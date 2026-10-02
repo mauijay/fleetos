@@ -2,6 +2,7 @@
 
 namespace App\Repositories;
 
+use App\Services\Fleet\CurrentVehicleCustodyService;
 use CodeIgniter\Database\BaseConnection;
 use Config\Database;
 
@@ -12,6 +13,22 @@ class MovementReadinessReadModelRepository
     public function __construct(?BaseConnection $db = null)
     {
         $this->db = $db ?? Database::connect();
+    }
+
+    /** Read the exact future pickup workspace without creating a checklist. */
+    public function pickupChecklistIdForCompany(int $companyId, int $tripId, int $vehicleId): ?int
+    {
+        if ($companyId < 1 || ! $this->db->tableExists('trip_movement_checklists')) {
+            return null;
+        }
+        $row = $this->db->table('trip_movement_checklists checklists')
+            ->select('checklists.id')
+            ->join('turo_trips_normalized trips', 'trips.id = checklists.turo_trip_normalized_id AND trips.fleet_vehicle_id = checklists.fleet_vehicle_id AND trips.starts_at = checklists.scheduled_at')
+            ->join('fleet_vehicles vehicles', 'vehicles.id = trips.fleet_vehicle_id')
+            ->where(['vehicles.company_id' => $companyId, 'trips.id' => $tripId, 'vehicles.id' => $vehicleId, 'checklists.movement_type' => 'pickup'])
+            ->get(1)->getRowArray();
+
+        return $row === null ? null : (int) $row['id'];
     }
 
     /**
@@ -27,7 +44,7 @@ class MovementReadinessReadModelRepository
 
         $checklists = $this->db->table('trip_movement_checklists checklists')
             ->select('checklists.id, checklists.turo_trip_normalized_id, checklists.fleet_vehicle_id, checklists.movement_type, checklists.scheduled_at, checklists.readiness_status, checklists.vehicle_disposition, checklists.completed_at, checklists.completion_note')
-            ->select('trips.starts_at, trips.ends_at, trips.canceled_at, trips.deleted_at, trip_statuses.code AS trip_status_code, vehicles.company_id')
+            ->select('trips.turo_reservation_id, trips.turo_trip_id, trips.starts_at, trips.ends_at, trips.canceled_at, trips.deleted_at, trip_statuses.code AS trip_status_code, vehicles.company_id')
             ->join('turo_trips_normalized trips', 'trips.id = checklists.turo_trip_normalized_id')
             ->join('fleet_vehicles vehicles', 'vehicles.id = checklists.fleet_vehicle_id AND vehicles.id = trips.fleet_vehicle_id')
             ->join('lookup_values trip_statuses', 'trip_statuses.id = trips.trip_status_lookup_value_id', 'left')
@@ -74,19 +91,10 @@ class MovementReadinessReadModelRepository
             ->orderBy('id', 'DESC')
             ->get()
             ->getResultArray();
-        $custodyEvents = $this->db->table('trip_movement_events')
-            ->where('company_id', $companyId)
-            ->whereIn('fleet_vehicle_id', $vehicleIds)
-            ->whereIn('event_code', ['actual_handoff', 'guest_return_staged', 'actual_return', 'vehicle_recovered'])
-            ->where('voided_at', null)
-            ->where('occurred_at <=', $asOfTimestamp)
-            ->groupStart()
-                ->where('created_at', null)
-                ->orWhere('created_at <=', $asOfTimestamp)
-            ->groupEnd()
-            ->orderBy('occurred_at', 'DESC')
-            ->orderBy('id', 'DESC')
-            ->get()->getResultArray();
+        $custodyEvents = array_values(array_filter(
+            (new OperationalFactsRepository($this->db))->activeCustodyTimelineEvents($vehicleIds, $asOfTimestamp, $companyId),
+            static fn (array $event): bool => ($event['created_at'] ?? null) === null || $event['created_at'] <= $asOfTimestamp,
+        ));
         $assessments = $this->db->table('movement_assessments assessments')
             ->select('assessments.*')
             ->join('trip_movement_events events', 'events.id = assessments.trip_movement_event_id AND events.voided_at IS NULL')
@@ -191,9 +199,20 @@ class MovementReadinessReadModelRepository
             $eventCode = (string) $event['event_code'];
             $eventsByTrip[$tripId][$movementType][$eventCode] ??= $event;
         }
-        $latestCustodyByVehicle = [];
+        $custodyEventsByVehicle = [];
         foreach ($custodyEvents as $event) {
-            $latestCustodyByVehicle[(int) $event['fleet_vehicle_id']] ??= $event;
+            $custodyEventsByVehicle[(int) $event['fleet_vehicle_id']][] = $event;
+        }
+        $custodyByVehicle = [];
+        $lastUseByVehicle = [];
+        $custodyResolver = new CurrentVehicleCustodyService();
+        foreach ($vehicleIds as $vehicleId) {
+            $timeline = $custodyEventsByVehicle[$vehicleId] ?? [];
+            $custodyByVehicle[$vehicleId] = $custodyResolver->resolveEvents($timeline);
+            $lastUseByVehicle[$vehicleId] = $custodyResolver->resolveEvents(array_values(array_filter(
+                $timeline,
+                static fn (array $event): bool => $event['event_code'] !== 'vehicle_staged',
+            )))['basis_event'];
         }
         $assessmentsByTrip = [];
         foreach ($assessments as $assessment) {
@@ -278,7 +297,9 @@ class MovementReadinessReadModelRepository
             $contexts[$checklistId] = array_merge($checklist, [
                 'items_by_code' => $itemsByChecklist[$checklistId] ?? [],
                 'active_events' => $eventsByTrip[$tripId][$movementType] ?? [],
-                'latest_custody_event' => $latestCustodyByVehicle[$vehicleId] ?? null,
+                'vehicle_custody' => $custodyByVehicle[$vehicleId],
+                'latest_custody_event' => $custodyByVehicle[$vehicleId]['basis_event'],
+                'latest_vehicle_use_event' => $lastUseByVehicle[$vehicleId],
                 'active_assessment' => $assessmentsByTrip[$tripId][$movementType] ?? null,
                 'current_readiness_assessment' => $currentReadinessByVehicle[$vehicleId] ?? null,
                 'last_known_vehicle_assessment' => $lastKnown,
@@ -302,7 +323,7 @@ class MovementReadinessReadModelRepository
     private function nextTripCandidates(array $checklists, array $vehicleIds): array
     {
         $builder = $this->db->table('turo_trips_normalized trips')
-            ->select('trips.id, trips.fleet_vehicle_id, trips.starts_at, trips.ends_at, trips.canceled_at, trip_statuses.code AS trip_status_code')
+            ->select('trips.id, trips.turo_reservation_id, trips.turo_trip_id, trips.fleet_vehicle_id, trips.starts_at, trips.ends_at, trips.canceled_at, trip_statuses.code AS trip_status_code')
             ->join('lookup_values trip_statuses', 'trip_statuses.id = trips.trip_status_lookup_value_id', 'left')
             ->whereIn('trips.fleet_vehicle_id', $vehicleIds)
             ->where('trips.deleted_at', null)

@@ -7,6 +7,7 @@ use App\Repositories\VehicleRecoveryExceptionRepository;
 use App\Services\Fleet\ChecklistActionFocusService;
 use App\Services\Fleet\LocationClassificationService;
 use App\Services\Fleet\OperationalMovementWorkService;
+use App\Services\Fleet\TripPreparationViewModelService;
 use CodeIgniter\Config\Services as CoreServices;
 use CodeIgniter\HTTP\RedirectResponse;
 use CodeIgniter\Shield\Config\Services as ShieldServices;
@@ -101,21 +102,9 @@ class TripMovementChecklists extends BaseController
         $extraPreparationByTrip = ($checklist['exists'] ?? false) && $companyId > 0
             ? Services::tripExtraFulfillmentService()->forTrips($companyId, $extraTripIds)
             : [];
-        $currentPhases = ($checklist['movement_type'] ?? null) === 'return' ? ['return', 'entire_trip'] : ['preparation', 'pickup', 'entire_trip'];
-        $extraPreparation = array_map(static function (array $row) use ($currentPhases): array {
-            if (! in_array((string) ($row['fulfillment_phase'] ?? ''), $currentPhases, true) && ! ($row['is_informational'] ?? false)) {
-                $row['is_actionable'] = false;
-            }
-
-            return $row;
-        }, $extraPreparationByTrip[$currentTripId] ?? []);
-        foreach ($extraPreparationByTrip[$nextTripId] ?? [] as $row) {
-            if (! in_array((string) ($row['fulfillment_phase'] ?? ''), ['preparation', 'pickup', 'entire_trip'], true) && ! ($row['is_informational'] ?? false)) {
-                continue;
-            }
-            $row['is_next_trip'] = true;
-            $extraPreparation[] = $row;
-        }
+        $preparation = (new TripPreparationViewModelService())->forChecklist($checklist, $extraPreparationByTrip, $readiness ?? []);
+        $extraPreparation = $preparation['target'];
+        $futureExtraPreparation = $preparation['future'];
         $locationClassifier = new LocationClassificationService();
         $recoveryLocationOptions = $locationClassifier->recoveryLocationOptions();
         $recoveryLocationPrefill = ($checklist['movement_type'] ?? null) === 'return'
@@ -151,6 +140,7 @@ class TripMovementChecklists extends BaseController
             'tripStatusCode' => $tripSchedule['trip_status_code'] ?? null,
             'guestCommitments' => $guestCommitments,
             'extraPreparation' => $extraPreparation,
+            'futureExtraPreparation' => $futureExtraPreparation,
             'extraVerification' => $extraVerification,
             'factTarget' => $factTarget,
             'latestEvent' => $latestEvent,

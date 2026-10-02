@@ -29,16 +29,13 @@ class MovementReadinessProjectionService
     /** @param array<string, mixed> $context @return array<string, mixed> */
     public function project(array $context): array
     {
+        $context = $this->filterOwnedWork($context);
         $movementType = (string) $context['movement_type'];
         $preparationAssessment = $this->preparationAssessment($context, $movementType === 'return');
         $requirements = $movementType === 'return'
             ? $this->returnRequirements($context)
             : $this->pickupRequirements($context);
-        if (($context['trip_is_operational'] ?? true) !== true) {
-            $requirements = $this->suppressActions($requirements);
-        } elseif (in_array($context['latest_custody_event']['event_code'] ?? null, ['actual_handoff', 'guest_return_staged'], true)) {
-            $requirements = $this->suppressActions($requirements, [self::PHASE_PICKUP_PREPARATION, self::PHASE_NEXT_PICKUP_PREPARATION]);
-        }
+        $requirements = $this->applyContext($requirements, $context);
         $readinessPhase = $movementType === 'return' ? self::PHASE_RETURN_INTAKE : self::PHASE_PICKUP_PREPARATION;
         $readinessRequirements = array_values(array_filter(
             $requirements,
@@ -46,7 +43,7 @@ class MovementReadinessProjectionService
         ));
         $blockingRemaining = count(array_filter(
             $readinessRequirements,
-            static fn (array $requirement): bool => $requirement['blocking'] && $requirement['status'] === self::STATUS_UNSATISFIED && ($requirement['actionable'] ?? true),
+            self::isBlocking(...),
         ));
         $additionalActionsRemaining = count(array_filter(
             $readinessRequirements,
@@ -56,7 +53,7 @@ class MovementReadinessProjectionService
             $readinessRequirements,
             static fn (array $requirement): bool => $requirement['blocking']
                 && $requirement['status'] === self::STATUS_UNSATISFIED
-                && ($requirement['actionable'] ?? true)
+                && ($requirement['relevant'] ?? true)
                 && in_array($requirement['kind'], [self::KIND_HUMAN, self::KIND_HYBRID], true),
         ));
         $knownFacts = count(array_filter(
@@ -95,11 +92,85 @@ class MovementReadinessProjectionService
         ];
     }
 
+    /** Project owned work even before a movement checklist exists. Physical facts remain in the vehicle state. */
+    public function projectTripPreparation(array $context): array
+    {
+        $context = $this->filterOwnedWork($context);
+        $requirements = array_merge(
+            $this->commitmentRequirements($context['active_commitments'], self::PHASE_PICKUP_PREPARATION),
+            $this->extraFulfillmentRequirements($context['extra_fulfillments'], self::PHASE_PICKUP_PREPARATION, ['preparation', 'pickup', 'entire_trip']),
+        );
+        if (($context['active_events']['actual_handoff'] ?? null) !== null) {
+            $requirements = $this->suppressCompletedMovementPreparation($requirements, self::PHASE_PICKUP_PREPARATION);
+        }
+        $requirements = $this->applyContext($requirements, $context);
+        $blocking = count(array_filter($requirements, self::isBlocking(...)));
+
+        return [
+            'company_id' => (int) $context['company_id'],
+            'trip_id' => (int) $context['turo_trip_normalized_id'],
+            'vehicle_id' => (int) $context['fleet_vehicle_id'],
+            'movement_type' => 'pickup',
+            'readiness_phase' => self::PHASE_PICKUP_PREPARATION,
+            'ready' => $blocking === 0,
+            'blocking_remaining_count' => $blocking,
+            'additional_actions_remaining_count' => count(array_filter($requirements, static fn (array $requirement): bool =>
+                ! $requirement['blocking'] && $requirement['status'] === self::STATUS_UNSATISFIED && $requirement['actionable'])),
+            'requirements' => $requirements,
+        ];
+    }
+
+    private function filterOwnedWork(array $context): array
+    {
+        foreach (['active_commitments', 'extra_fulfillments', 'next_trip_commitments', 'next_trip_extra_fulfillments'] as $key) {
+            $owner = str_starts_with($key, 'next_trip_') ? (int) ($context['next_trip']['id'] ?? 0) : (int) $context['turo_trip_normalized_id'];
+            $context[$key] = array_values(array_filter($context[$key] ?? [], static fn (array $work): bool =>
+                (int) ($work['turo_trip_normalized_id'] ?? 0) === $owner
+                && (int) ($work['company_id'] ?? $context['company_id']) === (int) $context['company_id']
+                && (int) ($work['fleet_vehicle_id'] ?? $context['fleet_vehicle_id']) === (int) $context['fleet_vehicle_id']));
+        }
+
+        return $context;
+    }
+
+    /** @param list<array<string, mixed>> $requirements @return list<array<string, mixed>> */
+    private function applyContext(array $requirements, array $context): array
+    {
+        $requirements = $this->withOwnership($requirements, $context);
+        if (($context['trip_is_operational'] ?? true) !== true) {
+            $requirements = $this->suppressActions($requirements, null, 'target_trip_inactive', true);
+        } elseif (in_array($context['latest_custody_event']['event_code'] ?? null, ['actual_handoff', 'guest_return_staged'], true)) {
+            $requirements = $this->suppressActions($requirements, [self::PHASE_PICKUP_PREPARATION, self::PHASE_NEXT_PICKUP_PREPARATION], 'vehicle_guest_custody');
+        }
+        foreach ($requirements as &$requirement) {
+            if (($requirement['deferred_reason'] ?? null) === 'vehicle_guest_custody') {
+                $event = $context['latest_custody_event'];
+                $otherTrip = (int) ($event['turo_trip_normalized_id'] ?? 0) !== (int) $requirement['trip_id'];
+                $requirement['deferred_reason'] = $otherTrip ? 'other_trip_guest_custody' : 'target_trip_guest_custody';
+                $requirement['deferred_label'] = $otherTrip ? 'Vehicle is currently in guest custody on another trip.' : 'Vehicle is currently in guest custody for this trip.';
+                $requirement['custody_event_id'] = isset($event['id']) ? (int) $event['id'] : null;
+                $requirement['custody_trip_id'] = isset($event['turo_trip_normalized_id']) ? (int) $event['turo_trip_normalized_id'] : null;
+            }
+        }
+        unset($requirement);
+
+        return $requirements;
+    }
+
     /** @param array<string, mixed> $context @return list<array<string, mixed>> */
     private function pickupRequirements(array $context): array
     {
         $events = $context['active_events'];
         $staged = $events['vehicle_staged'] ?? null;
+        $custody = $context['vehicle_custody'] ?? null;
+        $historicalStage = $staged !== null && $custody !== null
+            && ((int) ($custody['basis_trip_id'] ?? 0) !== (int) $context['turo_trip_normalized_id']
+                || (int) ($custody['basis_event_id'] ?? 0) !== (int) ($staged['id'] ?? 0)
+                || ($custody['basis_event_code'] ?? null) !== 'vehicle_staged');
+        if ($historicalStage) {
+            $staged = null;
+        }
+        $context['staging_is_historical'] = $historicalStage;
         $handoff = $events['actual_handoff'] ?? null;
         $actualLocation = $handoff ?? $staged;
         $assessment = $this->preparationAssessment($context, false);
@@ -114,6 +185,9 @@ class MovementReadinessProjectionService
         $cleanAt = $assessment['_cleanliness_captured_at'] ?? $assessment['captured_at'] ?? null;
         $energyAt = $assessment['_energy_percent_captured_at'] ?? $assessment['captured_at'] ?? null;
         $workflow = $context['airport_workflow'];
+        if ($historicalStage && $workflow !== null) {
+            $workflow = array_merge($workflow, ['vehicle_staged_at' => null, 'garage' => null, 'parking_level' => null, 'parking_row' => null]);
+        }
         $scheduledLocation = $context['scheduled_location'];
         $isAirport = ($actualLocation['location_class'] ?? null) === 'airport_hnl'
             || ($scheduledLocation['location_class'] ?? null) === 'airport_hnl'
@@ -221,6 +295,8 @@ class MovementReadinessProjectionService
             if ($requirement['phase'] === $phase && $requirement['status'] === self::STATUS_UNSATISFIED) {
                 $requirement['actionable'] = false;
                 $requirement['action'] = null;
+                $requirement['relevant'] = false;
+                $requirement['retired_reason'] = 'target_handoff';
             }
 
             return $requirement;
@@ -288,14 +364,15 @@ class MovementReadinessProjectionService
             $selected['_' . $field . '_event_id'] = $fields[$field]['event_id'] ?? null;
             $selected['_' . $field . '_applicable'] = $fields[$field]['applicable'] ?? false;
         }
-        $custody = $context['latest_custody_event'] ?? null;
-        if (in_array($custody['event_code'] ?? null, ['actual_return', 'vehicle_recovered'], true)) {
+        $custody = $context['latest_vehicle_use_event'] ?? $context['latest_custody_event'] ?? null;
+        if (in_array($custody['event_code'] ?? null, ['actual_handoff', 'guest_return_staged', 'actual_return', 'vehicle_recovered'], true)) {
             $recoveredAt = (string) ($custody['occurred_at'] ?? '');
             if ($selected['cleanliness'] === 'clean' && (string) ($selected['_cleanliness_captured_at'] ?? '') <= $recoveredAt) {
                 $selected['cleanliness'] = null;
             }
             if ($selected['energy_percent'] !== null && (string) ($selected['_energy_percent_captured_at'] ?? '') <= $recoveredAt
-                && (int) ($selected['_energy_percent_event_id'] ?? 0) !== (int) ($custody['id'] ?? 0)) {
+                && ((int) ($selected['_energy_percent_event_id'] ?? 0) !== (int) ($custody['id'] ?? 0)
+                    || in_array($custody['event_code'] ?? null, ['actual_handoff', 'guest_return_staged'], true))) {
                 $selected['energy_percent'] = null;
             }
         }
@@ -383,6 +460,9 @@ class MovementReadinessProjectionService
         }
         if ($actualLocation !== null) {
             return $this->derivedRequirement('location_confirmed', 'Pickup location confirmed', self::PHASE_PICKUP_PREPARATION, false, true, null, null, 'Record actual pickup location');
+        }
+        if ($context['staging_is_historical'] ?? false) {
+            return $this->derivedRequirement('location_confirmed', 'Pickup location confirmed', self::PHASE_PICKUP_PREPARATION, false, true, null, null, 'Record current pickup location');
         }
 
         $human = $this->humanRequirement($context, 'location_confirmed', 'Pickup location confirmed', self::PHASE_PICKUP_PREPARATION);
@@ -546,7 +626,7 @@ class MovementReadinessProjectionService
             $satisfied = $commitment['handling_mode'] === 'acknowledgment'
                 && ($commitment['acknowledged_at'] ?? null) !== null;
             $id = (int) $commitment['id'];
-            $requirements[] = $this->requirement(
+            $requirement = $this->requirement(
                 'guest_commitment_' . $id,
                 (string) $commitment['instruction'],
                 $phase,
@@ -562,6 +642,10 @@ class MovementReadinessProjectionService
                     'label' => (string) $commitment['instruction'],
                 ],
             );
+            $requirement['source_type'] = 'trip_commitment';
+            $requirement['commitment_id'] = $id;
+            $requirement['trip_id'] = (int) $commitment['turo_trip_normalized_id'];
+            $requirements[] = $requirement;
         }
 
         return $requirements;
@@ -599,6 +683,10 @@ class MovementReadinessProjectionService
             );
             $requirement['actionable'] = $actionable;
             $requirement['extra_fulfillment'] = $fulfillment;
+            $requirement['source_type'] = 'extra_fulfillment';
+            $requirement['fulfillment_id'] = $id;
+            $requirement['selection_id'] = isset($fulfillment['selection_id']) ? (int) $fulfillment['selection_id'] : null;
+            $requirement['trip_id'] = (int) $fulfillment['turo_trip_normalized_id'];
             $requirements[] = $requirement;
         }
 
@@ -673,17 +761,63 @@ class MovementReadinessProjectionService
     }
 
     /** @param list<array<string, mixed>> $requirements @param list<string>|null $phases @return list<array<string, mixed>> */
-    private function suppressActions(array $requirements, ?array $phases = null): array
+    private function suppressActions(array $requirements, ?array $phases = null, ?string $reason = null, bool $retire = false): array
     {
-        return array_map(static function (array $requirement) use ($phases): array {
+        return array_map(static function (array $requirement) use ($phases, $reason, $retire): array {
             if (($requirement['status'] ?? null) === self::STATUS_UNSATISFIED
                 && ($phases === null || in_array($requirement['phase'] ?? null, $phases, true))) {
                 $requirement['actionable'] = false;
                 $requirement['action'] = null;
+                if ($retire) {
+                    $requirement['relevant'] = false;
+                    $requirement['retired_reason'] = $reason;
+                } elseif ($requirement['relevant'] ?? true) {
+                    $requirement['deferred_reason'] = $reason;
+                }
             }
 
             return $requirement;
         }, $requirements);
+    }
+
+    /** Availability is independent of unresolved readiness. */
+    public static function isBlocking(array $requirement): bool
+    {
+        return ($requirement['blocking'] ?? false)
+            && ($requirement['relevant'] ?? true)
+            && ($requirement['status'] ?? null) === self::STATUS_UNSATISFIED;
+    }
+
+    /** @param list<array<string, mixed>> $requirements @return list<array<string, mixed>> */
+    private function withOwnership(array $requirements, array $context): array
+    {
+        $owned = [];
+        foreach ($requirements as $requirement) {
+            $future = $requirement['phase'] === self::PHASE_NEXT_PICKUP_PREPARATION;
+            $trip = $future ? ($context['next_trip'] ?? []) : $context;
+            $tripId = $future ? (int) ($trip['id'] ?? 0) : (int) $context['turo_trip_normalized_id'];
+            $requirement += [
+                'company_id' => (int) $context['company_id'],
+                'trip_id' => $tripId,
+                'reservation_id' => $trip['turo_reservation_id'] ?? $trip['turo_trip_id'] ?? null,
+                'vehicle_id' => (int) $context['fleet_vehicle_id'],
+                'work_identity' => $requirement['code'],
+                'source_type' => str_starts_with($requirement['code'], 'vehicle_health_') ? 'vehicle_health' : $requirement['kind'],
+                'relevant' => true,
+                'actionable' => true,
+                'deferred_reason' => null,
+                'retired_reason' => null,
+                'selection_id' => null,
+                'fulfillment_id' => null,
+                'commitment_id' => null,
+            ];
+            if (isset($requirement['extra_fulfillment']['turo_reservation_id'])) {
+                $requirement['reservation_id'] = $requirement['extra_fulfillment']['turo_reservation_id'];
+            }
+            $owned[$tripId . ':' . $requirement['phase'] . ':' . $requirement['code']] = $requirement;
+        }
+
+        return array_values($owned);
     }
 
     /** @param array<string, mixed>|null $assessment @return array<string, mixed>|null */

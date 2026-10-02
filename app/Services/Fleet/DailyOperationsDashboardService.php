@@ -56,12 +56,13 @@ class DailyOperationsDashboardService
             $today,
         );
         $checklists = $this->attachReadinessProjections($checklistSummaries, $asOf);
-        $awaitingVehicleIds = array_fill_keys(array_map('intval', array_column($today['awaiting_recovery'] ?? [], 'fleet_vehicle_id')), true);
-        $actionableChecklists = array_values(array_filter($checklists, static fn (array $checklist): bool => ! isset($awaitingVehicleIds[(int) ($checklist['fleet_vehicle_id'] ?? 0)])));
+        $awaitingTripIds = array_fill_keys(array_map('intval', array_column($today['awaiting_recovery'] ?? [], 'turo_trip_normalized_id')), true);
+        $actionableChecklists = array_values(array_filter($checklists, static fn (array $checklist): bool => ! isset($awaitingTripIds[(int) ($checklist['turo_trip_normalized_id'] ?? 0)])));
         $board = $this->stateService->movementBoard($vehicles, $today, $health, $asOf);
         $board = $this->attachCurrentPositions($board, $fleetSnapshot['vehicles']);
         $board = $this->attachChecklistSummaries($board, $actionableChecklists);
         $board = $this->movementBoardIntelligence()->enrich($board, $asOf, $companyId);
+        $readinessWork = $this->withNextTripPreparation($actionableChecklists, $board);
 
         $externalAlerts = $this->externalAlerts($importIssues, $vehicleMappings, $reconciliation, $airport, $reimbursements, $health);
         $attention = $this->stateService->immediateAttention($board, $externalAlerts);
@@ -75,7 +76,7 @@ class DailyOperationsDashboardService
             'timeline' => $this->attachChecklistTimeline($this->stateService->timeline($today, $asOf), $checklists),
             'attention' => $attention,
             'fleet_status' => $this->stateService->statusCounts($board, (float) $currentMonth['fleet_utilization'], $fleetSnapshot, $today),
-            'operational_queue' => $this->operationalQueue($today, $attention, $importIssues, $vehicleMappings, $reconciliation, $airport, $reimbursements, $incidentals, $expenses, $actionableChecklists),
+            'operational_queue' => $this->operationalQueue($today, $attention, $importIssues, $vehicleMappings, $reconciliation, $airport, $reimbursements, $incidentals, $expenses, $readinessWork),
             'financial' => [
                 'Realized Operating Revenue' => '$' . number_format((float) $financialSummary['realized_operating_revenue'], 2),
                 'Realized Recoveries' => '$' . number_format((float) $financialSummary['realized_recoveries'], 2),
@@ -97,6 +98,27 @@ class DailyOperationsDashboardService
     private function financialSummary(): FinancialSummaryService
     {
         return $this->financialSummaryService ?? Services::financialSummaryService();
+    }
+
+    private function withNextTripPreparation(array $checklists, array $board): array
+    {
+        foreach ($board as $card) {
+            $projection = $card['next_trip_preparation'] ?? null;
+            if ($projection === null) {
+                continue;
+            }
+            $checklists[] = [
+                'fleet_vehicle_id' => (int) $projection['vehicle_id'],
+                'turo_trip_normalized_id' => (int) $projection['trip_id'],
+                'movement_type' => 'pickup',
+                'href' => $projection['href'],
+                'blocking_remaining_count' => (int) $projection['blocking_remaining_count'],
+                'additional_actions_remaining_count' => (int) $projection['additional_actions_remaining_count'],
+                'readiness_projection' => $projection,
+            ];
+        }
+
+        return $checklists;
     }
 
     private function externalAlerts(array $importIssues, array $vehicleMappings, array $reconciliation, array $airport, array $reimbursements, array $health): array
@@ -125,9 +147,7 @@ class DailyOperationsDashboardService
             $vehicleId = (int) ($checklist['fleet_vehicle_id'] ?? 0);
             foreach ($projection['requirements'] ?? [] as $requirement) {
                 if (($requirement['phase'] ?? null) !== ($projection['readiness_phase'] ?? null)
-                    || ! ($requirement['blocking'] ?? false)
-                    || ($requirement['status'] ?? null) !== MovementReadinessProjectionService::STATUS_UNSATISFIED
-                    || ! ($requirement['actionable'] ?? true)) {
+                    || ! MovementReadinessProjectionService::isBlocking($requirement)) {
                     continue;
                 }
                 $code = (string) ($requirement['code'] ?? '');
@@ -357,18 +377,13 @@ class DailyOperationsDashboardService
                             && ($requirement['energy_condition'] ?? null) === 'above_maximum');
                     }
                     if (($requirement['phase'] ?? null) === ($projection['readiness_phase'] ?? null)
-                        && ($requirement['blocking'] ?? false)
-                        && ($requirement['status'] ?? null) === MovementReadinessProjectionService::STATUS_UNSATISFIED
-                        && ($requirement['actionable'] ?? true)) {
+                        && MovementReadinessProjectionService::isBlocking($requirement)) {
                         $blockers[] = array_merge($requirement, ['href' => $summary['href']]);
                     }
                     if (($projection['is_same_day_turnaround'] ?? false)
                         && ($requirement['phase'] ?? null) === MovementReadinessProjectionService::PHASE_NEXT_PICKUP_PREPARATION
-                        && ($requirement['blocking'] ?? false)
-                        && ($requirement['status'] ?? null) === MovementReadinessProjectionService::STATUS_UNSATISFIED
-                        && ($requirement['actionable'] ?? true)) {
+                        && MovementReadinessProjectionService::isBlocking($requirement)) {
                         $turnaroundRemaining++;
-                        $blockers[] = array_merge($requirement, ['href' => $summary['href']]);
                     }
                 }
             }

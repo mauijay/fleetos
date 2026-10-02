@@ -125,13 +125,14 @@ $tripFacts ??= [
             <?php if (! $tripIsOperational): ?>
                 <?= view('trip_movement_checklists/_inactive', ['checklist' => $checklist, 'tripStatusCode' => $tripStatusCode]) ?>
             <?php else: ?>
-            <?= view('trip_movement_checklists/_trip_preparation', ['checklist' => $checklist, 'extraPreparation' => $extraPreparation ?? []]) ?>
+            <?= view('trip_movement_checklists/_trip_preparation', ['checklist' => $checklist, 'extraPreparation' => $extraPreparation ?? [], 'preparationTrip' => null, 'isFuturePreparation' => false]) ?>
             <?php if (($checklist['movement_type'] ?? null) === 'return'): ?>
                 <?= view('trip_movement_checklists/_return_workflow', ['checklist' => $checklist, 'readiness' => $readiness, 'guestReturn' => $guestReturn, 'guestReturnActive' => $guestReturnActive, 'returnCompleted' => $returnCompleted, 'canRecover' => $canRecover, 'turnaroundWork' => $turnaroundWork, 'recoveryExceptions' => $recoveryExceptions]) ?>
             <?php else: ?>
                 <?= view('trip_movement_checklists/_readiness', ['checklist' => $checklist, 'readiness' => $readiness, 'tripFacts' => $tripFacts]) ?>
             <?php endif; ?>
-            <?= view('trip_movement_checklists/_guest_commitments', ['checklist' => $checklist, 'guestCommitments' => $guestCommitments ?? [], 'extraPreparation' => $extraPreparation ?? [], 'extraVerification' => $extraVerification ?? null]) ?>
+            <?= view('trip_movement_checklists/_guest_commitments', ['checklist' => $checklist, 'guestCommitments' => $guestCommitments ?? [], 'extraPreparation' => $extraPreparation ?? [], 'extraVerification' => $extraVerification ?? null, 'readiness' => $readiness]) ?>
+            <?= view('trip_movement_checklists/_future_preparation', ['checklist' => $checklist, 'readiness' => $readiness, 'futureExtraPreparation' => $futureExtraPreparation ?? []]) ?>
             <?= view('trip_movement_checklists/_known_damage', ['checklist' => $checklist, 'vehicleDamage' => $vehicleDamage, 'availableDamageExceptions' => $availableDamageExceptions, 'notice' => $vehicleDamageNotice, 'errors' => $vehicleDamageErrors, 'form' => $vehicleDamageForm, 'formData' => $vehicleDamageData]) ?>
 
             <?php if (($checklist['movement_type'] ?? null) === 'return'): ?>
