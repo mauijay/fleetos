@@ -10,9 +10,9 @@ final class TuroReservationUrlTripIdExtractorTest extends CIUnitTestCase
 {
     public function testExtractsTripIdFromValidReservationUrl(): void
     {
-        $id = (new TuroReservationUrlTripIdExtractor())->extract('https://turo.com//reservation/59419470');
+        $id = (new TuroReservationUrlTripIdExtractor())->extract('https://turo.com//reservation/70001001');
 
-        $this->assertSame('59419470', $id);
+        $this->assertSame('70001001', $id);
     }
 
     public function testMalformedReservationUrlReturnsNull(): void
@@ -38,6 +38,6 @@ final class TuroReservationUrlTripIdExtractorTest extends CIUnitTestCase
         $extractor = new TuroReservationUrlTripIdExtractor();
 
         $this->assertNull($extractor->extract('https://turo.com/login'));
-        $this->assertNull($extractor->extract('https://example.com/reservation/59419470'));
+        $this->assertNull($extractor->extract('https://example.com/reservation/70001001'));
     }
 }

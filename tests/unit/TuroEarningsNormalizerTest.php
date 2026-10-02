@@ -22,13 +22,13 @@ final class TuroEarningsNormalizerTest extends CIUnitTestCase
         $tripEarning = new RawTransactionRow(
             rowNumber: 2,
             payload: [
-                'type' => "Wice's trip\nWith Tesla Model Y 2026",
-                'reservation_url' => 'https://turo.com/reservation/59419470',
+                'type' => "Synthetic Guest Alpha's trip\nWith Tesla Model Y 2026",
+                'reservation_url' => 'https://turo.com/reservation/70001001',
                 'earnings' => '$100.00',
                 'date' => '2026-01-01',
             ],
             externalTransactionId: null,
-            externalTripId: '59419470',
+            externalTripId: '70001001',
             transactionDate: '2026-01-01',
             rowHash: hash('sha256', 'trip-earning'),
         );

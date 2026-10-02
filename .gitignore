@@ -140,3 +140,5 @@ _modules/*
 /Tesla_Charging_History_*.xlsx
 /Tesla_Charging_History_*.csv
 /trip_earnings_export_*.csv
+/private/import-sources/
+fleetos-turo-extras-*.json

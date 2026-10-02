@@ -16,6 +16,7 @@ $routes->group('', ['filter' => 'session'], static function (RouteCollection $ro
     $routes->group('turo/extras', ['filter' => 'permission:admin.access'], static function (RouteCollection $routes): void {
         $routes->get('', 'TuroExtras::index');
         $routes->post('import', 'TuroExtras::import');
+        $routes->post('reconcile', 'TuroExtras::reconcile');
         $routes->post('catalog', 'TuroExtras::createExtra');
         $routes->post('catalog/(:num)', 'TuroExtras::updateExtra/$1');
         $routes->post('mappings', 'TuroExtras::mapSource');

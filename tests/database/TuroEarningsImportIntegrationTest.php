@@ -274,8 +274,8 @@ final class TuroEarningsImportIntegrationTest extends CIUnitTestCase
         $file = $this->csvFile([
             'type', 'reservation_url', 'date', 'earnings',
         ], [
-            ['Trip payout', 'https://turo.com/reservation/59419470', '2026-01-10', '$100.00'],
-            ['Trip payout', 'https://turo.com/reservation/5941947', '2026-01-10', '$50.00'],
+            ['Trip payout', 'https://turo.com/reservation/70001001', '2026-01-10', '$100.00'],
+            ['Trip payout', 'https://turo.com/reservation/7000100', '2026-01-10', '$50.00'],
             ['Trip payout', 'https://turo.com/reservation/not-an-id', '2026-01-10', '$40.00'],
             ['Trip payout', 'N/A', '2026-01-10', '$30.00'],
             ['Trip payout', 'https://turo.com/login', '2026-01-10', '$20.00'],
@@ -294,7 +294,7 @@ final class TuroEarningsImportIntegrationTest extends CIUnitTestCase
             ->getRowArray();
         $this->assertNotNull($matched);
         $this->assertSame(502, (int) $matched['turo_trip_normalized_id']);
-        $this->assertSame('59419470', $matched['external_trip_id']);
+        $this->assertSame('70001001', $matched['external_trip_id']);
 
         $nonExact = $this->connection->table('turo_transactions_normalized')
             ->where('amount', '50.00')
@@ -343,7 +343,7 @@ final class TuroEarningsImportIntegrationTest extends CIUnitTestCase
         $rawRow = $this->connection->table('turo_transaction_raw')->where('row_number', 2)->get()->getRowArray();
         $this->assertNotNull($rawRow);
         $payload = json_decode((string) $rawRow['raw_payload'], true, 512, JSON_THROW_ON_ERROR);
-        $this->assertSame('https://turo.com/reservation/59419470', $payload['reservation_url']);
+        $this->assertSame('https://turo.com/reservation/70001001', $payload['reservation_url']);
     }
 
     public function testGenerated174RowRealShapeProducesNormalizedRowsInsteadOfFullSkips(): void
@@ -496,7 +496,7 @@ final class TuroEarningsImportIntegrationTest extends CIUnitTestCase
     {
         $this->connection->table('fleet_vehicles')->insert(['id' => 9, 'fleet_code' => 'Spaceship-009', 'display_name' => 'Spaceship-009', 'deleted_at' => null]);
         $this->connection->table('turo_trips_normalized')->insert(['id' => 501, 'fleet_vehicle_id' => 9, 'turo_trip_id' => 'trip-100', 'deleted_at' => null]);
-        $this->connection->table('turo_trips_normalized')->insert(['id' => 502, 'fleet_vehicle_id' => 9, 'turo_trip_id' => '59419470', 'deleted_at' => null]);
+        $this->connection->table('turo_trips_normalized')->insert(['id' => 502, 'fleet_vehicle_id' => 9, 'turo_trip_id' => '70001001', 'deleted_at' => null]);
     }
 
     /** @param array<int, array<int, string>> $rows */

@@ -20,7 +20,7 @@ final class TuroExtrasFoundationArchitectureTest extends CIUnitTestCase
 
         $this->assertMatchesRegularExpression('/group\(\'\', \[\'filter\' => \'session\'\].*?group\(\'turo\/extras\', \[\'filter\' => \'permission:admin\.access\'\]/s', $routes);
         $this->assertMatchesRegularExpression('/public array \$globals = \[.*?\'before\' => \[.*?\'csrf\'.*?\]/s', $filters);
-        foreach (["post('import'", "post('catalog'", "post('catalog/(:num)'", "post('mappings'", "post('mappings/create-extra'"] as $postRoute) {
+        foreach (["post('import'", "post('reconcile'", "post('catalog'", "post('catalog/(:num)'", "post('mappings'", "post('mappings/create-extra'"] as $postRoute) {
             $this->assertStringContainsString($postRoute, $routes);
         }
     }

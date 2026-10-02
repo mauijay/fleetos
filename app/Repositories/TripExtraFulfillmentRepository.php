@@ -20,6 +20,32 @@ class TripExtraFulfillmentRepository
         return $this->db->tableExists('trip_extra_fulfillments');
     }
 
+    public function attachUnmatchedForTrip(int $companyId, int $tripId): void
+    {
+        if (! $this->db->tableExists('turo_extra_reservation_snapshots')) {
+            return;
+        }
+        $trip = $this->db->table('turo_trips_normalized trips')->select('trips.turo_trip_id, trips.turo_reservation_id')
+            ->join('fleet_vehicles vehicles', 'vehicles.id = trips.fleet_vehicle_id')
+            ->where('vehicles.company_id', $companyId)->where('trips.id', $tripId)->where('trips.deleted_at', null)
+            ->get()->getRowArray();
+        if ($trip === null) {
+            return;
+        }
+        $ids = array_values(array_unique(array_filter([(string) $trip['turo_trip_id'], (string) $trip['turo_reservation_id']])));
+        $matches = (new FleetExtraRepository($this->db))->tripsByReservationIds($companyId, $ids);
+        $ids = array_values(array_filter($ids, static fn (string $id): bool => isset($matches[$id]) && (int) $matches[$id]['id'] === $tripId));
+        if ($ids === []) {
+            return;
+        }
+        $this->transaction(function () use ($companyId, $tripId, $ids): void {
+            foreach (['turo_extra_selections', 'turo_extra_reservation_snapshots'] as $table) {
+                $this->db->table($table)->where('company_id', $companyId)->whereIn('turo_reservation_id', $ids)
+                    ->where('turo_trip_normalized_id', null)->update(['turo_trip_normalized_id' => $tripId]);
+            }
+        });
+    }
+
     /** @param list<int> $selectionIds @return list<array<string, mixed>> */
     public function operationalRows(int $companyId, array $selectionIds = [], ?int $fleetExtraId = null, ?string $sourceExtraId = null): array
     {
@@ -232,6 +258,7 @@ class TripExtraFulfillmentRepository
     private function baseSelectionQuery(int $companyId): \CodeIgniter\Database\BaseBuilder
     {
         return $this->db->table('turo_extra_selections selections')
+            ->select('selections.*')
             ->select('selections.id AS selection_id, selections.company_id, selections.turo_trip_normalized_id, selections.turo_reservation_id')
             ->select('selections.source_extra_id, selections.reservation_state_extra_id, selections.quantity, selections.removed_at')
             ->select('mappings.fleet_extra_id, extras.code AS fleet_extra_code, extras.display_name AS fleet_extra_name, extras.active AS fleet_extra_active')
@@ -239,8 +266,8 @@ class TripExtraFulfillmentRepository
             ->select('trips.fleet_vehicle_id, trips.canceled_at AS trip_canceled_at, statuses.code AS trip_status_code')
             ->select('fulfillments.id AS fulfillment_id, fulfillments.state AS fulfillment_state, fulfillments.current_basis_hash, fulfillments.completed_basis_hash')
             ->select('fulfillments.completed_at, fulfillments.completed_by_user_id, fulfillments.completion_note, fulfillments.created_at AS fulfillment_created_at, fulfillments.updated_at AS fulfillment_updated_at')
-            ->join('fleet_extra_source_mappings mappings', "mappings.company_id = selections.company_id AND mappings.source_system = 'turo' AND mappings.source_extra_id = selections.source_extra_id")
-            ->join('fleet_extras extras', 'extras.id = mappings.fleet_extra_id AND extras.company_id = mappings.company_id')
+            ->join('fleet_extra_source_mappings mappings', "mappings.company_id = selections.company_id AND mappings.source_system = 'turo' AND mappings.source_extra_id = selections.source_extra_id", 'left')
+            ->join('fleet_extras extras', 'extras.id = mappings.fleet_extra_id AND extras.company_id = mappings.company_id', 'left')
             ->join('turo_trips_normalized trips', 'trips.id = selections.turo_trip_normalized_id AND trips.deleted_at IS NULL')
             ->join('fleet_vehicles vehicles', 'vehicles.id = trips.fleet_vehicle_id AND vehicles.company_id = selections.company_id')
             ->join('lookup_values statuses', 'statuses.id = trips.trip_status_lookup_value_id', 'left')

@@ -22,15 +22,93 @@ class FleetExtraService
     }
 
     /** @return array<string,mixed> */
-    public function workspace(int $companyId): array
+    public function workspace(int $companyId, ?string $reservationId = null): array
     {
+        if ($reservationId !== null && preg_match('/^\d{1,80}$/', $reservationId) !== 1) {
+            throw new InvalidArgumentException('Enter a numeric Turo reservation ID.');
+        }
+        $candidates = $this->extras->refreshCandidates($companyId, $reservationId);
+        $verification = $this->verificationForTrips($companyId, array_map('intval', array_column($candidates, 'trip_id')));
+        foreach ($candidates as &$candidate) {
+            $candidate['verification'] = $verification[(int) $candidate['trip_id']] ?? $this->unverified();
+        }
+        unset($candidate);
+
         return [
             'catalog' => $this->extras->catalog($companyId),
             'mappings' => $this->extras->mappings($companyId),
             'unmapped' => $this->extras->unmappedSources($companyId),
             'counts' => $this->extras->counts($companyId),
-            'reservation_ids' => $this->extras->reservationIdsNeedingSnapshot($companyId),
+            'reservation_ids' => array_values(array_unique(array_column($candidates, 'reservation_id'))),
+            'refresh_candidates' => $candidates,
+            'reservation_lookup' => $reservationId,
         ];
+    }
+
+    /** @param list<int> $tripIds @return array<int, array<string, mixed>> */
+    public function verificationForTrips(int $companyId, array $tripIds): array
+    {
+        $trips = $this->extras->tripsForVerification($companyId, $tripIds);
+        $reservationIds = array_values(array_unique(array_column($trips, 'reservation_id')));
+        $complete = $issues = [];
+        foreach ($this->extras->verificationObservations($companyId, $reservationIds) as $row) {
+            $reservationId = (string) $row['turo_reservation_id'];
+            if ((bool) $row['snapshot_complete']) {
+                $complete[$reservationId] = $row;
+            } else {
+                $issues[$reservationId] = ['observed_at' => (string) $row['observed_at'], 'message' => 'Latest observation was incomplete; complete verification is required.'];
+            }
+        }
+        foreach ($this->extras->verificationFailures($companyId, $reservationIds) as $row) {
+            $payload = json_decode((string) $row['raw_payload'], true);
+            $reservationId = (string) ($payload['reservation_id'] ?? '');
+            $observedAt = (string) ($payload['observed_at'] ?? '');
+            if ($observedAt >= ($issues[$reservationId]['observed_at'] ?? '')) {
+                $issues[$reservationId] = ['observed_at' => $observedAt, 'message' => $row['error_code'] === 'extras_observation_conflict'
+                    ? 'Conflicting observations at the same time; export a fresh snapshot.'
+                    : 'Latest Extras verification failed; export a fresh snapshot.'];
+            }
+        }
+        $result = [];
+        foreach ($trips as $trip) {
+            $reservationId = (string) $trip['reservation_id'];
+            $state = $this->unverified();
+            if (isset($complete[$reservationId])) {
+                $snapshot = $complete[$reservationId];
+                $payload = json_decode((string) $snapshot['source_payload'], true);
+                $count = count($payload['extras'] ?? []);
+                $label = (new \DateTimeImmutable((string) $snapshot['observed_at'], new \DateTimeZone('UTC')))
+                    ->setTimezone(new \DateTimeZone((new \Config\App())->appTimezone))->format('M j, Y g:i:s A T');
+                $state = [
+                    'state' => $count === 0 ? 'complete_empty' : 'complete_nonempty',
+                    'observed_at' => (string) $snapshot['observed_at'],
+                    'verified_label' => $label,
+                    'summary' => $count === 0 ? 'No Extras observed as of ' . $label : 'Extras verified ' . $label,
+                    'issue' => null,
+                ];
+            }
+            if (isset($issues[$reservationId]) && $issues[$reservationId]['observed_at'] >= ($state['observed_at'] ?? '')) {
+                $state['issue'] = $issues[$reservationId]['message'];
+            }
+            $result[(int) $trip['trip_id']] = $state;
+        }
+
+        return $result;
+    }
+
+    public function reconcileTripLinks(int $companyId, int $actorUserId): void
+    {
+        $this->requireContext($companyId, $actorUserId);
+        $trips = $this->extras->tripsByReservationIds($companyId, $this->extras->unmatchedReservationIds($companyId));
+        foreach (array_unique(array_column($trips, 'id')) as $tripId) {
+            $this->fulfillments?->reconcileForTrip($companyId, (int) $tripId, $actorUserId);
+        }
+    }
+
+    /** @return array<string, mixed> */
+    private function unverified(): array
+    {
+        return ['state' => 'never', 'observed_at' => null, 'verified_label' => null, 'summary' => 'Extras not verified for this reservation.', 'issue' => null];
     }
 
     public function createExtra(int $companyId, array $input, int $actorUserId): int

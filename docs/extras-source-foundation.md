@@ -18,7 +18,9 @@ Paste the helper into a Turo tab, then run:
 await FleetOSTuroExtrasExporter.run(["70000001", "70000002"])
 ```
 
-The protected Extras Import page exposes only active-company reservation IDs that do not yet have a complete snapshot. Copy those IDs into the helper, download the sanitized file, and upload it to FleetOS. An export failure contains only the reservation ID and a safe error description.
+The protected Extras Import page lists upcoming pickups and active/in-progress trips in the active company, including reservations previously verified with empty or nonempty Extras. Candidates are ordered by pickup time and capped at 500. An exact numeric reservation lookup can also select a historical company-owned trip. CSV aggregate Extras dollars do not affect eligibility. Copy the displayed IDs into the helper, download the sanitized file, and upload it to FleetOS. This is operator-assisted verification; FleetOS learns about subsequent Turo changes only after another export/import. Verify again during pickup preparation.
+
+Never verified means **Extras not verified for this reservation**. A complete empty snapshot means **No Extras observed as of [timestamp]**, not a promise that no subsequent changes occurred. Complete nonempty observations display the purchased selections and verification time. Source observation timestamps are stored in UTC and displayed in the application timezone (Pacific/Honolulu). A later partial observation, failed export, rejected reservation, or equal-time conflict displays a refresh warning while retaining the last complete verification. Newly recorded Extras errors carry server-derived company ownership and source observation time; legacy errors without those facts are not assigned to a company by guesswork.
 
 The accepted JSON root is:
 
@@ -47,13 +49,25 @@ Selections deliberately do not copy `fleet_extra_id`. Canonical identity resolve
 
 Price is historical selection data; it is never taken from a current catalog value. Missing quantity stays `NULL`, and gross amount stays `NULL` unless quantity was explicitly supplied. An unmatched reservation remains company-scoped and does not acquire a fabricated trip link. A local trip link is made only through the existing authoritative Turo trip/reservation identity for a vehicle owned by the active company.
 
-Re-importing an identical file is idempotent. A present selection updates allowed current source fields and `last_observed_at`; a new reservation-state Extra identity inserts a row. Missing selections are marked `removed_at` only from a valid snapshot explicitly marked complete. Partial or invalid reservation blocks cannot remove history. Deleted/recreated Turo Extras keep their old mappings; each new source ID enters the unmapped queue for an explicit decision.
+Re-importing an identical file is idempotent. A newer complete observation updates current source fields and `last_observed_at`; a new reservation-state Extra identity inserts a row. Missing selections are marked `removed_at` only from a valid snapshot explicitly marked complete. Partial observations are preserved as evidence only: they neither add/change current selections nor remove, reactivate, or reopen operational work. Only complete observations advance the authoritative lifecycle watermark.
+
+Equal-time equivalent reservation observations are no-ops even when the file encoding or Extra array order differs. Equal timestamps with different sanitized payloads are rejected per reservation, reported as `extras_observation_conflict`, and preserved in the existing import-error evidence. They do not replace current selections or become accepted verification snapshots. Obtain a fresh export with a later timestamp to resolve ambiguity. MySQL imports serialize these checks using the company row inside the existing transaction. Deleted/recreated Turo Extras keep their old mappings; each new source ID enters the unmapped queue for an explicit decision.
+
+Selections imported before their normalized trip exists retain their source evidence. The existing trip-import fulfillment reconciliation hook now attaches previously unmatched selections and snapshots by unambiguous company-owned reservation/trip identity. The protected **Match saved Extras to imported trips** POST action also reconciles already-created trips. No source-file replay or GET-side mutation is required; commercial fields and source payloads remain unchanged.
+
+## Movement visibility and fulfillment
+
+Movement Guest Commitments contains a read-only **Purchased Extras** summary and separate **Special instructions** marked Manual. Every active selection remains visible, including unmapped source products. Unknown products display their Turo label, optional quantity, and **Operational mapping required**, with no invented physical instruction or readiness blocker. Removed selections are absent from the active summary and retain existing fulfillment history.
+
+Mapped selections use the existing canonical catalog's fulfillment type, phase, confirmation flag, blocking flag, and operator action. No label-based behavior is introduced. The summary creates no tasks or completion controls; the existing Trip Preparation fulfillment remains the sole purchased-Extra completion authority. Manual commitments remain independent and do not alter imported commercial truth. Automatic manual/imported reconciliation remains out of scope.
 
 ## Operations and security
 
 All Extras browser routes require `session` and `admin.access`; POST requests use the global CSRF filter. Company ID and actor are server-derived. Catalog, mapping, trip matching, imports, and queue queries are company-scoped. Mapping, reservation, and existing-selection reads are batched; the unmapped queue is set-based.
 
-Safe synthetic fixtures live in `tests/_support/fixtures`. They cover two Turo IDs with the label “Beach gear,” changed historical pricing, the “Portable GPS” alias, omitted quantity, repeat import, and complete-snapshot removal. They contain no production or guest data and are not migration seed data.
+Safe synthetic fixtures live in `tests/_support/fixtures`. They cover two Turo IDs with the label “Beach gear,” changed historical pricing, the “Portable GPS” alias, omitted quantity, repeat import, and complete-snapshot removal. They contain no production or guest data and are not migration seed data. The earnings real-shape fixture preserves export shape with explicitly invented guest names, reservation/vehicle identifiers, and payment suffixes.
+
+Keep private exports and any downloaded receipt/detail material in `private/import-sources/`, which Git ignores. The narrow `fleetos-turo-extras-*.json` pattern also protects exporter downloads accidentally saved elsewhere in the repository. Do not commit source receipts/HTML, guest information, credentials, cookies, or session tokens. The sanitized JSON contract and operator's existing authenticated-tab mechanism are unchanged; no unattended automation or official API support is implied.
 
 ## Financial firewall and next slice
 

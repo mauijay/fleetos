@@ -51,6 +51,7 @@ class TripExtraFulfillmentService
         if (! $this->repo()->storageExists()) {
             return;
         }
+        $this->repo()->attachUnmatchedForTrip($companyId, $tripId);
         foreach ($this->repo()->currentForTrips($companyId, [$tripId]) as $row) {
             $this->reconcileRow($row, false, $actorUserId);
         }
@@ -197,7 +198,7 @@ class TripExtraFulfillmentService
     private function present(array $row, array $linkedCommitments, bool $handoffRecorded): array
     {
         $quantity = $this->quantityLabel($row['quantity'] ?? null);
-        $title = (string) $row['fleet_extra_name'] . ($quantity === null ? '' : ' ×' . $quantity);
+        $title = (string) ($row['fleet_extra_name'] ?? $row['source_label'] ?? 'Purchased Extra') . ($quantity === null ? '' : ' ×' . $quantity);
         $action = trim((string) ($row['default_action_label'] ?? ''));
         $action = str_replace('{quantity}', $quantity ?? 'quantity not supplied', $action);
         $operational = $this->tripIsOperational($row);
@@ -210,6 +211,7 @@ class TripExtraFulfillmentService
 
         return array_merge($row, [
             'title' => $title,
+            'is_mapped' => ($row['fleet_extra_id'] ?? null) !== null,
             'quantity_label' => $quantity,
             'quantity_unknown' => $quantity === null,
             'action_label' => $action,

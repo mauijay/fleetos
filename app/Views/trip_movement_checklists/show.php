@@ -131,7 +131,7 @@ $tripFacts ??= [
             <?php else: ?>
                 <?= view('trip_movement_checklists/_readiness', ['checklist' => $checklist, 'readiness' => $readiness, 'tripFacts' => $tripFacts]) ?>
             <?php endif; ?>
-            <?= view('trip_movement_checklists/_guest_commitments', ['checklist' => $checklist, 'guestCommitments' => $guestCommitments ?? []]) ?>
+            <?= view('trip_movement_checklists/_guest_commitments', ['checklist' => $checklist, 'guestCommitments' => $guestCommitments ?? [], 'extraPreparation' => $extraPreparation ?? [], 'extraVerification' => $extraVerification ?? null]) ?>
             <?= view('trip_movement_checklists/_known_damage', ['checklist' => $checklist, 'vehicleDamage' => $vehicleDamage, 'availableDamageExceptions' => $availableDamageExceptions, 'notice' => $vehicleDamageNotice, 'errors' => $vehicleDamageErrors, 'form' => $vehicleDamageForm, 'formData' => $vehicleDamageData]) ?>
 
             <?php if (($checklist['movement_type'] ?? null) === 'return'): ?>

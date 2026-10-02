@@ -53,12 +53,28 @@ $reservationIds = implode("\n", $workspace['reservation_ids']);
         </section>
 
         <section class="section" aria-labelledby="export-heading">
-            <div class="section-heading split-heading"><div><p class="eyebrow">Browser-side source capture</p><h2 id="export-heading">Export reservation Extras</h2></div><span class="count-pill"><?= count($workspace['reservation_ids']) ?> need first snapshot</span></div>
-            <p>These IDs belong to the active company and have no complete Extras snapshot yet. Copy them, open an authenticated <strong>turo.com</strong> tab, paste <code>tools/turo-extras-exporter.js</code> into DevTools, then run <code>FleetOSTuroExtrasExporter.run(ids)</code>.</p>
-            <label for="extras-reservation-ids">Reservation IDs needing first Extras refresh</label>
+            <div class="section-heading split-heading"><div><p class="eyebrow">Browser-side source capture</p><h2 id="export-heading">Export reservation Extras</h2></div><span class="count-pill"><?= count($workspace['reservation_ids']) ?> refresh candidates</span></div>
+            <p>Upcoming pickups and active trips remain eligible after every observation, including an empty snapshot. Verify Extras again during pickup preparation. Copy these IDs, open your authenticated <strong>turo.com</strong> tab, paste <code>tools/turo-extras-exporter.js</code> into DevTools, then run <code>FleetOSTuroExtrasExporter.run(ids)</code>.</p>
+            <form class="extra-map-form" action="/turo/extras" method="get">
+                <label>Exact reservation ID<input name="reservation_id" inputmode="numeric" pattern="[0-9]+" maxlength="80" value="<?= esc((string) ($workspace['reservation_lookup'] ?? ''), 'attr') ?>" required></label>
+                <button class="secondary-action" type="submit">Find reservation to refresh</button>
+                <a class="action-link" href="/turo/extras">Upcoming and active trips</a>
+            </form>
+            <?php if (($workspace['reservation_lookup'] ?? null) !== null && $workspace['reservation_ids'] === []): ?><p class="muted">No matching reservation in the active company.</p><?php endif; ?>
+            <label for="extras-reservation-ids">Reservation IDs for Extras refresh</label>
             <textarea id="extras-reservation-ids" class="source-id-list" rows="6" readonly><?= esc($reservationIds) ?></textarea>
             <button class="secondary-action" type="button" data-copy-target="extras-reservation-ids"<?= $reservationIds === '' ? ' disabled' : '' ?>>Copy reservation IDs</button>
             <p class="muted" data-copy-status aria-live="polite">The exporter downloads sanitized JSON locally. It never exports cookies, authorization headers, messages, or guest contact data.</p>
+            <p class="muted">Save private exports in <code>private/import-sources/</code>. A verification describes the last observation; changes in Turo require another export and import.</p>
+            <div class="history-list wrap-anywhere">
+                <?php foreach ($workspace['refresh_candidates'] ?? [] as $candidate): ?><div>
+                    <strong><?= esc((string) $candidate['fleet_code']) ?> · Reservation <?= esc((string) $candidate['reservation_id']) ?></strong>
+                    <span><?= esc((string) $candidate['verification']['summary']) ?></span>
+                    <?php if ($candidate['verification']['issue'] !== null): ?><small class="tone-warning"><?= esc((string) $candidate['verification']['issue']) ?></small><?php endif; ?>
+                    <a class="action-link" href="/turo/extras?reservation_id=<?= esc((string) $candidate['reservation_id'], 'attr') ?>">Refresh this reservation</a>
+                </div><?php endforeach; ?>
+            </div>
+            <form action="/turo/extras/reconcile" method="post"><?= csrf_field() ?><button class="secondary-action" type="submit">Match saved Extras to imported trips</button></form>
         </section>
 
         <section class="section import-panel" aria-labelledby="extras-upload-heading">

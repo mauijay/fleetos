@@ -32,6 +32,14 @@ class FleetExtraRepository
         }
     }
 
+    public function lockCompanyObservations(int $companyId): void
+    {
+        if ($this->db->DBDriver === 'MySQLi') {
+            // Serialize imports within a tenant so equal-time checks cannot race.
+            $this->db->query('SELECT id FROM ' . $this->db->prefixTable('companies') . ' WHERE id = ? FOR UPDATE', [$companyId]);
+        }
+    }
+
     public function supportsFulfillmentConfiguration(): bool
     {
         if ($this->db->DBDriver === 'SQLite3') {
@@ -197,13 +205,20 @@ class FleetExtraRepository
             ->get()->getResultArray();
 
         $result = [];
+        $ambiguous = [];
         foreach ($rows as $row) {
             foreach (['turo_trip_id', 'turo_reservation_id'] as $field) {
                 $key = trim((string) ($row[$field] ?? ''));
                 if ($key !== '') {
+                    if (isset($result[$key]) && (int) $result[$key]['id'] !== (int) $row['id']) {
+                        $ambiguous[$key] = true;
+                    }
                     $result[$key] = $row;
                 }
             }
+        }
+        foreach (array_keys($ambiguous) as $key) {
+            unset($result[$key]);
         }
 
         return $result;
@@ -236,6 +251,7 @@ class FleetExtraRepository
         $rows = $this->db->table('turo_extra_reservation_snapshots')
             ->select('turo_reservation_id, MAX(observed_at) AS observed_at', false)
             ->where('company_id', $companyId)
+            ->where('snapshot_complete', 1)
             ->whereIn('turo_reservation_id', $reservationIds)
             ->groupBy('turo_reservation_id')
             ->get()->getResultArray();
@@ -324,19 +340,99 @@ class FleetExtraRepository
     /** @return list<string> */
     public function reservationIdsNeedingSnapshot(int $companyId, int $limit = 500): array
     {
-        $rows = $this->db->table('turo_trips_normalized trips')
-            ->select("COALESCE(NULLIF(trips.turo_reservation_id, ''), trips.turo_trip_id) AS reservation_id", false)
-            ->join('fleet_vehicles vehicles', 'vehicles.id = trips.fleet_vehicle_id')
-            ->join('turo_extra_reservation_snapshots snapshots', 'snapshots.company_id = vehicles.company_id AND snapshots.turo_reservation_id = COALESCE(NULLIF(trips.turo_reservation_id, \'\'), trips.turo_trip_id) AND snapshots.snapshot_complete = 1', 'left', false)
-            ->where('vehicles.company_id', $companyId)
-            ->where('trips.deleted_at', null)
-            ->where('snapshots.id', null)
-            ->groupBy('reservation_id')
-            ->orderBy('trips.starts_at', 'DESC')
-            ->limit($limit)
-            ->get()->getResultArray();
+        return array_column($this->refreshCandidates($companyId, null, $limit), 'reservation_id');
+    }
 
-        return array_values(array_filter(array_map(static fn (array $row): string => trim((string) $row['reservation_id']), $rows)));
+    /** @return list<array<string, mixed>> */
+    public function refreshCandidates(int $companyId, ?string $reservationId = null, int $limit = 500, ?\DateTimeImmutable $asOf = null): array
+    {
+        $asOf ??= new \DateTimeImmutable();
+        $builder = $this->db->table('turo_trips_normalized trips')
+            ->select("trips.id AS trip_id, COALESCE(NULLIF(trips.turo_reservation_id, ''), trips.turo_trip_id) AS reservation_id, trips.starts_at, trips.ends_at, vehicles.fleet_code", false)
+            ->join('fleet_vehicles vehicles', 'vehicles.id = trips.fleet_vehicle_id')
+            ->join('lookup_values statuses', 'statuses.id = trips.trip_status_lookup_value_id', 'left')
+            ->where('vehicles.company_id', $companyId)
+            ->where('trips.deleted_at', null);
+        if ($reservationId !== null) {
+            $builder->groupStart()->where('trips.turo_reservation_id', $reservationId)->orWhere('trips.turo_trip_id', $reservationId)->groupEnd();
+        } else {
+            $builder->where('trips.canceled_at', null)
+                ->groupStart()->where('statuses.code', null)->orWhereIn('statuses.code', ['booked', 'in_progress'])->groupEnd()
+                ->groupStart()->where('trips.starts_at >=', $asOf->format('Y-m-d H:i:s'))
+                    ->orWhere('trips.ends_at >=', $asOf->format('Y-m-d H:i:s'))
+                    ->orWhere('statuses.code', 'in_progress')->groupEnd();
+        }
+
+        return $builder->orderBy('trips.starts_at', 'ASC')->orderBy('trips.id', 'ASC')->limit($limit)->get()->getResultArray();
+    }
+
+    /** @param list<int> $tripIds @return list<array<string, mixed>> */
+    public function tripsForVerification(int $companyId, array $tripIds): array
+    {
+        if ($tripIds === [] || ! $this->db->tableExists('turo_extra_reservation_snapshots')) {
+            return [];
+        }
+
+        return $this->db->table('turo_trips_normalized trips')
+            ->select("trips.id AS trip_id, COALESCE(NULLIF(trips.turo_reservation_id, ''), trips.turo_trip_id) AS reservation_id", false)
+            ->join('fleet_vehicles vehicles', 'vehicles.id = trips.fleet_vehicle_id')
+            ->where('vehicles.company_id', $companyId)->where('trips.deleted_at', null)
+            ->whereIn('trips.id', $tripIds)->get()->getResultArray();
+    }
+
+    /** @param list<string> $reservationIds @return list<array<string, mixed>> */
+    public function verificationObservations(int $companyId, array $reservationIds): array
+    {
+        if ($reservationIds === []) {
+            return [];
+        }
+        // Return the latest complete and partial observation without loading all history.
+        return $this->db->table('turo_extra_reservation_snapshots snapshots')
+            ->select('snapshots.*')
+            ->join($this->db->prefixTable('turo_extra_reservation_snapshots') . ' newer', 'newer.company_id = snapshots.company_id AND newer.turo_reservation_id = snapshots.turo_reservation_id AND newer.snapshot_complete = snapshots.snapshot_complete AND (newer.observed_at > snapshots.observed_at OR (newer.observed_at = snapshots.observed_at AND newer.id > snapshots.id))', 'left', false)
+            ->where('snapshots.company_id', $companyId)->whereIn('snapshots.turo_reservation_id', $reservationIds)
+            ->where('newer.id', null)->get()->getResultArray();
+    }
+
+    /** @param list<string> $reservationIds @return list<array<string, mixed>> */
+    public function verificationFailures(int $companyId, array $reservationIds): array
+    {
+        if ($reservationIds === [] || ! $this->db->tableExists('turo_import_errors')) {
+            return [];
+        }
+        $reservationExpression = "JSON_EXTRACT(errors.raw_payload, '$.reservation_id')";
+        if ($this->db->DBDriver !== 'SQLite3') {
+            $reservationExpression = 'JSON_UNQUOTE(' . $reservationExpression . ')';
+        }
+
+        // New Extras errors carry server-derived ownership and source observation time.
+        return $this->db->table('turo_import_errors errors')->select('errors.raw_payload, errors.error_code')
+            ->where('errors.raw_table', 'turo_extra_reservation_snapshots')
+            ->whereIn('errors.error_code', ['invalid_extras_reservation', 'extras_export_failure', 'extras_observation_conflict'])
+            ->where("JSON_EXTRACT(errors.raw_payload, '$.company_id')", $companyId, false)
+            ->whereIn($reservationExpression, $reservationIds)->get()->getResultArray();
+    }
+
+    /** @param list<string> $reservationIds @return list<array<string, mixed>> */
+    public function snapshotsAtObservation(int $companyId, array $reservationIds, string $observedAt): array
+    {
+        if ($reservationIds === []) {
+            return [];
+        }
+
+        return $this->db->table('turo_extra_reservation_snapshots')->select('turo_reservation_id, source_payload')
+            ->where('company_id', $companyId)->whereIn('turo_reservation_id', $reservationIds)
+            ->where('observed_at', $observedAt)->get()->getResultArray();
+    }
+
+    /** @return list<string> */
+    public function unmatchedReservationIds(int $companyId): array
+    {
+        $rows = $this->db->table('turo_extra_reservation_snapshots')->select('turo_reservation_id')
+            ->where('company_id', $companyId)->where('turo_trip_normalized_id', null)
+            ->groupBy('turo_reservation_id')->get()->getResultArray();
+
+        return array_column($rows, 'turo_reservation_id');
     }
 
     /** @return array{selection_count:int,unmapped_count:int,snapshot_count:int} */

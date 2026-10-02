@@ -15,15 +15,34 @@ class TuroExtras extends BaseController
     public function index(): string
     {
         $companyId = $this->activeCompanyId();
+        $reservationId = trim((string) $this->request->getGet('reservation_id'));
+        $lookupError = null;
+        try {
+            $workspace = Services::fleetExtraService()->workspace($companyId, $reservationId === '' ? null : $reservationId);
+        } catch (\InvalidArgumentException $exception) {
+            $workspace = Services::fleetExtraService()->workspace($companyId);
+            $lookupError = $exception->getMessage();
+        }
 
         return CoreServices::renderer()->setData([
             'assets' => Services::assetManifestService()->appAssets(),
             'navigation' => $this->navigation(),
-            'workspace' => Services::fleetExtraService()->workspace($companyId),
+            'workspace' => $workspace,
             'import_result' => CoreServices::session()->getFlashdata('turo_extras_import_result'),
             'success' => CoreServices::session()->getFlashdata('turo_extras_success'),
-            'error' => CoreServices::session()->getFlashdata('turo_extras_error'),
+            'error' => $lookupError ?? CoreServices::session()->getFlashdata('turo_extras_error'),
         ])->render('turo_extras/index');
+    }
+
+    public function reconcile(): RedirectResponse
+    {
+        try {
+            Services::fleetExtraService()->reconcileTripLinks($this->activeCompanyId(), $this->actorUserId());
+        } catch (Throwable $exception) {
+            return $this->failure($exception->getMessage());
+        }
+
+        return CoreServices::redirectresponse()->to('/turo/extras')->with('turo_extras_success', 'Saved Extras matched to available company trips.');
     }
 
     public function import(): RedirectResponse

@@ -95,6 +95,9 @@ class TripMovementChecklists extends BaseController
         $currentTripId = (int) ($checklist['turo_trip_normalized_id'] ?? 0);
         $nextTripId = (int) ($readiness['next_trip']['id'] ?? 0);
         $extraTripIds = array_values(array_filter([$currentTripId, $nextTripId]));
+        $extraVerification = $companyId > 0
+            ? (Services::fleetExtraService()->verificationForTrips($companyId, [$currentTripId])[$currentTripId] ?? null)
+            : null;
         $extraPreparationByTrip = ($checklist['exists'] ?? false) && $companyId > 0
             ? Services::tripExtraFulfillmentService()->forTrips($companyId, $extraTripIds)
             : [];
@@ -148,6 +151,7 @@ class TripMovementChecklists extends BaseController
             'tripStatusCode' => $tripSchedule['trip_status_code'] ?? null,
             'guestCommitments' => $guestCommitments,
             'extraPreparation' => $extraPreparation,
+            'extraVerification' => $extraVerification,
             'factTarget' => $factTarget,
             'latestEvent' => $latestEvent,
             'guestReturn' => $guestReturn,

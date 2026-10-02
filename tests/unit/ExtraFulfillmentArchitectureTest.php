@@ -147,6 +147,51 @@ final class ExtraFulfillmentArchitectureTest extends CIUnitTestCase
         $this->assertStringNotContainsString('/complete', $html);
     }
 
+    public function testGuestSectionSeparatesNeverVerifiedFromVerifiedEmptyAndManualInstructions(): void
+    {
+        $data = ['checklist' => ['turo_trip_normalized_id' => 333], 'guestCommitments' => [], 'extraPreparation' => [], 'extraVerification' => null];
+        $never = Services::renderer()->setData($data)->render('trip_movement_checklists/_guest_commitments');
+        $this->assertStringContainsString('Extras not verified for this reservation.', $never);
+        $this->assertStringContainsString('Purchased Extras', $never);
+        $this->assertStringContainsString('Special instructions', $never);
+        $this->assertStringNotContainsString('No guest-specific commitments', $never);
+
+        $data['extraVerification'] = ['summary' => 'No Extras observed as of Oct 1, 2099 10:00:00 AM HST', 'issue' => null];
+        $data['guestCommitments'] = [[
+            'id' => 11, 'category' => 'guest_amenity', 'category_label' => 'Guest amenity', 'instruction' => 'Pack a synthetic welcome card',
+            'phase_label' => 'Preparation', 'is_blocking' => true, 'handling_mode' => 'task', 'arranged_at' => null, 'fleet_extra_name' => null,
+        ]];
+        $empty = Services::renderer()->setData($data)->render('trip_movement_checklists/_guest_commitments');
+        $this->assertStringContainsString('No Extras observed as of', $empty);
+        $this->assertStringNotContainsString('Extras not verified', $empty);
+        $this->assertStringContainsString('Manual', $empty);
+        $this->assertStringContainsString('Pack a synthetic welcome card', $empty);
+        $this->assertStringContainsString('/operations/trips/333/commitments/11/complete', $empty);
+    }
+
+    public function testUnknownExtraRemainsVisibleOutsideHistoryWithoutTaskOrBlocker(): void
+    {
+        $html = Services::renderer()->setData(['checklist' => ['turo_trip_normalized_id' => 333], 'extraPreparation' => [[
+            'selection_id' => 12, 'turo_trip_normalized_id' => 333, 'title' => 'Unknown <kit> ×2', 'is_mapped' => false, 'configured' => false,
+            'is_removed' => false, 'is_completed' => false, 'is_actionable' => false, 'is_informational' => false, 'quantity_unknown' => false,
+        ]]])->render('trip_movement_checklists/_trip_preparation');
+        $this->assertStringContainsString('Unknown &lt;kit&gt;', $html);
+        $this->assertStringContainsString('Operational mapping required', $html);
+        $this->assertStringContainsString('0 actions', $html);
+        $this->assertStringNotContainsString('Fulfillment history', $html);
+        $this->assertStringNotContainsString('<form', $html);
+    }
+
+    public function testPurchasedSummaryExcludesRemovedSelectionsAndOtherTrips(): void
+    {
+        $html = Services::renderer()->setData(['checklist' => ['turo_trip_normalized_id' => 333], 'guestCommitments' => [], 'extraPreparation' => [
+            ['turo_trip_normalized_id' => 333, 'is_removed' => true, 'title' => 'Removed kit'],
+            ['turo_trip_normalized_id' => 334, 'is_removed' => false, 'title' => 'Other trip kit'],
+        ], 'extraVerification' => null])->render('trip_movement_checklists/_guest_commitments');
+        $this->assertStringNotContainsString('Removed kit', $html);
+        $this->assertStringNotContainsString('Other trip kit', $html);
+    }
+
     private function read(string $path): string
     {
         $contents = file_get_contents($this->root . '/' . $path);

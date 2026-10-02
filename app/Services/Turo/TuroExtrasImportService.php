@@ -88,7 +88,7 @@ class TuroExtrasImportService
                     'error_code' => 'invalid_extras_reservation',
                     'field_name' => null,
                     'message' => $invalid['message'],
-                    'raw_payload' => ['reservation_id' => $invalid['reservation_id'], 'validation_error' => $invalid['message']],
+                    'raw_payload' => ['company_id' => $companyId, 'observed_at' => $validated['exported_at'], 'reservation_id' => $invalid['reservation_id'], 'validation_error' => $invalid['message']],
                 ]);
             }
             foreach ($validated['failures'] as $failure) {
@@ -101,7 +101,7 @@ class TuroExtrasImportService
                     'error_code' => 'extras_export_failure',
                     'field_name' => 'reservation_id',
                     'message' => "Reservation {$failure['reservation_id']}: {$failure['error']}",
-                    'raw_payload' => $failure,
+                    'raw_payload' => array_merge($failure, ['company_id' => $companyId, 'observed_at' => $validated['exported_at']]),
                 ]);
             }
 
@@ -116,7 +116,7 @@ class TuroExtrasImportService
             $this->batches->update($batchId, [
                 'import_status_lookup_value_id' => $this->lookups->valueId('import_status', 'completed'),
                 'completed_at' => date('Y-m-d H:i:s'),
-                'error_message' => $validated['invalid'] === [] ? null : count($validated['invalid']) . ' reservation block(s) rejected.',
+                'error_message' => $result->invalidReservations === 0 ? null : $result->invalidReservations . ' reservation block(s) rejected.',
             ]);
 
             return $result;
@@ -137,16 +137,39 @@ class TuroExtrasImportService
         $sourceExtraIds = $this->sourceExtraIds($reservations);
         $trips = $this->extras->tripsByReservationIds($companyId, $reservationIds);
         $mappings = $this->extras->mappingsBySourceIds($companyId, $sourceExtraIds);
-        $existing = $this->extras->selectionsByIdentity($companyId, $reservationIds);
-        $latestSnapshots = $this->extras->latestSnapshotObservations($companyId, $reservationIds);
         $added = $updated = $unchanged = $removed = 0;
+        $conflicts = 0;
         $reactivatedSelectionIds = [];
+        $selectionIds = [];
 
-        $this->extras->transaction(function () use ($reservations, $observedAt, $batchId, $companyId, $trips, $mappings, $latestSnapshots, &$existing, &$added, &$updated, &$unchanged, &$removed, &$reactivatedSelectionIds): void {
+        $this->extras->transaction(function () use ($reservations, $reservationIds, $observedAt, $batchId, $companyId, $trips, $mappings, &$selectionIds, &$added, &$updated, &$unchanged, &$removed, &$conflicts, &$reactivatedSelectionIds): void {
+            $this->extras->lockCompanyObservations($companyId);
+            $existing = $this->extras->selectionsByIdentity($companyId, $reservationIds);
+            $latestSnapshots = $this->extras->latestSnapshotObservations($companyId, $reservationIds);
+            $sameTime = [];
+            foreach ($this->extras->snapshotsAtObservation($companyId, $reservationIds, $observedAt) as $snapshot) {
+                $payload = json_decode((string) $snapshot['source_payload'], true, 64, JSON_THROW_ON_ERROR);
+                $sameTime[(string) $snapshot['turo_reservation_id']][] = $this->reservationHash($payload);
+            }
             foreach ($reservations as $reservation) {
                 $reservationId = (string) $reservation['reservation_id'];
                 $trip = $trips[$reservationId] ?? null;
-                $payloadHash = $this->hash($reservation);
+                $payloadHash = $this->reservationHash($reservation);
+                if (isset($sameTime[$reservationId])) {
+                    if (count(array_diff($sameTime[$reservationId], [$payloadHash])) > 0) {
+                        $this->errors->create([
+                            'turo_import_batch_id' => $batchId,
+                            'severity_lookup_value_id' => $this->lookups->valueId('import_error_severity', 'error'),
+                            'raw_table' => 'turo_extra_reservation_snapshots', 'raw_row_id' => null, 'row_number' => null,
+                            'error_code' => 'extras_observation_conflict', 'field_name' => 'exported_at',
+                            'message' => "Reservation {$reservationId}: conflicting Extras observations have the same timestamp. Export a fresh snapshot.",
+                            'raw_payload' => ['company_id' => $companyId, 'reservation_id' => $reservationId, 'observed_at' => $observedAt, 'reservation' => $reservation],
+                        ]);
+                        $conflicts++;
+                    }
+                    $unchanged += count($reservation['extras']);
+                    continue;
+                }
                 $now = date('Y-m-d H:i:s');
                 $snapshotId = $this->extras->createSnapshot([
                     'company_id' => $companyId,
@@ -162,7 +185,8 @@ class TuroExtrasImportService
                     'source_payload' => $reservation,
                     'created_at' => $now,
                 ]);
-                if (($latestSnapshots[$reservationId] ?? '') > $observedAt) {
+                // Partial observations are evidence only: they cannot change purchase lifecycle or reopen work.
+                if (! $reservation['snapshot_complete'] || ($latestSnapshots[$reservationId] ?? '') > $observedAt) {
                     $unchanged += count($reservation['extras']);
 
                     continue;
@@ -227,19 +251,15 @@ class TuroExtrasImportService
                             $unchanged++;
                         }
                     }
+                    $selectionIds[] = (int) $existing[$key]['id'];
                     if (isset($mappings[(string) $extra['extra_id']])) {
                         $this->extras->touchMappingFromObservation($companyId, (string) $extra['extra_id'], $extra, $observedAt);
                     }
                 }
-                if ($reservation['snapshot_complete']) {
-                    $removed += $this->extras->markMissingSelectionsRemoved($companyId, $reservationId, $present, $observedAt, $snapshotId);
-                }
+                $removed += $this->extras->markMissingSelectionsRemoved($companyId, $reservationId, $present, $observedAt, $snapshotId);
             }
         });
-        $selectionIds = array_values(array_unique(array_map(
-            static fn (array $selection): int => (int) $selection['id'],
-            $existing,
-        )));
+        $selectionIds = array_values(array_unique($selectionIds));
         $this->fulfillments?->reconcileSelectionIds($companyId, $selectionIds, $reactivatedSelectionIds);
 
         return new TuroExtrasImportResult(
@@ -250,7 +270,7 @@ class TuroExtrasImportService
             selectionsUnchanged: $unchanged,
             selectionsRemoved: $removed,
             unmappedSourceExtraIds: count(array_diff($sourceExtraIds, array_keys($mappings))),
-            invalidReservations: $invalidCount,
+            invalidReservations: $invalidCount + $conflicts,
             exportFailures: $exportFailures,
         );
     }
@@ -280,6 +300,15 @@ class TuroExtrasImportService
     private function hash(array $payload): string
     {
         return hash('sha256', json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES));
+    }
+
+    /** @param array<string, mixed> $reservation */
+    private function reservationHash(array $reservation): string
+    {
+        // Array order is not commercial identity; keep same-time replays deterministic.
+        usort($reservation['extras'], static fn (array $a, array $b): int => strcmp((string) $a['reservation_state_extra_id'], (string) $b['reservation_state_extra_id']));
+
+        return $this->hash($reservation);
     }
 
     private function grossAmount(string $unitPrice, ?string $quantity): ?string
