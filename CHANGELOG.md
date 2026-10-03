@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.25.2 — Cross-Trip Vehicle Position Projection Fix
+
+Release date: 2026-10-02
+
+### Fixed
+
+- Allow a newer valid operator `vehicle_positioned` fact to update current location even when it is associated with a different trip context than the earlier recovery.
+- Preserve lifecycle/canonical custody authority while allowing location-only movement facts to update physical position.
+- Keep guest-custody protections intact when unrelated future or foreign-trip positioning facts exist.
+- Preserve chronological precedence for recovery and positioning facts, including voided, superseded, stale, and future-dated events.
+- Clear stale airport garage/level/row fields when a later Home position becomes current.
+- Keep single-vehicle and company-wide current-position projections consistent.
+
+### Release Boundaries
+
+- No migration or schema change.
+- No movement history rewrite.
+- No production positioning facts are changed by deployment.
+- Vehicle-position write-path success verification remains a separate hardening task.
+
 ## v0.25.1 — Cross-Trip Readiness Scoping Fix
 
 Release date: 2026-10-01
