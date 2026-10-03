@@ -127,6 +127,10 @@ class CurrentVehicleLocationService
         if ($latestLocation === null || (string) ($latestLocation['occurred_at'] ?? '') < (string) ($basis['occurred_at'] ?? '')) {
             return $basis;
         }
+        // A position-only fact's trip is provenance; custody remains established by the lifecycle basis.
+        if (($latestLocation['event_code'] ?? null) === 'vehicle_positioned') {
+            return $latestLocation;
+        }
         $locationTripId = (int) ($latestLocation['turo_trip_normalized_id'] ?? 0);
         $basisTripId = (int) ($basis['turo_trip_normalized_id'] ?? 0);
         if ($locationTripId > 0 && $basisTripId > 0 && $locationTripId !== $basisTripId) {

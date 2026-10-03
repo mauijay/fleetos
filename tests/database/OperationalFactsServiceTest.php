@@ -1201,6 +1201,237 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
         $this->assertSame(1, $this->connection->table('operational_fact_audits')->where('table_name', 'vehicle_positioning_plans')->where('action', 'invalidated')->countAllResults());
     }
 
+    #[DataProvider('operatorPositionTripContexts')]
+    public function testChecklistRelocationSeparatesOperatorCustodyFromPositionProvenance(int $positionTripId): void
+    {
+        $recoveryId = $this->seedOperatorPositionTrips();
+        $recovery = $this->repository->event($recoveryId);
+        $plans = $this->createStub(VehiclePositioningPlanService::class);
+        $plans->method('invalidateForWrite')->willReturn(0);
+        $service = new MovementOperationalFactService($this->connection, $this->events, $this->assessments, $plans);
+
+        $this->assertTrue($service->recordVehiclePosition(
+            ['exists' => true, 'company_id' => 1, 'fleet_vehicle_id' => 10, 'turo_trip_normalized_id' => $positionTripId, 'movement_type' => 'pickup'],
+            ['occurred_at' => '2026-09-12 10:00:00', 'location_class' => 'home'],
+            8,
+        ));
+        $position = $this->repository->latestLocationEvent(10);
+        $this->assertNotNull($position);
+        $this->assertSame($positionTripId, (int) $position['turo_trip_normalized_id']);
+        $this->assertSame('checklist_operator', $position['source']);
+        $this->assertNull($position['movement_type']);
+        $asOf = new DateTimeImmutable('2026-09-12 12:00:00');
+        $location = $this->assertOperatorPosition((int) $position['id'], 'home', $recoveryId, $asOf);
+        foreach (['airport_garage_code', 'airport_parking_level', 'airport_parking_row', 'location_detail', 'location_note'] as $field) {
+            $this->assertNull($location[$field]);
+        }
+        $this->assertSame($recovery, $this->repository->event($recoveryId));
+        $this->assertSame(3, $this->connection->table('trip_movement_events')->countAllResults());
+        $this->assertSame(0, $this->connection->table('movement_assessments')->countAllResults());
+
+        $locations = new CurrentVehicleLocationService($this->repository);
+        $snapshot = (new FleetSnapshotService($locations, $this->repository))->forCompany(1, $asOf);
+        $counts = array_column($snapshot['buckets'], 'count', 'code');
+        $this->assertSame(1, $counts['home']);
+        $this->assertSame(0, $counts['hnl']);
+        $this->assertSame(0, $counts['rented']);
+
+        $nextTrips = $this->createStub(NextConfirmedTripService::class);
+        $nextTrips->method('forVehicle')->willReturn(null);
+        $plans->method('active')->willReturn(null);
+        $board = new MovementBoardIntelligenceService(
+            $this->repository,
+            $nextTrips,
+            new ImportFreshnessService(),
+            new MovementStateResolver(),
+            new VehiclePositioningRecommendationService(),
+            $plans,
+            custodyService: new CurrentVehicleCustodyService($this->repository),
+        );
+        $card = $board->enrich([[
+            'fleet_vehicle_id' => 10, 'status' => 'available', 'flags' => [], 'actions' => [], 'current_position' => $location,
+        ]], $asOf)[0];
+        $this->assertSame('home', $card['location']['class']);
+        $this->assertSame('hold_home_flexible', $card['recommendation']['code']);
+        $this->assertSame($position['id'], $card['current_position']['event_id']);
+
+        $html = \Config\Services::renderer()->setData([
+            'checklist' => ['id' => 900, 'fleet_vehicle_id' => 10, 'movement_type' => 'pickup'],
+            'currentLocation' => $location, 'tripContext' => [], 'showPositionForm' => false,
+            'positionFormData' => [], 'hnlGarages' => [], 'readOnly' => true,
+        ])->render('trip_movement_checklists/_position');
+        $this->assertStringContainsString('id="position-heading">Home</h2>', $html);
+        $this->assertStringContainsString('No additional location detail.', $html);
+        $this->assertStringNotContainsString('International', $html);
+        $this->assertStringNotContainsString('HNL', $html);
+    }
+
+    /** @return array<string, array{int}> */
+    public static function operatorPositionTripContexts(): array
+    {
+        return ['same trip' => [100], 'future trip context' => [101]];
+    }
+
+    #[DataProvider('ignoredOperatorPositions')]
+    public function testOperatorPositionValidityAndChronologyPreserveRecovery(string $scenario): void
+    {
+        $recoveryId = $this->seedOperatorPositionTrips();
+        $occurredAt = match ($scenario) {
+            'stale' => '2026-09-12 08:30:00',
+            'future' => '2026-09-12 13:00:00',
+            default => '2026-09-12 10:00:00',
+        };
+        $eventCode = $scenario === 'foreign staging' ? 'vehicle_staged' : 'vehicle_positioned';
+        $positionId = $this->events->record(10, 101, $eventCode, $eventCode === 'vehicle_staged' ? 'pickup' : null, $occurredAt, 'home', null, 'operator', 8);
+        if ($scenario === 'foreign staging') {
+            $this->connection->table('turo_trips_normalized')->where('id', 101)->update(['canceled_at' => '2026-09-12 11:00:00']);
+        }
+        if ($scenario === 'voided') {
+            $this->assertTrue($this->events->void($positionId, 8, 'Synthetic invalid position.'));
+        }
+        $asOf = new DateTimeImmutable('2026-09-12 12:00:00');
+        $this->assertOperatorPosition($recoveryId, 'airport_hnl', $recoveryId, $asOf);
+        if ($scenario === 'future') {
+            $this->assertOperatorPosition($positionId, 'home', $recoveryId, new DateTimeImmutable('2026-09-12 13:00:00'));
+        }
+    }
+
+    /** @return array<string, array{string}> */
+    public static function ignoredOperatorPositions(): array
+    {
+        return [
+            'position before recovery' => ['stale'],
+            'voided position' => ['voided'],
+            'future position until applicable' => ['future'],
+            'canceled future staging retains lifecycle trip guard' => ['foreign staging'],
+        ];
+    }
+
+    public function testLatestOperatorPositionsUseOwnDetailsAndDeterministicTimestampTies(): void
+    {
+        $recoveryId = $this->seedOperatorPositionTrips();
+        $homeId = $this->events->record(10, 101, 'vehicle_positioned', null, '2026-09-12 09:00:00', 'home', null, 'operator', 8);
+        $this->assertOperatorPosition($homeId, 'home', $recoveryId, new DateTimeImmutable('2026-09-12 09:30:00'));
+        $otherId = $this->events->record(10, 101, 'vehicle_positioned', null, '2026-09-12 10:00:00', 'other_delivery', 'Synthetic service center', 'operator', 8);
+        $other = $this->assertOperatorPosition($otherId, 'other_delivery', $recoveryId, new DateTimeImmutable('2026-09-12 10:30:00'));
+        $this->assertSame('Synthetic service center', $other['location_detail']);
+        $airportId = $this->events->record(10, 101, 'vehicle_positioned', null, '2026-09-12 11:00:00', 'airport_hnl', null, 'operator', 8, null, ['garage_code' => 'terminal_2', 'level' => 4, 'row' => 'M']);
+        $airport = $this->assertOperatorPosition($airportId, 'airport_hnl', $recoveryId, new DateTimeImmutable('2026-09-12 12:00:00'));
+        $this->assertSame('terminal_2', $airport['airport_garage_code']);
+        $this->assertSame(4, (int) $airport['airport_parking_level']);
+        $this->assertSame('M', $airport['airport_parking_row']);
+
+        $laterRecovery = $this->events->record(10, 100, 'vehicle_recovered', 'return', '2026-09-12 11:00:00', 'home', null, 'operator', 8);
+        $this->assertOperatorPosition($laterRecovery, 'home', $laterRecovery, new DateTimeImmutable('2026-09-12 12:00:00'));
+    }
+
+    public function testVoidedNewerPositionPreservesHomeUntilLaterHnlRecovery(): void
+    {
+        $recoveryId = $this->seedOperatorPositionTrips();
+        $homeId = $this->events->record(10, 101, 'vehicle_positioned', null, '2026-09-12 10:00:00', 'home', null, 'operator', 8);
+        $otherId = $this->events->record(10, 101, 'vehicle_positioned', null, '2026-09-12 11:00:00', 'other_delivery', 'Synthetic invalid position', 'operator', 8);
+        $this->assertTrue($this->events->void($otherId, 8, 'Synthetic invalid position.'));
+        $this->assertOperatorPosition($homeId, 'home', $recoveryId, new DateTimeImmutable('2026-09-12 11:30:00'));
+
+        $laterRecoveryId = $this->events->record(10, 100, 'vehicle_recovered', 'return', '2026-09-12 12:00:00', 'airport_hnl', null, 'operator', 8, null, ['garage_code' => 'terminal_2', 'level' => 3, 'row' => 'K']);
+        $airport = $this->assertOperatorPosition($laterRecoveryId, 'airport_hnl', $laterRecoveryId, new DateTimeImmutable('2026-09-12 12:30:00'));
+        $this->assertSame('terminal_2', $airport['airport_garage_code']);
+        $this->assertSame(3, (int) $airport['airport_parking_level']);
+        $this->assertSame('K', $airport['airport_parking_row']);
+        $this->assertSame('home', $this->repository->event($homeId)['location_class']);
+    }
+
+    public function testSupersededOperatorPositionUsesReplacementChronologyAndLocation(): void
+    {
+        $recoveryId = $this->seedOperatorPositionTrips();
+        $homeId = $this->events->record(10, 101, 'vehicle_positioned', null, '2026-09-12 10:00:00', 'home', null, 'operator', 8);
+        $otherId = $this->events->record(10, 101, 'vehicle_positioned', null, '2026-09-12 11:00:00', 'other_delivery', 'Synthetic erroneous position', 'operator', 8);
+        $replacementId = $this->events->correct($otherId, ['occurred_at' => '2026-09-12 09:30:00', 'location_detail' => 'Synthetic corrected position'], 8, 'Synthetic chronology correction.');
+        $this->assertNotNull($this->repository->event($otherId)['voided_at']);
+        $this->assertSame($otherId, (int) $this->repository->event($replacementId)['supersedes_event_id']);
+        $this->assertOperatorPosition($replacementId, 'other_delivery', $recoveryId, new DateTimeImmutable('2026-09-12 09:45:00'));
+        $this->assertOperatorPosition($homeId, 'home', $recoveryId, new DateTimeImmutable('2026-09-12 12:00:00'));
+    }
+
+    #[DataProvider('guestPositionCustodyStates')]
+    public function testForeignPositionCannotOverrideGuestCustodyOrUnverifiedReturn(string $lifecycleCode): void
+    {
+        $this->seedOperatorPositionTrips();
+        $handoffId = $this->events->record(10, 100, 'actual_handoff', 'pickup', '2026-09-12 09:30:00', 'airport_hnl', null, 'operator', 8);
+        $basisId = $lifecycleCode === 'actual_handoff' ? $handoffId
+            : $this->events->record(10, 100, 'guest_return_staged', 'return', '2026-09-12 10:00:00', 'airport_hnl', null, 'guest_report_received', 8);
+        $this->events->record(10, 101, 'vehicle_positioned', null, '2026-09-12 11:00:00', 'home', null, 'operator', 8);
+        $asOf = new DateTimeImmutable('2026-09-12 12:00:00');
+        $custody = new CurrentVehicleCustodyService($this->repository);
+        $this->assertSame('guest', $custody->resolve(10, $asOf)['custody']);
+        $this->assertSame($basisId, $custody->resolve(10, $asOf)['basis_event_id']);
+        $locations = new CurrentVehicleLocationService($this->repository);
+        $location = $locations->resolve(10, $asOf);
+        $batch = array_column($locations->forCompany(1, $asOf), null, 'id')[10];
+        $this->assertSame($location, array_intersect_key($batch, $location));
+        $this->assertSame($basisId, $location['event_id']);
+        $this->assertSame($lifecycleCode === 'actual_handoff' ? 'rented' : 'awaiting_recovery', $location['operational_state']);
+        $this->assertSame($lifecycleCode === 'actual_handoff' ? 'airport_hnl' : 'unknown', $location['location_class']);
+        $this->assertNotSame('current', $location['position_semantics']);
+    }
+
+    /** @return array<string, array{string}> */
+    public static function guestPositionCustodyStates(): array
+    {
+        return ['guest handoff' => ['actual_handoff'], 'unverified guest return' => ['guest_return_staged']];
+    }
+
+    public function testOperatorPositionsRemainVehicleAndCompanyScoped(): void
+    {
+        $recoveryId = $this->seedOperatorPositionTrips();
+        $positionId = $this->events->record(10, 101, 'vehicle_positioned', null, '2026-09-12 10:00:00', 'home', null, 'operator', 8);
+        $this->connection->table('fleet_vehicles')->insert(['id' => 30, 'company_id' => 1, 'deleted_at' => null]);
+        $this->events->record(30, null, 'vehicle_positioned', null, '2026-09-12 11:00:00', 'other_delivery', 'Synthetic other vehicle', 'operator', 8);
+        $foreignId = $this->events->record(20, 200, 'vehicle_recovered', 'return', '2026-09-12 11:30:00', 'airport_hnl', null, 'operator', 8);
+        $asOf = new DateTimeImmutable('2026-09-12 12:00:00');
+        $this->assertOperatorPosition($positionId, 'home', $recoveryId, $asOf);
+        $locations = new CurrentVehicleLocationService($this->repository);
+        $this->assertSame([10, 30], array_map('intval', array_column($locations->forCompany(1, $asOf), 'id')));
+        $companyTwo = $locations->forCompany(2, $asOf);
+        $this->assertSame([20], array_map('intval', array_column($companyTwo, 'id')));
+        $this->assertSame($foreignId, $companyTwo[0]['event_id']);
+        $this->assertSame([], $locations->forCompany(0, $asOf));
+    }
+
+    private function seedOperatorPositionTrips(): int
+    {
+        foreach (['airport_garage_code VARCHAR(40)', 'airport_parking_level INTEGER', 'airport_parking_row VARCHAR(4)'] as $column) {
+            $this->connection->query('ALTER TABLE ' . $this->table('trip_movement_events') . ' ADD COLUMN ' . $column . ' NULL');
+        }
+        $this->connection->table('turo_trips_normalized')->where('id', 100)->update(['starts_at' => '2026-09-11 08:00:00', 'ends_at' => '2026-09-12 09:00:00']);
+        $this->connection->table('turo_trips_normalized')->insert([
+            'id' => 101, 'fleet_vehicle_id' => 10, 'starts_at' => '2026-09-13 08:00:00', 'ends_at' => '2026-09-14 09:00:00', 'deleted_at' => null,
+        ]);
+        $this->events->record(10, 100, 'actual_handoff', 'pickup', '2026-09-11 08:00:00', 'home', null, 'operator', 8);
+        return $this->events->record(10, 100, 'vehicle_recovered', 'return', '2026-09-12 09:00:00', 'airport_hnl', null, 'operator', 8, null, ['garage_code' => 'international', 'level' => 6, 'row' => 'G']);
+    }
+
+    /** @return array<string, mixed> */
+    private function assertOperatorPosition(int $positionId, string $locationClass, int $recoveryId, DateTimeImmutable $asOf): array
+    {
+        $custody = new CurrentVehicleCustodyService($this->repository);
+        foreach ([$custody->resolve(10, $asOf), $custody->forCompany(1, [10], $asOf)[10]] as $state) {
+            $this->assertSame('operator', $state['custody']);
+            $this->assertSame($recoveryId, $state['basis_event_id']);
+            $this->assertSame(100, $state['basis_trip_id']);
+            $this->assertNull($state['active_trip_id']);
+        }
+        $locations = new CurrentVehicleLocationService($this->repository, $custody);
+        $location = $locations->resolve(10, $asOf);
+        $batch = array_column($locations->forCompany(1, $asOf), null, 'id')[10];
+        $this->assertSame($location, array_intersect_key($batch, $location));
+        $this->assertSame($positionId, $location['event_id']);
+        $this->assertSame($locationClass, $location['location_class']);
+        $this->assertSame('parked', $location['operational_state']);
+        $this->assertSame('current', $location['position_semantics']);
+        return $location;
+    }
+
     public function testExactPositionReplayIsRejectedButLaterReturnToSameLocationIsAllowed(): void
     {
         $returnId = $this->events->record(10, 100, 'actual_return', 'return', '2026-09-01 15:30:00', 'waikiki_hotel', 'LOCAL TEST HOTEL', 'operator', 7);
