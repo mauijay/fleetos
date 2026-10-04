@@ -75,6 +75,8 @@ class MovementReadinessProjectionService
             'human_actions_remaining_count' => $humanRemaining,
             'known_facts_satisfied_count' => $knownFacts,
             'requirements' => $requirements,
+            'extra_verification' => $context['extra_verification'] ?? null,
+            'next_trip_extra_verification' => $context['next_trip_extra_verification'] ?? null,
             'next_trip' => $context['next_trip'] ?? null,
             'is_same_day_turnaround' => ($context['next_trip']['is_same_day_turnaround'] ?? $context['prior_trip_is_same_day_turnaround'] ?? false) === true,
             'positioning_plan' => $context['positioning_plan'],
@@ -97,10 +99,12 @@ class MovementReadinessProjectionService
     {
         $context = $this->filterOwnedWork($context);
         $requirements = array_merge(
+            $this->extraVerificationRequirements($context['extra_verification'] ?? null, $context, self::PHASE_PICKUP_PREPARATION),
             $this->commitmentRequirements($context['active_commitments'], self::PHASE_PICKUP_PREPARATION),
             $this->extraFulfillmentRequirements($context['extra_fulfillments'], self::PHASE_PICKUP_PREPARATION, ['preparation', 'pickup', 'entire_trip']),
         );
-        if (($context['active_events']['actual_handoff'] ?? null) !== null) {
+        if (($context['active_events']['actual_handoff'] ?? null) !== null
+            && (int) ($context['active_events']['actual_handoff']['turo_trip_normalized_id'] ?? $context['turo_trip_normalized_id']) === (int) $context['turo_trip_normalized_id']) {
             $requirements = $this->suppressCompletedMovementPreparation($requirements, self::PHASE_PICKUP_PREPARATION);
         }
         $requirements = $this->applyContext($requirements, $context);
@@ -172,6 +176,9 @@ class MovementReadinessProjectionService
         }
         $context['staging_is_historical'] = $historicalStage;
         $handoff = $events['actual_handoff'] ?? null;
+        if ($handoff !== null && (int) ($handoff['turo_trip_normalized_id'] ?? $context['turo_trip_normalized_id']) !== (int) $context['turo_trip_normalized_id']) {
+            $handoff = null;
+        }
         $actualLocation = $handoff ?? $staged;
         $assessment = $this->preparationAssessment($context, false);
         $assessmentAuthority = $assessment['_authority'] ?? 'movement_assessment';
@@ -216,7 +223,7 @@ class MovementReadinessProjectionService
             self::PHASE_PICKUP_PREPARATION,
             ['preparation', 'pickup', 'entire_trip'],
         ));
-        $requirements = array_merge($requirements, $this->vehicleHealthRequirements($context));
+        $requirements = array_merge($requirements, $this->vehicleHealthRequirements($context), $this->extraVerificationRequirements($context['extra_verification'] ?? null, $context, self::PHASE_PICKUP_PREPARATION));
 
         if ($handoff !== null) {
             $requirements = $this->suppressCompletedMovementPreparation($requirements, self::PHASE_PICKUP_PREPARATION);
@@ -261,6 +268,7 @@ class MovementReadinessProjectionService
         ));
 
         if ($nextTrip !== null) {
+            $requirements = array_merge($requirements, $this->extraVerificationRequirements($context['next_trip_extra_verification'] ?? null, array_merge($nextTrip, ['company_id' => $context['company_id'], 'turo_trip_normalized_id' => $nextTrip['id']]), self::PHASE_NEXT_PICKUP_PREPARATION));
             $requirements[] = $this->nextPickupRequirement(
                 $this->derivedRequirement('vehicle_clean', 'Vehicle clean for next pickup', self::PHASE_NEXT_PICKUP_PREPARATION, $nextPickupClean, true, $nextPickupClean ? ($nextPickupAssessment['_cleanliness_authority'] ?? $nextPickupAuthority) : null, $cleanAt ?: null, 'Cleaning Required'),
                 $nextTrip,
@@ -281,7 +289,8 @@ class MovementReadinessProjectionService
             }
         }
 
-        if (($context['next_pickup_handoff'] ?? null) !== null) {
+        if (($context['next_pickup_handoff'] ?? null) !== null
+            && (int) ($context['next_pickup_handoff']['turo_trip_normalized_id'] ?? $nextTrip['id']) === (int) ($nextTrip['id'] ?? 0)) {
             $requirements = $this->suppressCompletedMovementPreparation($requirements, self::PHASE_NEXT_PICKUP_PREPARATION);
         }
 
@@ -651,6 +660,42 @@ class MovementReadinessProjectionService
         return $requirements;
     }
 
+    /** @param array<string, mixed>|null $verification @param array<string, mixed> $trip @return list<array<string, mixed>> */
+    private function extraVerificationRequirements(?array $verification, array $trip, string $phase): array
+    {
+        if ($verification === null || (int) $verification['company_id'] !== (int) $trip['company_id']
+            || (int) $verification['trip_id'] !== (int) $trip['turo_trip_normalized_id']
+            || (isset($trip['fleet_vehicle_id']) && (int) $verification['vehicle_id'] !== (int) $trip['fleet_vehicle_id'])) {
+            return [];
+        }
+        $applicable = (bool) $verification['pickup_applicable'];
+        $pending = $verification['refresh_required'] || $verification['advisory'];
+        $satisfied = $applicable && $verification['qualifies_for_preparation'];
+        $action = $pending && $verification['action_href'] !== null ? [
+            'type' => 'extras_verification', 'label' => 'Refresh Turo Extras', 'href' => $verification['action_href'],
+            'trip_id' => (int) $verification['trip_id'],
+        ] : null;
+        $requirement = $this->requirement(
+            'extras_verification_' . $verification['company_id'] . '_' . $verification['trip_id'],
+            'Extras source verification',
+            $phase,
+            self::KIND_DERIVED,
+            $pending ? self::STATUS_UNSATISFIED : ($satisfied ? self::STATUS_SATISFIED : self::STATUS_NOT_APPLICABLE),
+            (bool) $verification['refresh_required'],
+            $satisfied ? 'complete_extras_observation' : null,
+            $verification['observed_at'],
+            $action,
+        );
+        return [array_merge($requirement, [
+            'company_id' => (int) $verification['company_id'], 'trip_id' => (int) $verification['trip_id'],
+            'reservation_id' => $verification['reservation_id'], 'source_type' => 'extras_verification',
+            'work_identity' => $verification['company_id'] . ':' . $verification['trip_id'] . ':extras_verification',
+            'requires_vehicle_access' => false, 'actionable' => $action !== null, 'relevant' => $applicable,
+            'href' => $verification['action_href'], 'verification' => $verification,
+            'target_trip_id' => (int) $verification['trip_id'], 'target_at' => $verification['pickup_at'],
+        ])];
+    }
+
     /** @param list<array<string, mixed>> $fulfillments @param list<string> $applicablePhases @return list<array<string, mixed>> */
     private function extraFulfillmentRequirements(array $fulfillments, string $phase, array $applicablePhases): array
     {
@@ -765,7 +810,8 @@ class MovementReadinessProjectionService
     {
         return array_map(static function (array $requirement) use ($phases, $reason, $retire): array {
             if (($requirement['status'] ?? null) === self::STATUS_UNSATISFIED
-                && ($phases === null || in_array($requirement['phase'] ?? null, $phases, true))) {
+                && ($phases === null || in_array($requirement['phase'] ?? null, $phases, true))
+                && ($retire || ($requirement['requires_vehicle_access'] ?? true))) {
                 $requirement['actionable'] = false;
                 $requirement['action'] = null;
                 if ($retire) {

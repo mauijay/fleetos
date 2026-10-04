@@ -35,3 +35,9 @@ Command Center creates and summarizes current-day checklists through `TripMoveme
 ## Performance
 
 Command Center loads current-day checklist summaries only. Detailed checklist items are loaded only when the operator opens a specific checklist.
+
+Extras source verification is a derived requirement independent of purchased Extra preparation. Missing, stale, pre-preparation, future-dated, or unresolved failed/incomplete evidence blocks pickup readiness inside the configured preparation window. Current empty observations explicitly show verification age; stale empty observations lead with a stale warning rather than presenting historical absence as current truth.
+
+The requirement is fulfilled through a qualifying complete source observation, never a manual checkbox. Its read-only `Refresh Turo Extras` link opens exact-reservation exporter instructions. This browser action remains available during guest custody. The same requirement supplies checklist, Command Center, Movement Board (including no-checklist preparation), and deduplicated Operations Queue work. Far-future stale evidence creates no operational queue noise.
+
+Next-trip verification appears in Future Preparation and does not affect current return readiness. Only that target trip's actual handoff retires its pickup blocker; a passed pickup schedule or another trip's handoff does not. Completed/inactive trips acquire no new blocker, and fulfillment completion and operational fact history are preserved.

@@ -344,9 +344,8 @@ class FleetExtraRepository
     }
 
     /** @return list<array<string, mixed>> */
-    public function refreshCandidates(int $companyId, ?string $reservationId = null, int $limit = 500, ?\DateTimeImmutable $asOf = null): array
+    public function refreshCandidates(int $companyId, ?string $reservationId = null, ?int $limit = 500, ?\DateTimeImmutable $asOf = null): array
     {
-        $asOf ??= new \DateTimeImmutable();
         $builder = $this->db->table('turo_trips_normalized trips')
             ->select("trips.id AS trip_id, COALESCE(NULLIF(trips.turo_reservation_id, ''), trips.turo_trip_id) AS reservation_id, trips.starts_at, trips.ends_at, vehicles.fleet_code", false)
             ->join('fleet_vehicles vehicles', 'vehicles.id = trips.fleet_vehicle_id')
@@ -356,34 +355,53 @@ class FleetExtraRepository
         if ($reservationId !== null) {
             $builder->groupStart()->where('trips.turo_reservation_id', $reservationId)->orWhere('trips.turo_trip_id', $reservationId)->groupEnd();
         } else {
+            // Schedule expiry cannot close pickup work; the freshness policy applies lifecycle evidence.
             $builder->where('trips.canceled_at', null)
-                ->groupStart()->where('statuses.code', null)->orWhereIn('statuses.code', ['booked', 'in_progress'])->groupEnd()
-                ->groupStart()->where('trips.starts_at >=', $asOf->format('Y-m-d H:i:s'))
-                    ->orWhere('trips.ends_at >=', $asOf->format('Y-m-d H:i:s'))
-                    ->orWhere('statuses.code', 'in_progress')->groupEnd();
+                ->groupStart()->where('statuses.code', null)->orWhereIn('statuses.code', ['booked', 'in_progress'])->groupEnd();
         }
 
-        return $builder->orderBy('trips.starts_at', 'ASC')->orderBy('trips.id', 'ASC')->limit($limit)->get()->getResultArray();
+        $builder->orderBy('trips.starts_at', 'ASC')->orderBy('trips.id', 'ASC');
+        if ($limit !== null) {
+            $builder->limit($limit);
+        }
+        return $builder->get()->getResultArray();
     }
 
     /** @param list<int> $tripIds @return list<array<string, mixed>> */
     public function tripsForVerification(int $companyId, array $tripIds): array
     {
-        if ($tripIds === [] || ! $this->db->tableExists('turo_extra_reservation_snapshots')) {
+        if ($tripIds === []) {
             return [];
         }
 
         return $this->db->table('turo_trips_normalized trips')
-            ->select("trips.id AS trip_id, COALESCE(NULLIF(trips.turo_reservation_id, ''), trips.turo_trip_id) AS reservation_id", false)
+            ->select("trips.id AS trip_id, COALESCE(NULLIF(trips.turo_reservation_id, ''), trips.turo_trip_id) AS reservation_id, trips.starts_at, trips.ends_at, trips.canceled_at, trips.deleted_at, trips.fleet_vehicle_id, vehicles.company_id, statuses.code AS trip_status_code", false)
             ->join('fleet_vehicles vehicles', 'vehicles.id = trips.fleet_vehicle_id')
+            ->join('lookup_values statuses', 'statuses.id = trips.trip_status_lookup_value_id', 'left')
             ->where('vehicles.company_id', $companyId)->where('trips.deleted_at', null)
             ->whereIn('trips.id', $tripIds)->get()->getResultArray();
+    }
+
+    /** @param list<int> $tripIds @return list<int> */
+    public function verificationHandoffTripIds(int $companyId, array $tripIds, \DateTimeImmutable $asOf): array
+    {
+        if ($tripIds === [] || ! $this->db->tableExists('trip_movement_events')) {
+            return [];
+        }
+        $local = $asOf->setTimezone(new \DateTimeZone((new \Config\App())->appTimezone));
+        $rows = $this->db->table('trip_movement_events events')->select('events.turo_trip_normalized_id')
+            ->join('turo_trips_normalized trips', 'trips.id = events.turo_trip_normalized_id AND trips.fleet_vehicle_id = events.fleet_vehicle_id')
+            ->join('fleet_vehicles vehicles', 'vehicles.id = trips.fleet_vehicle_id AND vehicles.company_id = events.company_id')
+            ->where('events.company_id', $companyId)->whereIn('trips.id', $tripIds)
+            ->where('events.event_code', 'actual_handoff')->where('events.voided_at', null)
+            ->where('events.occurred_at <=', $local->format('Y-m-d H:i:s'))->get()->getResultArray();
+        return array_values(array_unique(array_map('intval', array_column($rows, 'turo_trip_normalized_id'))));
     }
 
     /** @param list<string> $reservationIds @return list<array<string, mixed>> */
     public function verificationObservations(int $companyId, array $reservationIds): array
     {
-        if ($reservationIds === []) {
+        if ($reservationIds === [] || ! $this->db->tableExists('turo_extra_reservation_snapshots')) {
             return [];
         }
         // Return the latest complete and partial observation without loading all history.

@@ -23,6 +23,7 @@ class MovementBoardIntelligenceService
         private readonly ?TripExtraFulfillmentService $extraFulfillmentService = null,
         private readonly ?MovementReadinessReadService $movementReadinessReadService = null,
         private readonly ?MovementReadinessReadModelRepository $readinessRepository = null,
+        private readonly ?FleetExtraService $extraVerificationService = null,
     ) {
     }
 
@@ -30,6 +31,7 @@ class MovementBoardIntelligenceService
     public function enrich(array $cards, ?\DateTimeImmutable $asOf = null, ?int $companyId = null): array
     {
         $asOf ??= new \DateTimeImmutable();
+        $asOf = $asOf->setTimezone(new \DateTimeZone((new \Config\App())->appTimezone));
         $vehicleIds = array_values(array_unique(array_map(static fn (array $card): int => (int) ($card['fleet_vehicle_id'] ?? 0), $cards)));
         $cleanliness = $companyId !== null && $companyId > 0
             ? $this->repo()->latestCleanlinessForCompany($companyId, $vehicleIds, $asOf->format('Y-m-d H:i:s'))
@@ -54,6 +56,10 @@ class MovementBoardIntelligenceService
             }
         }
 
+        $sourceVerification = $companyId !== null && $companyId > 0
+            ? ($this->extraVerificationService ?? Services::fleetExtraService())->refreshVerificationForCompany($companyId, $asOf)
+            : [];
+        $cards = array_map(fn (array $card): array => $this->attachSourceVerification($card, $sourceVerification, $companyId), $cards);
         return array_map(fn (array $card): array => $this->enrichCard(
             $card,
             $asOf,
@@ -64,11 +70,41 @@ class MovementBoardIntelligenceService
             $companyId,
             $exceptionsByVehicle[(int) ($card['fleet_vehicle_id'] ?? 0)] ?? [],
             $custody[(int) ($card['fleet_vehicle_id'] ?? 0)] ?? null,
+            $sourceVerification,
         ), $cards);
     }
 
+    /** @param array<string, mixed> $card @param array<int, array<string, mixed>> $verification @return array<string, mixed> */
+    private function attachSourceVerification(array $card, array $verification, ?int $companyId): array
+    {
+        $seen = array_fill_keys(array_column($card['readiness_blockers'] ?? [], 'code'), true);
+        $actions = [];
+        foreach ($verification as $source) {
+            if ((int) $source['company_id'] !== $companyId || (int) $source['vehicle_id'] !== (int) $card['fleet_vehicle_id'] || (! $source['refresh_required'] && ! $source['advisory'])) {
+                continue;
+            }
+            $projection = (new MovementReadinessProjectionService())->projectTripPreparation([
+                'company_id' => $source['company_id'], 'turo_trip_normalized_id' => $source['trip_id'],
+                'fleet_vehicle_id' => $source['vehicle_id'], 'extra_verification' => $source,
+                'active_events' => [], 'active_commitments' => [], 'extra_fulfillments' => [],
+            ]);
+            foreach ($projection['requirements'] as $requirement) {
+                if ($requirement['actionable']) {
+                    $actions[$requirement['work_identity']] = $requirement;
+                }
+                if (MovementReadinessProjectionService::isBlocking($requirement) && ! isset($seen[$requirement['code']])) {
+                    $card['readiness_blockers'][] = $requirement;
+                    $card['readiness_blocking_remaining'] = (int) ($card['readiness_blocking_remaining'] ?? 0) + 1;
+                    $seen[$requirement['code']] = true;
+                }
+            }
+        }
+        $card['extras_verification_actions'] = array_values($actions);
+        return $card;
+    }
+
     /** @return array<string, mixed> */
-    private function enrichCard(array $card, \DateTimeImmutable $asOf, ?array $latestCleanliness, ?array $latestEnergy, ?array $cleaningNeed, ?array $energyNeed, ?int $companyId, array $recoveryExceptions = [], ?array $custodyState = null): array
+    private function enrichCard(array $card, \DateTimeImmutable $asOf, ?array $latestCleanliness, ?array $latestEnergy, ?array $cleaningNeed, ?array $energyNeed, ?int $companyId, array $recoveryExceptions = [], ?array $custodyState = null, array $sourceVerification = []): array
     {
         $vehicleId = (int) ($card['fleet_vehicle_id'] ?? 0);
         $event = $this->repo()->latestActiveMovementEvent($vehicleId, $asOf->format('Y-m-d H:i:s'));
@@ -102,7 +138,7 @@ class MovementBoardIntelligenceService
                 || (string) ($assessment['captured_at'] ?? '') <= (string) $lifecycleEvent['occurred_at']));
         $profile = $this->repo()->profile($vehicleId) ?? $this->emptyProfile();
         $nextTrip = $this->nextTrips()->forVehicle($vehicleId, $asOf);
-        $card = $this->attachNextTripPreparation($card, $nextTrip, $custodyState, $companyId, $asOf);
+        $card = $this->attachNextTripPreparation($card, $nextTrip, $custodyState, $companyId, $asOf, $sourceVerification);
         $freshness = $this->freshness()->assess($nextTrip['import_completed_at'] ?? $schedule['import_completed_at'] ?? null, $asOf);
         $location = $this->positionBasis($lifecycleEvent ?? $event, $schedule, $card['current_position'] ?? null);
         $blockers = $this->blockers($card);
@@ -151,7 +187,7 @@ class MovementBoardIntelligenceService
         if ($awaitingRecovery) {
             $compactReadiness['additional_count'] = 0;
             $compactReadiness['summary'] = ($readinessRemaining > 0 ? $readinessRemaining . ' blocking requirement' . ($readinessRemaining === 1 ? ' remains. ' : 's remain. ') : '') . 'Physical preparation resumes after recovery';
-            $compactReadiness['next_actions'] = [];
+            $compactReadiness['next_actions'] = array_values(array_filter($compactReadiness['next_actions'], static fn (array $action): bool => str_starts_with($action['code'], 'extras_verification_')));
         }
         $lifecycleCode = (string) ($lifecycleEvent['event_code'] ?? '');
         $commitmentTripId = match (true) {
@@ -265,7 +301,7 @@ class MovementBoardIntelligenceService
     }
 
     /** Keep future trip work visible on days without a movement workflow. */
-    private function attachNextTripPreparation(array $card, ?array $nextTrip, array $custody, ?int $companyId, \DateTimeImmutable $asOf): array
+    private function attachNextTripPreparation(array $card, ?array $nextTrip, array $custody, ?int $companyId, \DateTimeImmutable $asOf, array $sourceVerification = []): array
     {
         $tripId = (int) ($nextTrip['id'] ?? 0);
         if ($tripId < 1 || $companyId === null || $companyId < 1) {
@@ -288,6 +324,7 @@ class MovementBoardIntelligenceService
         } else {
             $extras = ($this->extraFulfillmentService ?? Services::tripExtraFulfillmentService())->forTrips($companyId, [$tripId])[$tripId] ?? [];
             $manual = ($this->tripCommitmentService ?? Services::tripCommitmentService())->activeForTrip($companyId, $tripId, ['preparation', 'pickup', 'entire_trip']);
+            $verification = $sourceVerification[$tripId] ?? ($this->extraVerificationService ?? Services::fleetExtraService())->verificationForTrips($companyId, [$tripId], $asOf)[$tripId] ?? null;
             $event = $custody['basis_event'] ?? null;
             $projection = (new MovementReadinessProjectionService())->projectTripPreparation(array_merge($nextTrip, [
                 'company_id' => $companyId,
@@ -300,16 +337,22 @@ class MovementBoardIntelligenceService
                 'active_events' => ($event['event_code'] ?? null) === 'actual_handoff' && (int) ($event['turo_trip_normalized_id'] ?? 0) === $tripId ? ['actual_handoff' => $event] : [],
                 'active_commitments' => $manual,
                 'extra_fulfillments' => $extras,
+                'extra_verification' => $verification,
+                'as_of' => $asOf->format(DATE_ATOM),
             ]));
             $href = '/operations/trips/' . $tripId . '/commitments';
         }
         $projection['href'] = $href;
+        $actions = array_merge($card['extras_verification_actions'] ?? [], array_values(array_filter($projection['requirements'], static fn (array $requirement): bool => ($requirement['source_type'] ?? null) === 'extras_verification' && ($requirement['actionable'] ?? false) && ($requirement['relevant'] ?? true))));
+        $card['extras_verification_actions'] = array_values(array_column($actions, null, 'work_identity'));
         $blockers = array_values(array_filter($projection['requirements'], static fn (array $requirement): bool =>
             $requirement['phase'] === $projection['readiness_phase'] && MovementReadinessProjectionService::isBlocking($requirement)));
         $card['next_trip_preparation'] = $projection;
         $card['next_trip_preparation_remaining'] = (int) $projection['blocking_remaining_count'];
-        $card['readiness_blocking_remaining'] = (int) ($card['readiness_blocking_remaining'] ?? 0) + $card['next_trip_preparation_remaining'];
-        $card['readiness_blockers'] = array_merge($card['readiness_blockers'] ?? [], array_map(static fn (array $requirement): array => array_merge($requirement, ['href' => $href]), $blockers));
+        $existing = array_fill_keys(array_column($card['readiness_blockers'] ?? [], 'code'), true);
+        $newBlockers = array_values(array_filter($blockers, static fn (array $requirement): bool => ! isset($existing[$requirement['code']])));
+        $card['readiness_blocking_remaining'] = (int) ($card['readiness_blocking_remaining'] ?? 0) + count($newBlockers);
+        $card['readiness_blockers'] = array_merge($card['readiness_blockers'] ?? [], array_map(static fn (array $requirement): array => array_merge($requirement, ['href' => $requirement['action']['href'] ?? $href]), $newBlockers));
 
         return $card;
     }
@@ -513,6 +556,7 @@ class MovementBoardIntelligenceService
             'summary' => $summary,
             'next_actions' => $nextActions,
             'trip_preparation_count' => $tripPreparationCount,
+            'trip_preparation_href' => $tripPreparationRequirements[0]['href'] ?? null,
             'trip_preparation_items' => array_slice(array_map(
                 static fn (array $requirement): string => (string) ($requirement['label'] ?? 'Purchased Extra'),
                 $tripPreparationRequirements,
@@ -670,6 +714,12 @@ class MovementBoardIntelligenceService
     private function presentAction(array $state, array $card, int $vehicleId, ?array $schedule): ?array
     {
         $code = (string) ($state['primary_action']['code'] ?? 'none');
+        foreach ($card['readiness_blockers'] ?? [] as $requirement) {
+            if (($requirement['source_type'] ?? null) === 'extras_verification' && ($requirement['actionable'] ?? false)
+                && in_array($code, ['clear_blockers', 'complete_turnaround'], true)) {
+                return ['code' => 'extras_verification', 'label' => 'Refresh Turo Extras', 'href' => (string) $requirement['action']['href']];
+            }
+        }
         if ((int) ($card['next_trip_preparation_remaining'] ?? 0) > 0
             && in_array($code, ['clear_blockers', 'complete_turnaround'], true)
             && array_any($card['next_trip_preparation']['requirements'] ?? [], static fn (array $requirement): bool =>

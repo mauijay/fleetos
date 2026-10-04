@@ -151,7 +151,7 @@ final class ExtraFulfillmentArchitectureTest extends CIUnitTestCase
     {
         $data = ['checklist' => ['turo_trip_normalized_id' => 333], 'guestCommitments' => [], 'extraPreparation' => [], 'extraVerification' => null];
         $never = Services::renderer()->setData($data)->render('trip_movement_checklists/_guest_commitments');
-        $this->assertStringContainsString('Extras not verified for this reservation.', $never);
+        $this->assertStringContainsString('Extras have not been verified.', $never);
         $this->assertStringContainsString('Purchased Extras', $never);
         $this->assertStringContainsString('Special instructions', $never);
         $this->assertStringNotContainsString('No guest-specific commitments', $never);

@@ -3,6 +3,7 @@
 use App\Repositories\MovementReadinessReadModelRepository;
 use App\Repositories\OperationalFactsRepository;
 use App\Services\Fleet\CurrentVehicleCustodyService;
+use App\Services\Fleet\FleetExtraService;
 use App\Services\Fleet\ImportFreshnessService;
 use App\Services\Fleet\MovementBoardIntelligenceService;
 use App\Services\Fleet\MovementReadinessReadService;
@@ -542,7 +543,39 @@ final class MovementBoardIntelligenceServiceTest extends CIUnitTestCase
         $this->assertSame('International Garage L7 RF', $card['location_detail']);
     }
 
-    private function service(?array $event, ?array $schedule, ?array $assessment, array $profile, ?array $nextTrip, ?array $plan = null, ?array $latestCleanliness = null, array $extras = [], ?array $futureProjection = null): MovementBoardIntelligenceService
+    public function testStaleEmptySourceBlocksFallbackAndDoesNotDuplicateChecklistWork(): void
+    {
+        $asOf = new DateTimeImmutable('2030-01-02 12:00:00 Pacific/Honolulu');
+        $nextTrip = ['id' => 502, 'fleet_vehicle_id' => 9, 'turo_reservation_id' => '70000502', 'starts_at' => '2030-01-03 09:00:00', 'pickup_location_class' => 'home'];
+        $model = (new \App\Services\Fleet\ExtrasVerificationFreshnessPolicy())->assess(['observed_at' => '2029-12-17 22:00:00', 'extra_count' => 0], array_merge($nextTrip, ['company_id' => 1]), $asOf, 'Pacific/Honolulu');
+        $service = $this->service(null, null, ['cleanliness' => 'clean', 'energy_percent' => 90], ['energy_kind' => 'electric', 'ready_energy_target_percent' => 80, 'capabilities' => []], $nextTrip, sourceVerification: [502 => $model]);
+        $card = $service->enrich([['fleet_vehicle_id' => 9, 'status' => 'available', 'checklists' => []]], $asOf, 1)[0];
+        $this->assertSame(1, $card['readiness_blocking_remaining']);
+        $this->assertCount(1, $card['readiness_blockers']);
+        $this->assertFalse($card['checklist_ready']);
+        $this->assertSame($model['action_href'], $card['readiness_compact']['next_actions'][0]['href']);
+        $this->assertCount(1, $card['extras_verification_actions']);
+        $this->assertCount(1, $card['next_trip_preparation']['requirements']);
+        $this->assertSame('extras_verification', $card['next_trip_preparation']['requirements'][0]['source_type']);
+        $input = ['fleet_vehicle_id' => 9, 'status' => 'available', 'checklists' => [['id' => 10, 'movement_type' => 'pickup', 'turo_trip_normalized_id' => 502]], 'readiness_blocking_remaining' => 1, 'readiness_blockers' => $card['readiness_blockers']];
+        $existing = $service->enrich([$input], $asOf, 1)[0];
+        $this->assertSame(1, $existing['readiness_blocking_remaining']);
+        $this->assertCount(1, $existing['extras_verification_actions']);
+        $this->assertCount(1, $existing['readiness_blockers']);
+    }
+
+    public function testAdvisoryAndOverdueSourceWorkRemainVisibleWithoutNextTrip(): void
+    {
+        $asOf = new DateTimeImmutable('2030-01-02 12:00:00 Pacific/Honolulu');
+        foreach (['2030-01-04 09:00:00' => false, '2030-01-01 09:00:00' => true, '2030-01-10 09:00:00' => false] as $pickup => $blocking) {
+            $model = (new \App\Services\Fleet\ExtrasVerificationFreshnessPolicy())->assess([], ['company_id' => 1, 'trip_id' => 502, 'fleet_vehicle_id' => 9, 'reservation_id' => '70000502', 'starts_at' => $pickup], $asOf, 'Pacific/Honolulu');
+            $card = $this->service(null, null, null, ['energy_kind' => 'unknown', 'capabilities' => []], null, sourceVerification: [502 => $model])->enrich([['fleet_vehicle_id' => 9, 'status' => 'available', 'checklists' => []]], $asOf, 1)[0];
+            $this->assertSame($blocking ? 1 : 0, $card['readiness_blocking_remaining']);
+            $this->assertCount($pickup === '2030-01-10 09:00:00' ? 0 : 1, $card['extras_verification_actions']);
+        }
+    }
+
+    private function service(?array $event, ?array $schedule, ?array $assessment, array $profile, ?array $nextTrip, ?array $plan = null, ?array $latestCleanliness = null, array $extras = [], ?array $futureProjection = null, array $sourceVerification = []): MovementBoardIntelligenceService
     {
         $repository = $this->createStub(OperationalFactsRepository::class);
         $repository->method('latestActiveMovementEvent')->willReturn($event);
@@ -573,6 +606,9 @@ final class MovementBoardIntelligenceServiceTest extends CIUnitTestCase
         $readiness = $this->createStub(MovementReadinessReadService::class);
         $readiness->method('forCompany')->willReturn($futureProjection === null ? [] : [902 => $futureProjection]);
 
+        $verification = $this->createStub(FleetExtraService::class);
+        $verification->method('refreshVerificationForCompany')->willReturn($sourceVerification);
+        $verification->method('verificationForTrips')->willReturn($sourceVerification);
         return new MovementBoardIntelligenceService(
             $repository,
             $nextTrips,
@@ -585,6 +621,7 @@ final class MovementBoardIntelligenceServiceTest extends CIUnitTestCase
             extraFulfillmentService: $extraService,
             readinessRepository: $readinessRepository,
             movementReadinessReadService: $readiness,
+            extraVerificationService: $verification,
         );
     }
 }

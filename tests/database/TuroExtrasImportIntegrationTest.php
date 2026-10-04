@@ -5,12 +5,21 @@ use App\Database\Migrations\CreateFleetExtrasFoundation;
 use App\Repositories\AuditLogRepository;
 use App\Repositories\FleetExtraRepository;
 use App\Repositories\LookupRepository;
+use App\Repositories\MovementReadinessReadModelRepository;
+use App\Repositories\OperationalFactsRepository;
 use App\Repositories\TripExtraFulfillmentRepository;
 use App\Repositories\TuroImportBatchRepository;
 use App\Repositories\TuroImportErrorRepository;
+use App\Services\Fleet\CurrentVehicleCustodyService;
+use App\Services\Fleet\DailyOperationsDashboardService;
+use App\Services\Fleet\FleetCommandCenterViewModelService;
 use App\Services\Fleet\FleetExtraService;
+use App\Services\Fleet\MovementBoardIntelligenceService;
 use App\Services\Fleet\MovementReadinessProjectionService;
+use App\Services\Fleet\MovementReadinessReadService;
+use App\Services\Fleet\NextConfirmedTripService;
 use App\Services\Fleet\TripExtraFulfillmentService;
+use App\Services\Fleet\VehiclePositioningPlanService;
 use App\Services\Turo\TuroExtrasImportService;
 use App\Services\Turo\TuroImportAuditService;
 use App\Validation\Turo\TuroExtrasPayloadValidator;
@@ -18,6 +27,7 @@ use CodeIgniter\Database\BaseConnection;
 use CodeIgniter\Exceptions\PageNotFoundException;
 use CodeIgniter\Test\CIUnitTestCase;
 use Config\Database;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 require_once __DIR__ . '/../../app/Database/Migrations/2026-09-13-000021_CreateFleetExtrasFoundation.php';
 require_once __DIR__ . '/../../app/Database/Migrations/2026-09-21-000024_CreateExtraFulfillment.php';
@@ -71,6 +81,274 @@ final class TuroExtrasImportIntegrationTest extends CIUnitTestCase
     {
         $this->connection->query('PRAGMA foreign_keys = OFF');
         parent::tearDown();
+    }
+
+    #[DataProvider('overdueEvidenceCases')]
+    public function testOverduePickupRemainsVisibleAcrossSurfaces(string $status, bool $stale): void
+    {
+        $asOf = $this->overdueTrip($status);
+        if ($stale) {
+            $this->observe('2029-12-17T12:00:00-10:00');
+        }
+        $model = $this->catalog->verificationForTrips(1, [100], $asOf)[100];
+        $this->assertSame($stale ? 'stale_empty' : 'never', $model['state']);
+        $this->assertSame('handoff_missing', $model['lifecycle']);
+        $this->assertOverdueSurfaces($asOf, true);
+    }
+
+    public static function overdueEvidenceCases(): array
+    {
+        return [['booked', false], ['booked', true], ['in_progress', false]];
+    }
+
+    #[DataProvider('handoffStatusCases')]
+    public function testOverduePickupClosesOnlyAtItsOwnHandoff(string $status): void
+    {
+        $asOf = $this->overdueTrip($status);
+        $this->assertOverdueSurfaces($asOf, true);
+        $this->connection->table('trip_movement_events')->insert([
+            'company_id' => 1, 'fleet_vehicle_id' => 1, 'turo_trip_normalized_id' => 100,
+            'event_code' => 'actual_handoff', 'occurred_at' => '2030-01-01 09:05:00',
+        ]);
+        $model = $this->catalog->verificationForTrips(1, [100], $asOf)[100];
+        $this->assertSame('handoff_closed', $model['lifecycle']);
+        $this->assertTrue($model['optional_active_refresh']);
+        $this->assertOverdueSurfaces($asOf, false);
+    }
+
+    public static function handoffStatusCases(): array
+    {
+        return [['booked'], ['in_progress']];
+    }
+
+    public function testOtherTripsHandoffCannotHideOverduePickup(): void
+    {
+        $asOf = $this->overdueTrip('booked');
+        $this->connection->table('turo_trips_normalized')->insert([
+            'id' => 101, 'fleet_vehicle_id' => 1, 'turo_trip_id' => 'synthetic-other-trip',
+            'turo_reservation_id' => '70000003', 'starts_at' => '2030-01-01 10:00:00',
+            'ends_at' => '2030-01-02 10:00:00',
+        ]);
+        $this->connection->table('trip_movement_events')->insert([
+            'company_id' => 1, 'fleet_vehicle_id' => 1, 'turo_trip_normalized_id' => 101,
+            'event_code' => 'actual_handoff', 'occurred_at' => '2030-01-01 10:05:00',
+        ]);
+        $batch = $this->catalog->refreshVerificationForCompany(1, $asOf);
+        $this->assertArrayHasKey(101, $batch);
+        $this->assertFalse($batch[101]['refresh_required']);
+        $this->assertOverdueSurfaces($asOf, true);
+    }
+
+    #[DataProvider('inactiveOverdueCases')]
+    public function testInactiveOverduePickupsStayExcluded(string $status, array $lifecycle): void
+    {
+        $asOf = $this->overdueTrip($status);
+        if ($lifecycle !== []) {
+            $this->connection->table('turo_trips_normalized')->where('id', 100)->update($lifecycle);
+        }
+        if ($status === 'completed') {
+            $this->connection->table('trip_movement_events')->insertBatch([
+                ['company_id' => 1, 'fleet_vehicle_id' => 1, 'turo_trip_normalized_id' => 100,
+                    'event_code' => 'actual_handoff', 'occurred_at' => '2030-01-01 09:05:00'],
+                ['company_id' => 1, 'fleet_vehicle_id' => 1, 'turo_trip_normalized_id' => 100,
+                    'event_code' => 'vehicle_recovered', 'occurred_at' => '2030-01-02 09:05:00'],
+            ]);
+        }
+        $this->assertSame([], $this->repository->refreshCandidates(1, null, null, $asOf));
+        $this->assertSame([], $this->catalog->workspace(1, null, $asOf)['refresh_candidates']);
+        $this->assertSame([], $this->catalog->refreshVerificationForCompany(1, $asOf));
+        $model = $this->catalog->verificationForTrips(1, [100], $asOf)[100] ?? null;
+        if ($model !== null) {
+            $this->assertFalse($model['refresh_required']);
+            $this->assertFalse($model['advisory']);
+            $this->assertSame('inactive', $model['lifecycle']);
+        }
+        $card = $this->overdueBoard($asOf);
+        $this->assertSame([], $card['extras_verification_actions']);
+        $this->assertSame(0, $card['readiness_blocking_remaining']);
+        $this->assertSame([], $this->overdueQueue($card));
+    }
+
+    public static function inactiveOverdueCases(): array
+    {
+        return [
+            ['canceled', []], ['invalid', []], ['completed', []],
+            ['booked', ['canceled_at' => '2030-01-01 08:00:00']],
+            ['booked', ['deleted_at' => '2030-01-01 08:00:00']],
+        ];
+    }
+
+    private function overdueTrip(string $status): DateTimeImmutable
+    {
+        $this->connection->table('lookup_types')->insert(['code' => 'trip_status', 'name' => 'Synthetic trip status']);
+        $typeId = (int) $this->connection->insertID();
+        $this->connection->table('lookup_values')->insert(['lookup_type_id' => $typeId, 'code' => $status, 'name' => 'Synthetic lifecycle']);
+        $this->connection->table('turo_trips_normalized')->where('id', 100)->update([
+            'trip_status_lookup_value_id' => (int) $this->connection->insertID(),
+            'starts_at' => '2030-01-01 09:00:00', 'ends_at' => '2030-01-02 09:00:00',
+        ]);
+        return new DateTimeImmutable('2030-01-02 12:00:00 Pacific/Honolulu');
+    }
+
+    private function assertOverdueSurfaces(DateTimeImmutable $asOf, bool $required): void
+    {
+        $href = '/turo/extras?reservation_id=70000001#export-heading';
+        $model = $this->catalog->verificationForTrips(1, [100], $asOf)[100];
+        $this->assertSame($required, $model['refresh_required']);
+        $batch = $this->catalog->refreshVerificationForCompany(1, $asOf);
+        $this->assertArrayHasKey(100, $batch);
+        $this->assertSame($model, $batch[100]);
+        $workspace = $this->catalog->workspace(1, null, $asOf);
+        $candidates = array_column($workspace['refresh_candidates'], null, 'trip_id');
+        $this->assertArrayHasKey(100, $candidates);
+        $this->assertSame($model, $candidates[100]['verification']);
+        $this->assertContains('70000001', $workspace['reservation_ids']);
+        $this->assertSame($href, $model['action_href']);
+
+        $context = [
+            'id' => 10, 'company_id' => 1, 'turo_trip_normalized_id' => 100, 'fleet_vehicle_id' => 1,
+            'movement_type' => 'pickup', 'starts_at' => '2030-01-01 09:00:00',
+            'active_events' => [], 'items_by_code' => [], 'capabilities' => [], 'profile' => [],
+            'airport_workflow' => null, 'scheduled_location' => null, 'positioning_plan' => null,
+            'completed_at' => null, 'readiness_status' => 'open', 'next_trip' => null,
+        ];
+        $readinessRepo = $this->createStub(MovementReadinessReadModelRepository::class);
+        $readinessRepo->method('loadForCompany')->willReturn([10 => $context]);
+        $readiness = (new MovementReadinessReadService(
+            $readinessRepo,
+            new MovementReadinessProjectionService(),
+            extraVerificationService: $this->catalog,
+        ))->forCompany(1, [10], $asOf)[10];
+        $source = array_values(array_filter($readiness['requirements'], static fn (array $row): bool => $row['source_type'] === 'extras_verification'));
+        $this->assertCount(1, $source);
+        $this->assertSame($model, $readiness['extra_verification']);
+        $this->assertSame($required, MovementReadinessProjectionService::isBlocking($source[0]));
+        $this->assertSame($required ? $href : null, $source[0]['action']['href'] ?? null);
+        if ($required) {
+            $this->assertFalse($readiness['ready']);
+            $html = html_entity_decode(\Config\Services::renderer()->setData([
+                'checklist' => ['id' => 10, 'completed_at' => null, 'items' => []],
+                'readiness' => $readiness, 'tripFacts' => ['pickup' => null, 'return' => null],
+            ])->render('trip_movement_checklists/_readiness', null, false));
+            $this->assertStringContainsString($href, $html);
+        }
+        $preparation = (new MovementReadinessProjectionService())->projectTripPreparation(array_merge($context, ['extra_verification' => $model]));
+        $this->assertSame(! $required, $preparation['ready']);
+
+        $card = $this->overdueBoard($asOf);
+        $this->assertSame([], $card['checklists']);
+        $this->assertNull($card['next_trip']);
+        $this->assertSame($required ? 1 : 0, $card['readiness_blocking_remaining']);
+        $this->assertSame(! $required, $card['checklist_ready']);
+        $this->assertCount($required ? 1 : 0, $card['extras_verification_actions']);
+        $queue = $this->overdueQueue($card);
+        $this->assertCount($required ? 1 : 0, $queue);
+        if ($required) {
+            $this->assertSame($source[0]['work_identity'], $card['extras_verification_actions'][0]['work_identity']);
+            $this->assertSame($href, $card['readiness_compact']['next_actions'][0]['href']);
+            $this->assertSame('Refresh Turo Extras', $queue[0]['label']);
+            $this->assertSame($href, $queue[0]['href']);
+            $this->assertSame('required', $queue[0]['urgency']);
+        }
+        $queueView = new ReflectionMethod(FleetCommandCenterViewModelService::class, 'queueView');
+        foreach ([null, 'today', 'urgent'] as $scope) {
+            $view = $queueView->invoke(new FleetCommandCenterViewModelService(), $scope, [], [], [], $queue, $queue, $asOf);
+            $this->assertSame($queue, $view['items']);
+        }
+    }
+
+    private function overdueBoard(DateTimeImmutable $asOf): array
+    {
+        $facts = $this->createStub(OperationalFactsRepository::class);
+        $nextTrips = $this->createStub(NextConfirmedTripService::class);
+        $nextTrips->method('forVehicle')->willReturn(null);
+        $plans = $this->createStub(VehiclePositioningPlanService::class);
+        $plans->method('active')->willReturn(null);
+        $custody = $this->createStub(CurrentVehicleCustodyService::class);
+        $custody->method('forCompany')->willReturn([1 => ['basis_event' => null]]);
+        return (new MovementBoardIntelligenceService(
+            repository: $facts,
+            nextTripService: $nextTrips,
+            positioningPlanService: $plans,
+            custodyService: $custody,
+            extraVerificationService: $this->catalog,
+        ))->enrich([['fleet_vehicle_id' => 1, 'status' => 'available', 'checklists' => []]], $asOf, 1)[0];
+    }
+
+    private function overdueQueue(array $card): array
+    {
+        return (new ReflectionMethod(DailyOperationsDashboardService::class, 'extrasVerificationQueue'))
+            ->invoke(new DailyOperationsDashboardService(), [], [$card]);
+    }
+
+    public function testWorkspacePrioritizesRequiredRefreshBeforeApplyingExportCap(): void
+    {
+        $this->connection->table('turo_trips_normalized')->where('id', 100)->update(['starts_at' => '2030-01-02 14:00:00']);
+        $trips = $events = [];
+        for ($index = 1; $index <= 500; $index++) {
+            $trips[] = ['id' => 1000 + $index, 'fleet_vehicle_id' => 1, 'turo_trip_id' => 'synthetic-active-' . $index, 'turo_reservation_id' => (string) (71000000 + $index), 'starts_at' => '2030-01-01 09:00:00'];
+            $events[] = ['company_id' => 1, 'fleet_vehicle_id' => 1, 'turo_trip_normalized_id' => 1000 + $index, 'event_code' => 'actual_handoff', 'occurred_at' => '2030-01-01 09:00:00'];
+        }
+        $this->connection->table('turo_trips_normalized')->insertBatch($trips);
+        $this->connection->table('trip_movement_events')->insertBatch($events);
+        $asOf = new DateTimeImmutable('2030-01-02 12:00:00 Pacific/Honolulu');
+        $workspace = $this->catalog->workspace(1, null, $asOf);
+        $this->assertCount(500, $workspace['refresh_candidates']);
+        $this->assertSame('70000001', $workspace['reservation_ids'][0]);
+        $this->assertSame('required', $workspace['refresh_candidates'][0]['verification']['urgency']);
+        $this->assertCount(501, $this->catalog->refreshVerificationForCompany(1, $asOf));
+        $this->assertSame(0, $this->connection->table('turo_extra_reservation_snapshots')->countAllResults());
+    }
+
+    public function testStaleEmptySourceDoesNotBecomeFreshFromReplayOrFailedAttempt(): void
+    {
+        $this->connection->table('turo_trips_normalized')->where('id', 100)->update(['starts_at' => '2030-01-02 14:00:00']);
+        $this->observe('2029-12-17T12:00:00-10:00');
+        $asOf = new DateTimeImmutable('2030-01-02 12:00:00 Pacific/Honolulu');
+        $model = $this->catalog->verificationForTrips(1, [100], $asOf)[100];
+        $this->assertSame('stale_empty', $model['state']);
+        $this->assertTrue($model['refresh_required']);
+        $this->assertSame('2029-12-17 22:00:00', $model['observed_at']);
+        $this->importer->import($this->observation('2029-12-17T12:00:00-10:00') . "\n", 1, 10, 'synthetic-old-replay.json');
+        $afterReplay = $this->catalog->verificationForTrips(1, [100], $asOf)[100];
+        $this->assertSame($model['age_seconds'], $afterReplay['age_seconds']);
+        $this->assertTrue($afterReplay['refresh_required']);
+        $this->connection->table('turo_extra_reservation_snapshots')->update(['created_at' => '2030-01-02 12:00:00']);
+        $replayed = $this->catalog->verificationForTrips(1, [100], $asOf)[100];
+        $this->assertSame($model['age_seconds'], $replayed['age_seconds']);
+        $payload = ['schema' => 'fleetos-turo-extras-v1', 'exported_at' => '2030-01-02T11:00:00-10:00', 'reservations' => [], 'failures' => [['reservation_id' => '70000001', 'error' => 'HTTP 403']]];
+        $this->importer->import(json_encode($payload, JSON_THROW_ON_ERROR), 1, 10, 'synthetic-failed-refresh.json');
+        $failed = $this->catalog->verificationForTrips(1, [100], $asOf)[100];
+        $this->assertSame($model['observed_at'], $failed['observed_at']);
+        $this->assertSame($model['age_seconds'], $failed['age_seconds']);
+        $this->assertStringContainsString('failed', $failed['issue']);
+        $this->assertTrue($failed['refresh_required']);
+        $this->assertSame(0, $this->connection->table('turo_extra_selections')->countAllResults());
+        $this->assertSame(0, $this->connection->table('trip_extra_fulfillments')->countAllResults());
+        $this->assertSame([], $this->catalog->verificationForTrips(2, [100], $asOf));
+    }
+
+    public function testOnlyOwnedUnvoidedHandoffClosesVerificationAndWorkspaceSortsUrgency(): void
+    {
+        $this->connection->table('turo_trips_normalized')->where('id', 100)->update(['starts_at' => '2030-01-02 14:00:00']);
+        $this->connection->table('turo_trips_normalized')->insert(['id' => 101, 'fleet_vehicle_id' => 1, 'turo_trip_id' => 'synthetic-far-trip', 'turo_reservation_id' => '70000003', 'starts_at' => '2030-01-10 14:00:00']);
+        $asOf = new DateTimeImmutable('2030-01-02 12:00:00 Pacific/Honolulu');
+        $workspace = $this->catalog->workspace(1, null, $asOf);
+        $this->assertSame(['70000001', '70000003'], $workspace['reservation_ids']);
+        $this->assertSame('required', $workspace['refresh_candidates'][0]['verification']['urgency']);
+        $this->assertSame('informational', $workspace['refresh_candidates'][1]['verification']['urgency']);
+        $this->connection->table('trip_movement_events')->insert(['company_id' => 1, 'fleet_vehicle_id' => 1, 'turo_trip_normalized_id' => 101, 'event_code' => 'actual_handoff', 'occurred_at' => '2030-01-02 11:00:00']);
+        $this->assertTrue($this->catalog->verificationForTrips(1, [100], $asOf)[100]['refresh_required']);
+        $this->connection->table('trip_movement_events')->insert(['company_id' => 2, 'fleet_vehicle_id' => 1, 'turo_trip_normalized_id' => 100, 'event_code' => 'actual_handoff', 'occurred_at' => '2030-01-02 11:00:00']);
+        $this->assertTrue($this->catalog->verificationForTrips(1, [100], $asOf)[100]['refresh_required']);
+        $this->connection->table('trip_movement_events')->insert(['company_id' => 1, 'fleet_vehicle_id' => 1, 'turo_trip_normalized_id' => 100, 'event_code' => 'actual_handoff', 'occurred_at' => '2030-01-02 13:00:00']);
+        $this->assertTrue($this->catalog->verificationForTrips(1, [100], $asOf)[100]['refresh_required']);
+        $this->connection->table('trip_movement_events')->insert(['company_id' => 1, 'fleet_vehicle_id' => 1, 'turo_trip_normalized_id' => 100, 'event_code' => 'actual_handoff', 'occurred_at' => '2030-01-02 11:00:00', 'voided_at' => '2030-01-02 11:30:00']);
+        $this->assertTrue($this->catalog->verificationForTrips(1, [100], $asOf)[100]['refresh_required']);
+        $this->connection->table('trip_movement_events')->insert(['company_id' => 1, 'fleet_vehicle_id' => 1, 'turo_trip_normalized_id' => 100, 'event_code' => 'actual_handoff', 'occurred_at' => '2030-01-02 11:00:00']);
+        $closed = $this->catalog->verificationForTrips(1, [100], $asOf)[100];
+        $this->assertFalse($closed['refresh_required']);
+        $this->assertSame('handoff_closed', $closed['lifecycle']);
     }
 
     public function testImportIsStablePreservesSourceFactsAndOnlyCompleteSnapshotsRemove(): void
@@ -232,10 +510,10 @@ final class TuroExtrasImportIntegrationTest extends CIUnitTestCase
     public function testPreviouslyEmptyReservationRefreshesAndLaterPurchaseCreatesExactlyOneMovementBlocker(): void
     {
         $this->assertSame(['70000001'], $this->repository->reservationIdsNeedingSnapshot(1));
-        $this->assertSame('never', $this->catalog->verificationForTrips(1, [100])[100]['state']);
+        $this->assertSame('never', $this->catalog->verificationForTrips(1, [100], new DateTimeImmutable('2026-10-01 15:00:00 Pacific/Honolulu'))[100]['state']);
         $this->observe('2026-10-01T09:00:00-10:00');
         $this->assertSame(['70000001'], $this->repository->reservationIdsNeedingSnapshot(1));
-        $this->assertSame('complete_empty', $this->catalog->verificationForTrips(1, [100])[100]['state']);
+        $this->assertSame('current_empty', $this->catalog->verificationForTrips(1, [100], new DateTimeImmutable('2026-10-01 15:00:00 Pacific/Honolulu'))[100]['state']);
         $json = $this->observation('2026-10-01T10:00:00-10:00', [$this->syntheticExtra()]);
         $this->importer->import($json, 1, 10, 'synthetic-addition.json');
         $this->configureSyntheticExtra();
@@ -244,7 +522,7 @@ final class TuroExtrasImportIntegrationTest extends CIUnitTestCase
         $this->assertTrue($rows[0]['is_actionable']);
         $this->assertSame(1, $this->extraBlockerCount($rows));
         $this->assertSame(['70000001'], $this->repository->reservationIdsNeedingSnapshot(1));
-        $this->assertSame('complete_nonempty', $this->catalog->verificationForTrips(1, [100])[100]['state']);
+        $this->assertSame('current_nonempty', $this->catalog->verificationForTrips(1, [100], new DateTimeImmutable('2026-10-01 15:00:00 Pacific/Honolulu'))[100]['state']);
         $this->assertSame(2, $this->connection->table('turo_extra_reservation_snapshots')->countAllResults());
         $auditCount = $this->connection->table('trip_extra_fulfillment_audits')->countAllResults();
         $this->assertTrue($this->importer->import($json, 1, 10, 'synthetic-repeat.json')->duplicateFile);
@@ -260,7 +538,10 @@ final class TuroExtrasImportIntegrationTest extends CIUnitTestCase
 
     public function testExactLookupScopesCompanyAndCanRefreshHistoricalReservations(): void
     {
-        $this->connection->table('turo_trips_normalized')->where('id', 100)->update(['ends_at' => '2020-01-01 10:00:00']);
+        $this->connection->table('turo_trips_normalized')->where('id', 100)->update([
+            'starts_at' => '2020-01-01 09:00:00', 'ends_at' => '2020-01-01 10:00:00',
+            'canceled_at' => '2019-12-31 09:00:00',
+        ]);
         $this->assertSame([], $this->repository->reservationIdsNeedingSnapshot(1));
         $this->assertSame(['70000001'], $this->catalog->workspace(1, '70000001')['reservation_ids']);
         $this->assertSame([], $this->catalog->workspace(2, '70000001')['reservation_ids']);
@@ -328,8 +609,8 @@ final class TuroExtrasImportIntegrationTest extends CIUnitTestCase
         $this->assertStringNotContainsString('Synthetic Gear Kit', $this->movementSummary($rows));
         $this->assertSame($auditCount, $this->connection->table('trip_extra_fulfillment_audits')->countAllResults());
         $this->assertSame(4, $this->connection->table('turo_extra_reservation_snapshots')->countAllResults());
-        $verification = $this->catalog->verificationForTrips(1, [100])[100];
-        $this->assertSame('complete_empty', $verification['state']);
+        $verification = $this->catalog->verificationForTrips(1, [100], new DateTimeImmutable('2026-10-01 15:00:00 Pacific/Honolulu'))[100];
+        $this->assertSame('current_empty', $verification['state']);
         $this->assertStringContainsString('incomplete', $verification['issue']);
         $this->observe('2026-10-01T14:00:00-10:00', [$this->syntheticExtra()]);
         $this->assertFalse($this->fulfillments()->forTrips(1, [100])[100][0]['is_removed']);
@@ -340,7 +621,7 @@ final class TuroExtrasImportIntegrationTest extends CIUnitTestCase
     {
         $this->observe('2026-10-01T10:00:00-10:00', [$this->syntheticExtra()], false);
         $this->assertSame(0, $this->connection->table('turo_extra_selections')->countAllResults());
-        $verification = $this->catalog->verificationForTrips(1, [100])[100];
+        $verification = $this->catalog->verificationForTrips(1, [100], new DateTimeImmutable('2026-10-01 15:00:00 Pacific/Honolulu'))[100];
         $this->assertSame('never', $verification['state']);
         $this->assertStringContainsString('incomplete', $verification['issue']);
     }
@@ -355,9 +636,9 @@ final class TuroExtrasImportIntegrationTest extends CIUnitTestCase
         $this->assertSame($before, $this->connection->table('turo_extra_selections')->get()->getRowArray());
         $this->assertSame(1, $this->connection->table('turo_extra_reservation_snapshots')->countAllResults());
         $this->assertSame('extras_observation_conflict', $this->connection->table('turo_import_errors')->get()->getRow('error_code'));
-        $this->assertStringContainsString('Conflicting', $this->catalog->verificationForTrips(1, [100])[100]['issue']);
+        $this->assertStringContainsString('Conflicting', $this->catalog->verificationForTrips(1, [100], new DateTimeImmutable('2026-10-01 15:00:00 Pacific/Honolulu'))[100]['issue']);
         $this->observe('2026-10-01T11:00:00-10:00');
-        $this->assertNull($this->catalog->verificationForTrips(1, [100])[100]['issue']);
+        $this->assertNull($this->catalog->verificationForTrips(1, [100], new DateTimeImmutable('2026-10-01 15:00:00 Pacific/Honolulu'))[100]['issue']);
     }
 
     public function testEqualTimestampExtraOrderDoesNotChangeIdentityOrCreateConflict(): void
@@ -380,10 +661,10 @@ final class TuroExtrasImportIntegrationTest extends CIUnitTestCase
         $payload = ['schema' => 'fleetos-turo-extras-v1', 'exported_at' => '2026-10-01T11:00:00-10:00', 'reservations' => [],
             'failures' => [['reservation_id' => '70000001', 'error' => 'HTTP 403']]];
         $this->importer->import(json_encode($payload, JSON_THROW_ON_ERROR), 2, 10, 'other-company-failure.json');
-        $this->assertNull($this->catalog->verificationForTrips(1, [100])[100]['issue']);
+        $this->assertNull($this->catalog->verificationForTrips(1, [100], new DateTimeImmutable('2026-10-01 15:00:00 Pacific/Honolulu'))[100]['issue']);
         $this->importer->import(json_encode($payload, JSON_THROW_ON_ERROR), 1, 10, 'failure.json');
-        $verification = $this->catalog->verificationForTrips(1, [100])[100];
-        $this->assertSame('complete_empty', $verification['state']);
+        $verification = $this->catalog->verificationForTrips(1, [100], new DateTimeImmutable('2026-10-01 15:00:00 Pacific/Honolulu'))[100];
+        $this->assertSame('current_empty', $verification['state']);
         $this->assertStringContainsString('failed', $verification['issue']);
     }
 
@@ -442,7 +723,7 @@ final class TuroExtrasImportIntegrationTest extends CIUnitTestCase
     private function movementSummary(array $rows): string
     {
         return \Config\Services::renderer()->setData(['checklist' => ['turo_trip_normalized_id' => 100], 'guestCommitments' => [],
-            'extraPreparation' => $rows, 'extraVerification' => $this->catalog->verificationForTrips(1, [100])[100]])->render('trip_movement_checklists/_guest_commitments');
+            'extraPreparation' => $rows, 'extraVerification' => $this->catalog->verificationForTrips(1, [100], new DateTimeImmutable('2026-10-01 15:00:00 Pacific/Honolulu'))[100]])->render('trip_movement_checklists/_guest_commitments');
     }
 
     /** @param list<array<string, mixed>> $rows */
@@ -467,7 +748,7 @@ final class TuroExtrasImportIntegrationTest extends CIUnitTestCase
         $this->connection->query('CREATE TABLE ' . $this->table('fleet_vehicles') . ' (id INTEGER PRIMARY KEY, company_id INTEGER NOT NULL, fleet_code VARCHAR(80) DEFAULT "SYNTHETIC-VEHICLE")');
         $this->connection->query('CREATE TABLE ' . $this->table('turo_trips_normalized') . ' (id INTEGER PRIMARY KEY, fleet_vehicle_id INTEGER NULL, trip_status_lookup_value_id INTEGER NULL, turo_trip_id VARCHAR(80), turo_reservation_id VARCHAR(80), starts_at DATETIME, ends_at DATETIME DEFAULT "2099-01-01 10:00:00", canceled_at DATETIME NULL, deleted_at DATETIME NULL)');
         $this->connection->query('CREATE TABLE ' . $this->table('fleet_trip_commitments') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, company_id INTEGER, turo_trip_normalized_id INTEGER, state VARCHAR(20), instruction TEXT)');
-        $this->connection->query('CREATE TABLE ' . $this->table('trip_movement_events') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, fleet_vehicle_id INTEGER, turo_trip_normalized_id INTEGER, event_code VARCHAR(80), voided_at DATETIME NULL)');
+        $this->connection->query('CREATE TABLE ' . $this->table('trip_movement_events') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, company_id INTEGER DEFAULT 1, fleet_vehicle_id INTEGER, turo_trip_normalized_id INTEGER, event_code VARCHAR(80), occurred_at DATETIME DEFAULT "2026-10-01 12:00:00", voided_at DATETIME NULL)');
         $this->connection->query('CREATE TABLE ' . $this->table('turo_import_batches') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, import_type_lookup_value_id INTEGER, import_status_lookup_value_id INTEGER, source_filename VARCHAR(190), source_hash VARCHAR(128) UNIQUE, row_count INTEGER DEFAULT 0, started_at DATETIME, completed_at DATETIME, error_message TEXT, created_by INTEGER, created_at DATETIME, updated_at DATETIME)');
         $this->connection->query('CREATE TABLE ' . $this->table('turo_import_errors') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, turo_import_batch_id INTEGER, severity_lookup_value_id INTEGER, raw_table VARCHAR(120), raw_row_id INTEGER, row_number INTEGER, error_code VARCHAR(120), field_name VARCHAR(120), message TEXT, raw_payload TEXT, created_at DATETIME, updated_at DATETIME)');
         $this->connection->query('CREATE TABLE ' . $this->table('audit_logs') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, actor_user_id INTEGER, action_lookup_value_id INTEGER, table_name VARCHAR(120), record_id INTEGER, old_values TEXT, new_values TEXT, created_at DATETIME)');

@@ -69,6 +69,22 @@ Safe synthetic fixtures live in `tests/_support/fixtures`. They cover two Turo I
 
 Keep private exports and any downloaded receipt/detail material in `private/import-sources/`, which Git ignores. The narrow `fleetos-turo-extras-*.json` pattern also protects exporter downloads accidentally saved elsewhere in the repository. Do not commit source receipts/HTML, guest information, credentials, cookies, or session tokens. The sanitized JSON contract and operator's existing authenticated-tab mechanism are unchanged; no unattended automation or official API support is implied.
 
+## Extras verification freshness
+
+`ExtrasVerificationFreshnessPolicy` derives source age and pickup applicability from the latest complete reservation snapshot. It preserves historical evidence and reports `never`, `current_empty`, `current_nonempty`, `stale_empty`, or `stale_nonempty`, with a separate unresolved failed/incomplete attempt overlay. Only source `observed_at` establishes verification; importing an old export again or changing metadata cannot reset age. Future observations are untrusted and cannot satisfy preparation.
+
+Typed `Config\ExtrasVerification` defaults centralize a 24-hour preparation window, 24-hour maximum complete-observation age, and 72-hour advisory horizon. This slice has no migration, company Settings dependency, or Settings UI. These operating windows do not establish a Turo purchase cutoff.
+
+Inside preparation, a complete observation qualifies at or after `max(pickup_at - preparationWindowHours, as_of - maxCompleteAgeHours)`. Exactly 24 hours old is current; preparation opens exactly at its boundary. A recent snapshot captured before preparation remains current by age but requires refresh. A failed/incomplete attempt at or after the last complete observation, including an equal-time conflict, requires a new complete observation during preparation.
+
+Beyond 72 hours, age remains informational. Within the advisory horizon, missing/stale/problematic verification creates a nonblocking refresh action. Inside preparation, it blocks pickup readiness. An overdue pickup without its own actual handoff remains unresolved. An owned, unvoided handoff closes pickup preparation; another trip's handoff does not. Completed/canceled/deleted/invalid trips acquire no new pickup requirement. Active trips may still be refreshed voluntarily without reopening historical pickup readiness.
+
+All surfaces consume the same company/trip source-verification model and clock. Stored observations are parsed as UTC, normalized trip schedules as application-local time, and comparisons use epoch seconds. Operator timestamps display Pacific/Honolulu. Readiness, board fallback, and queue work share a stable company/trip identity. Return projections retain next-trip ownership and exclude this future requirement from current return readiness.
+
+`Refresh Turo Extras` navigates read-only to `/turo/extras?reservation_id=<owned-id>#export-heading`. It does not import on click. Guest custody does not suppress browser/source work. The existing operator-assisted sanitized exporter remains unchanged. Purchased Extra fulfillment stays independent: no fake selections, fulfillment records, manual verification checkbox, or fabricated historical snapshots are created.
+
+The workspace evaluates eligible candidates before sorting required refreshes ahead of advisory and informational candidates, then applies the existing 500-reservation export limit. The board evaluates eligible work without this export cap. The board also batches eligible reservation evidence, so overdue pickups and advisory work do not depend on having a persisted checklist or being the selected next trip. Queue actions are deduplicated across current/next-trip projections and use exact-reservation destinations.
+
 ## Financial firewall and next slice
 
 Extra amounts are commercial attribution facts called selected price, Extra sale amount, or gross Extra sales. They are not host earnings and are not financial postings. Slice A does not touch the financial activity readers or the formulas for realized revenue, recoveries, operating costs, or net realized operating result.

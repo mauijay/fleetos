@@ -61,7 +61,7 @@ class FleetCommandCenterViewModelService
         $importIssues = $this->importIssues()->attentionSummary();
         $vehicleMappings = $this->vehicleMappings()->attentionSummary();
         $tripReconciliation = $this->tripReconciliation()->attentionSummary();
-        $queueView = $this->queueView($queueScope, $today, $tomorrow, $command['urgent_items'], $dailyOperations['operational_queue']);
+        $queueView = $this->queueView($queueScope, $today, $tomorrow, $command['urgent_items'], $dailyOperations['operational_queue'], $dailyOperations['extras_verification_actions'] ?? [], $asOf);
         $dailyOperations['queue_view'] = $queueView;
 
         return [
@@ -536,12 +536,24 @@ class FleetCommandCenterViewModelService
     }
 
     /** @return array<string, mixed> */
-    private function queueView(?string $activeScope, array $today, array $tomorrow, array $urgent, array $defaultActions): array
+    private function queueView(?string $activeScope, array $today, array $tomorrow, array $urgent, array $defaultActions, array $verificationActions = [], ?DateTimeImmutable $asOf = null): array
     {
         $activeScope = in_array($activeScope, ['today', 'tomorrow', 'urgent'], true) ? $activeScope : null;
         $todayActions = $this->timeScopedActions($today, 'today');
         $tomorrowActions = $this->timeScopedActions($tomorrow, 'tomorrow');
         $urgentActions = $this->urgentActions($urgent);
+        $local = ($asOf ?? new DateTimeImmutable())->setTimezone($this->businessTimezone());
+        foreach ($verificationActions as $action) {
+            $pickupDay = (new DateTimeImmutable((string) $action['pickup_at'], $this->businessTimezone()))->format('Y-m-d');
+            if ($pickupDay <= $local->format('Y-m-d')) {
+                $todayActions[] = $action;
+            } elseif ($pickupDay === $local->modify('+1 day')->format('Y-m-d')) {
+                $tomorrowActions[] = $action;
+            }
+            if ($action['urgency'] === 'required') {
+                $urgentActions[] = $action;
+            }
+        }
         $countActions = static fn (array $actions): int => array_sum(array_map(static fn (array $action): int => (int) $action['count'], $actions));
         $scopes = [
             ['code' => 'all', 'label' => 'All', 'count' => null, 'href' => '/#operational-queue', 'active' => $activeScope === null, 'actionable' => true],

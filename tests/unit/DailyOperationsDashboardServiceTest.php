@@ -28,7 +28,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
  */
 final class DailyOperationsDashboardServiceTest extends CIUnitTestCase
 {
-    public function testNoWorkflowTodayStillQueuesTomorrowsPendingSeatInstallation(): void
+    public function testNoWorkflowTodayQueuesVerificationAndSeatInstallationWithoutDuplicateAggregateWork(): void
     {
         $asOf = new DateTimeImmutable('2030-01-02 12:00:00');
         $tasks = $this->createStub(TaskService::class);
@@ -64,10 +64,11 @@ final class DailyOperationsDashboardServiceTest extends CIUnitTestCase
         $expenses->method('attentionSummary')->willReturn(['total' => 0, 'href' => '#expenses']);
         $pendingStates = [true, false];
         $intelligence = $this->createMock(MovementBoardIntelligenceService::class);
-        $intelligence->expects($this->exactly(2))->method('enrich')->willReturnCallback(static function (array $board) use (&$pendingStates): array {
+        $intelligence->expects($this->exactly(2))->method('enrich')->willReturnCallback(static function (array $board) use (&$pendingStates, $asOf): array {
             $pending = array_shift($pendingStates);
+            $source = (new \App\Services\Fleet\ExtrasVerificationFreshnessPolicy())->assess([], ['company_id' => 1, 'trip_id' => 502, 'fleet_vehicle_id' => 9, 'reservation_id' => '70000502', 'starts_at' => '2030-01-03 09:00:00', 'has_actual_handoff' => ! $pending], $asOf, 'Pacific/Honolulu');
             $projection = (new \App\Services\Fleet\MovementReadinessProjectionService())->projectTripPreparation([
-                'company_id' => 1, 'turo_trip_normalized_id' => 502, 'fleet_vehicle_id' => 9,
+                'company_id' => 1, 'turo_trip_normalized_id' => 502, 'fleet_vehicle_id' => 9, 'extra_verification' => $source,
                 'extra_fulfillments' => [['company_id' => 1, 'turo_trip_normalized_id' => 502, 'fulfillment_id' => 702, 'selection_id' => 602,
                     'title' => 'Synthetic booster seat', 'fulfillment_type' => 'install', 'fulfillment_phase' => 'preparation', 'requires_operator_confirmation' => true,
                     'readiness_blocking' => true, 'is_actionable' => $pending, 'is_completed' => ! $pending, 'action_label' => 'Install the synthetic seat']],
@@ -101,10 +102,14 @@ final class DailyOperationsDashboardServiceTest extends CIUnitTestCase
         $this->assertSame([], $result['movement_board'][0]['checklists']);
         $queue = array_column($result['operational_queue'], null, 'code');
         $this->assertSame(1, $queue['readiness']['count']);
+        $this->assertSame('Refresh Turo Extras', $queue['extras_verification_1_502']['label']);
+        $this->assertSame('/turo/extras?reservation_id=70000502#export-heading', $queue['extras_verification_1_502']['href']);
+        $this->assertSame(2, $result['movement_board'][0]['readiness_blocking_remaining']);
         $this->assertArrayNotHasKey('pickup', $queue);
         $this->assertCount(1, $dashboard->filterMovementBoard($result['movement_board'], 'readiness'));
         $completed = $dashboard->forToday($asOf);
         $this->assertArrayNotHasKey('readiness', array_column($completed['operational_queue'], null, 'code'));
+        $this->assertArrayNotHasKey('extras_verification_1_502', array_column($completed['operational_queue'], null, 'code'));
         $this->assertSame([], $dashboard->filterMovementBoard($completed['movement_board'], 'readiness'));
     }
 

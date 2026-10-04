@@ -18,21 +18,28 @@ class FleetExtraService
         private readonly AuditLogRepository $audit = new AuditLogRepository(),
         private readonly LookupRepository $lookups = new LookupRepository(),
         private readonly ?TripExtraFulfillmentService $fulfillments = null,
+        private readonly ExtrasVerificationFreshnessPolicy $freshnessPolicy = new ExtrasVerificationFreshnessPolicy(),
     ) {
     }
 
     /** @return array<string,mixed> */
-    public function workspace(int $companyId, ?string $reservationId = null): array
+    public function workspace(int $companyId, ?string $reservationId = null, ?\DateTimeImmutable $asOf = null): array
     {
         if ($reservationId !== null && preg_match('/^\d{1,80}$/', $reservationId) !== 1) {
             throw new InvalidArgumentException('Enter a numeric Turo reservation ID.');
         }
-        $candidates = $this->extras->refreshCandidates($companyId, $reservationId);
-        $verification = $this->verificationForTrips($companyId, array_map('intval', array_column($candidates, 'trip_id')));
+        $asOf ??= new \DateTimeImmutable('now', new \DateTimeZone((new \Config\App())->appTimezone));
+        $candidates = $this->extras->refreshCandidates($companyId, $reservationId, null, $asOf);
+        $verification = $this->verificationForTrips($companyId, array_map('intval', array_column($candidates, 'trip_id')), $asOf);
         foreach ($candidates as &$candidate) {
             $candidate['verification'] = $verification[(int) $candidate['trip_id']] ?? $this->unverified();
         }
         unset($candidate);
+        $priority = ['required' => 0, 'advisory' => 1, 'informational' => 2];
+        usort($candidates, static fn (array $a, array $b): int =>
+            [$priority[$a['verification']['urgency'] ?? 'informational'], $a['starts_at'], (int) $a['trip_id']]
+            <=> [$priority[$b['verification']['urgency'] ?? 'informational'], $b['starts_at'], (int) $b['trip_id']]);
+        $candidates = array_slice($candidates, 0, 500);
 
         return [
             'catalog' => $this->extras->catalog($companyId),
@@ -45,10 +52,19 @@ class FleetExtraService
         ];
     }
 
-    /** @param list<int> $tripIds @return array<int, array<string, mixed>> */
-    public function verificationForTrips(int $companyId, array $tripIds): array
+    /** Read refresh work in one company-scoped batch, including overdue unconfirmed pickups. @return array<int, array<string, mixed>> */
+    public function refreshVerificationForCompany(int $companyId, \DateTimeImmutable $asOf): array
     {
+        $candidates = $this->extras->refreshCandidates($companyId, null, null, $asOf);
+        return $this->verificationForTrips($companyId, array_map('intval', array_column($candidates, 'trip_id')), $asOf);
+    }
+
+    /** @param list<int> $tripIds @return array<int, array<string, mixed>> */
+    public function verificationForTrips(int $companyId, array $tripIds, ?\DateTimeImmutable $asOf = null): array
+    {
+        $asOf ??= new \DateTimeImmutable('now', new \DateTimeZone((new \Config\App())->appTimezone));
         $trips = $this->extras->tripsForVerification($companyId, $tripIds);
+        $handoffs = array_fill_keys($this->extras->verificationHandoffTripIds($companyId, array_map('intval', array_column($trips, 'trip_id')), $asOf), true);
         $reservationIds = array_values(array_unique(array_column($trips, 'reservation_id')));
         $complete = $issues = [];
         foreach ($this->extras->verificationObservations($companyId, $reservationIds) as $row) {
@@ -77,20 +93,14 @@ class FleetExtraService
                 $snapshot = $complete[$reservationId];
                 $payload = json_decode((string) $snapshot['source_payload'], true);
                 $count = count($payload['extras'] ?? []);
-                $label = (new \DateTimeImmutable((string) $snapshot['observed_at'], new \DateTimeZone('UTC')))
-                    ->setTimezone(new \DateTimeZone((new \Config\App())->appTimezone))->format('M j, Y g:i:s A T');
-                $state = [
-                    'state' => $count === 0 ? 'complete_empty' : 'complete_nonempty',
-                    'observed_at' => (string) $snapshot['observed_at'],
-                    'verified_label' => $label,
-                    'summary' => $count === 0 ? 'No Extras observed as of ' . $label : 'Extras verified ' . $label,
-                    'issue' => null,
-                ];
+                $state = ['observed_at' => (string) $snapshot['observed_at'], 'extra_count' => $count, 'issue' => null, 'issue_observed_at' => null];
             }
             if (isset($issues[$reservationId]) && $issues[$reservationId]['observed_at'] >= ($state['observed_at'] ?? '')) {
                 $state['issue'] = $issues[$reservationId]['message'];
+                $state['issue_observed_at'] = $issues[$reservationId]['observed_at'];
             }
-            $result[(int) $trip['trip_id']] = $state;
+            $trip['has_actual_handoff'] = isset($handoffs[(int) $trip['trip_id']]);
+            $result[(int) $trip['trip_id']] = $this->freshnessPolicy->assess($state, $trip, $asOf, (new \Config\App())->appTimezone);
         }
 
         return $result;

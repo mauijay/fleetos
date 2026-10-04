@@ -9,8 +9,7 @@ $commitmentRequirements = array_column($readiness['requirements'] ?? [], null, '
 <section class="section workflow-guest-commitments" aria-labelledby="workflow-guest-commitments-heading">
     <div class="section-heading split-heading"><div><p class="eyebrow">What must be ready for this guest</p><h2 id="workflow-guest-commitments-heading">Guest Commitments</h2></div><a class="action-link" href="/operations/trips/<?= $tripId ?>/commitments">Review all guest commitments</a></div>
     <h3>Purchased Extras</h3>
-    <p class="muted"><?= esc((string) ($extraVerification['summary'] ?? 'Extras not verified for this reservation.')) ?></p>
-    <?php if (($extraVerification['issue'] ?? null) !== null): ?><p class="tone-warning"><?= esc((string) $extraVerification['issue']) ?></p><?php endif; ?>
+    <?= view('trip_movement_checklists/_extras_verification', ['verification' => $extraVerification ?? null]) ?>
     <div class="workflow-commitment-list">
         <?php foreach ($purchasedExtras as $extra): ?><article class="workflow-commitment">
             <div><span class="eyebrow">Turo purchased selection</span><strong><?= esc((string) $extra['title']) ?></strong>

@@ -69,9 +69,9 @@ $reservationIds = implode("\n", $workspace['reservation_ids']);
             <div class="history-list wrap-anywhere">
                 <?php foreach ($workspace['refresh_candidates'] ?? [] as $candidate): ?><div>
                     <strong><?= esc((string) $candidate['fleet_code']) ?> · Reservation <?= esc((string) $candidate['reservation_id']) ?></strong>
-                    <span><?= esc((string) $candidate['verification']['summary']) ?></span>
-                    <?php if ($candidate['verification']['issue'] !== null): ?><small class="tone-warning"><?= esc((string) $candidate['verification']['issue']) ?></small><?php endif; ?>
-                    <a class="action-link" href="/turo/extras?reservation_id=<?= esc((string) $candidate['reservation_id'], 'attr') ?>">Refresh this reservation</a>
+                    <small><?= esc(ucfirst((string) ($candidate['verification']['urgency'] ?? 'informational'))) ?> ? Pickup <?= esc((string) $candidate['starts_at']) ?></small>
+                    <?= view('trip_movement_checklists/_extras_verification', ['verification' => $candidate['verification']]) ?>
+                    <?php if (! ($candidate['verification']['refresh_required'] ?? false) && ! ($candidate['verification']['advisory'] ?? false) && ! ($candidate['verification']['optional_active_refresh'] ?? false) && ($candidate['verification']['action_href'] ?? null) !== null): ?><a class="action-link" href="<?= esc((string) $candidate['verification']['action_href'], 'attr') ?>">Refresh Turo Extras</a><?php endif; ?>
                 </div><?php endforeach; ?>
             </div>
             <form action="/turo/extras/reconcile" method="post"><?= csrf_field() ?><button class="secondary-action" type="submit">Match saved Extras to imported trips</button></form>

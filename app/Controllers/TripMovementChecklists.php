@@ -17,6 +17,7 @@ class TripMovementChecklists extends BaseController
 {
     public function show(int $id): string
     {
+        $asOf = new \DateTimeImmutable('now', new \DateTimeZone((new \Config\App())->appTimezone));
         $checklist = Services::tripMovementChecklistService()->checklistForCompany($this->activeCompanyId(), $id) ?? ['exists' => false];
         $companyId = (int) ($checklist['company_id'] ?? 0);
         $tripSchedule = ($checklist['exists'] ?? false)
@@ -29,7 +30,7 @@ class TripMovementChecklists extends BaseController
         $tripIsOperational = ! ($checklist['exists'] ?? false)
             || ($tripSchedule !== null && Services::tripCommitmentService()->tripIsOperational($tripSchedule));
         $readiness = ($checklist['exists'] ?? false) && $companyId > 0
-            ? (Services::movementReadinessReadService()->forCompany($companyId, [$id])[$id] ?? null)
+            ? (Services::movementReadinessReadService()->forCompany($companyId, [$id], $asOf)[$id] ?? null)
             : null;
         $factsPresenter = Services::movementOperationalFactPresentationService();
         $tripFacts = ($checklist['exists'] ?? false) ? $factsPresenter->tripFacts((int) $checklist['turo_trip_normalized_id']) : ['pickup' => null, 'return' => null];
@@ -97,7 +98,7 @@ class TripMovementChecklists extends BaseController
         $nextTripId = (int) ($readiness['next_trip']['id'] ?? 0);
         $extraTripIds = array_values(array_filter([$currentTripId, $nextTripId]));
         $extraVerification = $companyId > 0
-            ? (Services::fleetExtraService()->verificationForTrips($companyId, [$currentTripId])[$currentTripId] ?? null)
+            ? ($readiness['extra_verification'] ?? Services::fleetExtraService()->verificationForTrips($companyId, [$currentTripId], $asOf)[$currentTripId] ?? null)
             : null;
         $extraPreparationByTrip = ($checklist['exists'] ?? false) && $companyId > 0
             ? Services::tripExtraFulfillmentService()->forTrips($companyId, $extraTripIds)

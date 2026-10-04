@@ -6,6 +6,42 @@ use CodeIgniter\Test\CIUnitTestCase;
 /** @internal */
 final class MovementBoardCardViewTest extends CIUnitTestCase
 {
+    public function testPackingNavigationStaysSeparateFromVerificationRefresh(): void
+    {
+        $vehicle = $this->vehicle();
+        $refreshHref = '/turo/extras?reservation_id=70000001#export-heading';
+        $vehicle['readiness_blockers'] = [
+            ['code' => 'extras_verification_1_100', 'label' => 'Extras source verification',
+                'href' => $refreshHref, 'action' => ['label' => 'Refresh Turo Extras']],
+            ['code' => 'extra_fulfillment_702', 'label' => 'Synthetic packing kit',
+                'href' => '/operations/checklists/10', 'action' => ['label' => 'Pack synthetic kit']],
+        ];
+        $vehicle['readiness_compact'] = (new ReflectionMethod(\App\Services\Fleet\MovementBoardIntelligenceService::class, 'compactReadiness'))
+            ->invoke(new \App\Services\Fleet\MovementBoardIntelligenceService(), $vehicle, 2);
+        $vehicle['extras_verification_actions'] = [[
+            'blocking' => true, 'reservation_id' => '70000001', 'verification' => ['refresh_reason' => 'Verification is stale.'],
+            'action' => ['href' => $refreshHref],
+        ]];
+        $html = html_entity_decode($this->render($vehicle));
+        $this->assertSame(1, $vehicle['readiness_compact']['trip_preparation_count']);
+        $this->assertSame($refreshHref, $vehicle['readiness_compact']['next_actions'][0]['href']);
+        $this->assertStringContainsString('href="/operations/checklists/10#trip-preparation">Continue preparation</a>', $html);
+        $this->assertSame(1, substr_count($html, 'href="' . $refreshHref . '"'));
+        $this->assertStringNotContainsString('#export-heading#trip-preparation', $html);
+    }
+
+    public function testBrowserVerificationLinkRemainsVisibleDuringGuestCustody(): void
+    {
+        $vehicle = $this->vehicle();
+        $vehicle['extras_verification_actions'] = [[
+            'blocking' => true, 'reservation_id' => '70000001', 'verification' => ['refresh_reason' => 'Last complete verification is stale.'],
+            'action' => ['href' => '/turo/extras?reservation_id=70000001#export-heading'],
+        ]];
+        $html = html_entity_decode($this->render($vehicle));
+        $this->assertStringContainsString('Extras refresh required before pickup', $html);
+        $this->assertStringContainsString('/turo/extras?reservation_id=70000001#export-heading', $html);
+    }
+
     public function testCardRendersPlannedFactsFutureTripRecommendationFreshnessAndOneAction(): void
     {
         $vehicle = $this->vehicle();

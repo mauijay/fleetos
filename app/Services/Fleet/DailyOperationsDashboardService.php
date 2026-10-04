@@ -37,6 +37,7 @@ class DailyOperationsDashboardService
     public function forToday(?DateTimeImmutable $asOf = null, ?string $movementFilter = null): array
     {
         $asOf ??= new DateTimeImmutable();
+        $asOf = $asOf->setTimezone(new \DateTimeZone((new \Config\App())->appTimezone));
         $fleetSnapshot = $this->fleetSnapshot()->forSingleFleetCompany($asOf);
         $companyId = (int) $fleetSnapshot['company_id'];
         $financialSummary = $this->financialSummary()->currentMonth($companyId, $asOf);
@@ -63,6 +64,7 @@ class DailyOperationsDashboardService
         $board = $this->attachChecklistSummaries($board, $actionableChecklists);
         $board = $this->movementBoardIntelligence()->enrich($board, $asOf, $companyId);
         $readinessWork = $this->withNextTripPreparation($actionableChecklists, $board);
+        $verificationActions = $this->extrasVerificationQueue($readinessWork, $board);
 
         $externalAlerts = $this->externalAlerts($importIssues, $vehicleMappings, $reconciliation, $airport, $reimbursements, $health);
         $attention = $this->stateService->immediateAttention($board, $externalAlerts);
@@ -76,7 +78,8 @@ class DailyOperationsDashboardService
             'timeline' => $this->attachChecklistTimeline($this->stateService->timeline($today, $asOf), $checklists),
             'attention' => $attention,
             'fleet_status' => $this->stateService->statusCounts($board, (float) $currentMonth['fleet_utilization'], $fleetSnapshot, $today),
-            'operational_queue' => $this->operationalQueue($today, $attention, $importIssues, $vehicleMappings, $reconciliation, $airport, $reimbursements, $incidentals, $expenses, $readinessWork),
+            'extras_verification_actions' => $verificationActions,
+            'operational_queue' => array_merge($verificationActions, $this->operationalQueue($today, $attention, $importIssues, $vehicleMappings, $reconciliation, $airport, $reimbursements, $incidentals, $expenses, $readinessWork)),
             'financial' => [
                 'Realized Operating Revenue' => '$' . number_format((float) $financialSummary['realized_operating_revenue'], 2),
                 'Realized Recoveries' => '$' . number_format((float) $financialSummary['realized_recoveries'], 2),
@@ -93,6 +96,33 @@ class DailyOperationsDashboardService
                 'Positioning recommendations do not include live GPS, traffic, travel time, or automatic transportation availability.',
             ],
         ];
+    }
+
+    /** @param list<array<string, mixed>> $checklists @return list<array<string, mixed>> */
+    private function extrasVerificationQueue(array $checklists, array $board = []): array
+    {
+        $actions = [];
+        foreach ($board as $card) {
+            $checklists[] = ['readiness_projection' => ['requirements' => $card['extras_verification_actions'] ?? []]];
+        }
+        foreach ($checklists as $checklist) {
+            foreach ($checklist['readiness_projection']['requirements'] ?? [] as $requirement) {
+                if (($requirement['source_type'] ?? null) !== 'extras_verification'
+                    || ! ($requirement['actionable'] ?? false) || ! ($requirement['relevant'] ?? true)) {
+                    continue;
+                }
+                $verification = $requirement['verification'];
+                $identity = (string) $requirement['work_identity'];
+                $actions[$identity] = [
+                    'code' => $requirement['code'], 'label' => 'Refresh Turo Extras', 'count' => 1,
+                    'detail' => ($verification['refresh_required'] ? 'Required before pickup' : 'Upcoming verification advisory') . ' ? Reservation ' . $verification['reservation_id'] . ' ? ' . $verification['refresh_reason'],
+                    'href' => $requirement['action']['href'], 'actionable' => true,
+                    'urgency' => $verification['urgency'], 'pickup_at' => $verification['pickup_at'],
+                    'trip_id' => $requirement['trip_id'], 'work_identity' => $identity,
+                ];
+            }
+        }
+        return array_values($actions);
     }
 
     private function financialSummary(): FinancialSummaryService
@@ -150,6 +180,9 @@ class DailyOperationsDashboardService
                     || ! MovementReadinessProjectionService::isBlocking($requirement)) {
                     continue;
                 }
+                if (($requirement['source_type'] ?? null) === 'extras_verification') {
+                    continue; // This work has its own exact-reservation queue action.
+                }
                 $code = (string) ($requirement['code'] ?? '');
                 if (($code === 'vehicle_clean' && isset($cleaningVehicles[$vehicleId]))
                     || (in_array($code, ['energy_known', 'energy_ready'], true) && isset($energyVehicles[$vehicleId]))) {
@@ -159,6 +192,17 @@ class DailyOperationsDashboardService
             }
         }
         $additionalActions = array_sum(array_map(static fn (array $checklist): int => (int) ($checklist['additional_actions_remaining_count'] ?? 0), $checklists));
+        foreach ($checklists as $checklist) {
+            $projection = $checklist['readiness_projection'] ?? [];
+            foreach ($projection['requirements'] ?? [] as $requirement) {
+                if (($requirement['source_type'] ?? null) === 'extras_verification' && ! $requirement['blocking']
+                    && ($requirement['phase'] ?? null) === ($projection['readiness_phase'] ?? null)
+                    && $requirement['status'] === 'unsatisfied' && ($requirement['actionable'] ?? false)) {
+                    $additionalActions--;
+                }
+            }
+        }
+        $additionalActions = max(0, $additionalActions);
         $pendingAirportDeliveries = count(array_filter($today['airport_deliveries'], static fn (array $delivery): bool => ($delivery['completed_at'] ?? null) === null));
 
         $actions = [
@@ -378,7 +422,7 @@ class DailyOperationsDashboardService
                     }
                     if (($requirement['phase'] ?? null) === ($projection['readiness_phase'] ?? null)
                         && MovementReadinessProjectionService::isBlocking($requirement)) {
-                        $blockers[] = array_merge($requirement, ['href' => $summary['href']]);
+                        $blockers[] = array_merge($requirement, ['href' => $requirement['action']['href'] ?? $summary['href']]);
                     }
                     if (($projection['is_same_day_turnaround'] ?? false)
                         && ($requirement['phase'] ?? null) === MovementReadinessProjectionService::PHASE_NEXT_PICKUP_PREPARATION

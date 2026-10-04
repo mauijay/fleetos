@@ -119,7 +119,7 @@ final class VehicleHealthViewTest extends CIUnitTestCase
         $this->assertStringContainsString("post('(:num)/health/tire-pressure'", $routes);
         $this->assertStringContainsString("post('(:num)/health/odometer'", $routes);
         $this->assertStringNotContainsString("get('(:num)/health/", $routes);
-        $this->assertStringContainsString("\$actionType === 'vehicle_health'", $readiness);
+        $this->assertStringContainsString("['vehicle_health', 'extras_verification']", $readiness);
         $this->assertStringContainsString('Record tire pressure (optional)', $return);
         $this->assertStringContainsString('not by return count', $return);
     }

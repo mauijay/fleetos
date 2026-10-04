@@ -32,6 +32,9 @@ $pendingLabels = [
 ];
 $activeFacts = $tripFacts[(string) ($checklist['movement_type'] ?? '')] ?? null;
 $factDetail = static function (array $requirement) use ($activeFacts): ?string {
+    if (($requirement['source_type'] ?? null) === 'extras_verification') {
+        return $requirement['verification']['verified_label'] ?? null;
+    }
     if ($activeFacts === null) {
         return isset($requirement['basis_at']) ? date('g:i A', strtotime((string) $requirement['basis_at'])) : null;
     }
@@ -92,7 +95,7 @@ $factDetail = static function (array $requirement) use ($activeFacts): ?string {
                                 <div class="readiness-action-controls"><form action="/operations/checklists/<?= (int) $checklist['id'] ?>/charging-adapter-present" method="post"><?= csrf_field() ?><button class="primary-action" type="submit">Confirm</button></form></div>
                             <?php elseif (! $closed && in_array($actionType, ['guest_commitment_complete', 'guest_commitment_acknowledge'], true)): ?>
                                 <div class="readiness-action-controls"><a class="action-link" href="#guest-commitment-<?= (int) $requirement['action']['commitment_id'] ?>">Review instruction</a></div>
-                            <?php elseif (! $closed && $actionType === 'vehicle_health'): ?>
+                            <?php elseif (! $closed && in_array($actionType, ['vehicle_health', 'extras_verification'], true)): ?>
                                 <div class="readiness-action-controls"><a class="action-link" href="<?= esc((string) $requirement['action']['href'], 'attr') ?>"><?= esc((string) $requirement['action']['label']) ?></a></div>
                             <?php elseif (! $closed && $itemId > 0): ?>
                                 <div class="readiness-action-controls"><form action="/operations/checklist-items/<?= $itemId ?>/complete" method="post"><?= csrf_field() ?><button class="primary-action" type="submit">Confirm</button></form><?php if ($requirement['allows_na'] ?? false): ?><form action="/operations/checklist-items/<?= $itemId ?>/not-applicable" method="post"><?= csrf_field() ?><button class="action-link" type="submit">Not applicable</button></form><?php endif; ?></div>

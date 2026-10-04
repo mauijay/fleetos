@@ -108,12 +108,15 @@ $statusLabel = ($state['code'] ?? null) === 'on_trip' ? 'Rented' : (string) $sta
             <span><?= ($state['code'] ?? null) === 'awaiting_recovery' ? 'Pending recovery' : ((int) $readiness['blocking_count'] === 0 ? 'Ready' : esc((string) $readiness['blocking_count'])) ?></span>
         </div>
         <p><strong><?= esc((string) $readiness['summary']) ?></strong></p>
-        <?php if ((int) ($readiness['trip_preparation_count'] ?? 0) > 0): ?><div class="movement-card__next-action"><span>Trip Preparation · <strong><?= (int) $readiness['trip_preparation_count'] ?> item<?= (int) $readiness['trip_preparation_count'] === 1 ? '' : 's' ?></strong></span><ul><?php foreach (($readiness['trip_preparation_items'] ?? []) as $item): ?><li><?= esc((string) $item) ?></li><?php endforeach; ?></ul><?php if (($readiness['next_actions'][0]['href'] ?? null) !== null): ?><a class="text-link" href="<?= esc((string) $readiness['next_actions'][0]['href'], 'attr') ?>#trip-preparation">Continue preparation</a><?php endif; ?></div><?php endif; ?>
+        <?php if ((int) ($readiness['trip_preparation_count'] ?? 0) > 0): ?><div class="movement-card__next-action"><span>Trip Preparation · <strong><?= (int) $readiness['trip_preparation_count'] ?> item<?= (int) $readiness['trip_preparation_count'] === 1 ? '' : 's' ?></strong></span><ul><?php foreach (($readiness['trip_preparation_items'] ?? []) as $item): ?><li><?= esc((string) $item) ?></li><?php endforeach; ?></ul><?php if (($readiness['trip_preparation_href'] ?? null) !== null): ?><a class="text-link" href="<?= esc((string) $readiness['trip_preparation_href'], 'attr') ?>#trip-preparation">Continue preparation</a><?php endif; ?></div><?php endif; ?>
         <?php foreach ($readiness['next_actions'] as $nextAction): ?>
             <p class="movement-card__next-action">Next: <strong><?= esc((string) $nextAction['label']) ?></strong></p>
         <?php endforeach; ?>
     </section>
 
+    <?php foreach ($vehicle['extras_verification_actions'] ?? [] as $verificationAction): ?>
+        <p class="movement-card__next-action tone-warning"><strong><?= $verificationAction['blocking'] ? 'Extras refresh required before pickup' : 'Upcoming Extras verification advisory' ?></strong> ? Reservation <?= esc((string) $verificationAction['reservation_id']) ?> ? <?= esc((string) $verificationAction['verification']['refresh_reason']) ?> <a class="text-link" href="<?= esc((string) $verificationAction['action']['href'], 'attr') ?>">Refresh Turo Extras</a></p>
+    <?php endforeach; ?>
     <?php if (($vehicle['recovery_exceptions'] ?? []) !== []): ?>
         <section class="movement-card__blockers" aria-label="Recovery exceptions">
             <h4>Recovery exception needs attention</h4>

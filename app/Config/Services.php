@@ -599,6 +599,7 @@ class Services extends BaseService
             static::tripCommitmentService(),
             static::tripEnergyRuleResolver(),
             static::tripExtraFulfillmentService(),
+            static::fleetExtraService(),
         );
     }
 
@@ -807,6 +808,7 @@ class Services extends BaseService
             tripCommitmentService: static::tripCommitmentService(),
             energyRuleResolver: static::tripEnergyRuleResolver(),
             custodyService: static::currentVehicleCustodyService(),
+            extraVerificationService: static::fleetExtraService(),
         );
     }
 
