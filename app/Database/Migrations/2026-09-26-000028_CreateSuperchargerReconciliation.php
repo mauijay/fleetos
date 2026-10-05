@@ -33,9 +33,18 @@ class CreateSuperchargerReconciliation extends Migration
         $candidateIndex = $connection->protectIdentifiers($connection->getPrefix() . 'charging_sessions_candidate_trip_idx');
         $this->db->query("CREATE UNIQUE INDEX {$sourceIndex} ON {$chargingSessions} (source_session_fingerprint)");
         $this->db->query("CREATE INDEX {$candidateIndex} ON {$chargingSessions} (candidate_turo_trip_normalized_id)");
-        $this->forge->addForeignKey('custody_basis_event_id', 'trip_movement_events', 'id', 'CASCADE', 'SET NULL', $this->foreignKeyName('charging_sessions_custody_event_fk'));
-        $this->forge->addForeignKey('candidate_turo_trip_normalized_id', 'turo_trips_normalized', 'id', 'CASCADE', 'SET NULL', $this->foreignKeyName('charging_sessions_candidate_trip_fk'));
-        $this->forge->processIndexes('charging_sessions');
+        if ($this->db instanceof \CodeIgniter\Database\SQLite3\Connection) {
+            (new \App\Database\SQLiteMigrationTable($this->db, new \CodeIgniter\Database\SQLite3\Forge($this->db)))
+                ->fromTable($this->db->prefixTable('charging_sessions'))
+                ->addForeignKey([
+                    ['field' => ['custody_basis_event_id'], 'referenceTable' => $this->db->prefixTable('trip_movement_events'), 'referenceField' => ['id'], 'onUpdate' => 'CASCADE', 'onDelete' => 'SET NULL'],
+                    ['field' => ['candidate_turo_trip_normalized_id'], 'referenceTable' => $this->db->prefixTable('turo_trips_normalized'), 'referenceField' => ['id'], 'onUpdate' => 'CASCADE', 'onDelete' => 'SET NULL'],
+                ])->run();
+        } else {
+            $this->forge->addForeignKey('custody_basis_event_id', 'trip_movement_events', 'id', 'CASCADE', 'SET NULL', $this->foreignKeyName('charging_sessions_custody_event_fk'));
+            $this->forge->addForeignKey('candidate_turo_trip_normalized_id', 'turo_trips_normalized', 'id', 'CASCADE', 'SET NULL', $this->foreignKeyName('charging_sessions_candidate_trip_fk'));
+            $this->forge->processIndexes('charging_sessions');
+        }
 
         $this->createImportBatches();
         $this->createImportRows();

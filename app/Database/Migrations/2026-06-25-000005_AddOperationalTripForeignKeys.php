@@ -8,6 +8,16 @@ class AddOperationalTripForeignKeys extends Migration
 {
     public function up(): void
     {
+        if ($this->db instanceof \CodeIgniter\Database\SQLite3\Connection) {
+            foreach (['damage_claims', 'charging_sessions', 'airport_deliveries'] as $table) {
+                (new \App\Database\SQLiteMigrationTable($this->db, new \CodeIgniter\Database\SQLite3\Forge($this->db)))
+                    ->fromTable($this->db->prefixTable($table))
+                    ->addForeignKey([['field' => ['turo_trip_normalized_id'], 'referenceTable' => $this->db->prefixTable('turo_trips_normalized'), 'referenceField' => ['id'], 'onUpdate' => 'CASCADE', 'onDelete' => 'SET NULL']])
+                    ->run();
+            }
+
+            return;
+        }
         $this->forge->addForeignKey(
             'turo_trip_normalized_id',
             'turo_trips_normalized',
