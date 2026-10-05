@@ -126,7 +126,7 @@ class TripMovementChecklists extends BaseController
         $checklistNotice = session()->getFlashdata('movement_checklist_notice');
         $checklistError = session()->getFlashdata('movement_checklist_error');
         $vehicleDamage = ($checklist['exists'] ?? false) && $companyId > 0
-            ? Services::vehicleDamageService()->workspace($companyId, (int) $checklist['fleet_vehicle_id'])
+            ? Services::vehicleDamageReadService()->workspace($companyId, (int) $checklist['fleet_vehicle_id'])
             : ['current' => [], 'history' => [], 'has_unsafe' => false, 'zones' => [], 'damage_types' => [], 'severities' => [], 'statuses' => []];
         return view('trip_movement_checklists/show', [
             'assets' => Services::assetManifestService()->appAssets(),

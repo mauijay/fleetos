@@ -1,0 +1,15 @@
+<?php $base = '/fleet/vehicles/' . (int) $vehicle['id'] . '/damage/' . (int) $item['id']; $formData ??= []; ?>
+<section class="section"><h1>Condition record #<?= (int) $item['id'] ?></h1>
+<h2><?= esc(\Config\VehicleDamage::PANELS[$item['panel_code'] ?? ''] ?? (string) $item['zone_code']) ?></h2>
+<p><?= nl2br(esc((string) $item['description'])) ?></p>
+<p><?= esc(\App\Services\Fleet\VehicleDamageService::SEVERITIES[$item['severity_code']]) ?> · <?= esc((string) $item['status_code']) ?></p>
+<p>Discovered <?= esc((string) $item['discovered_at']) ?> · Reservation <?= esc((string) ($item['turo_reservation_id'] ?? 'Not linked')) ?></p>
+<?php if (! empty($item['current_condition_item_id'])): ?><p>Historical provenance for <a href="/fleet/vehicles/<?= (int) $vehicle['id'] ?>/damage/<?= (int) $item['current_condition_item_id'] ?>">canonical condition #<?= (int) $item['current_condition_item_id'] ?></a>.</p><?php else: ?>
+<p><a href="<?= $base ?>/link-preview">Link as worsened existing damage</a></p><?php endif; ?>
+<h2>Evidence · <?= count($evidence) ?></h2><ul><?php foreach ($evidence as $entry): ?><li><?= esc((string) ($entry['label'] ?: $entry['external_reference'] ?: $entry['original_filename'] ?: $entry['alt_text'] ?: 'Stored private evidence')) ?></li><?php endforeach; ?></ul>
+<h2>Append-only event history</h2><ol class="damage-history"><?php foreach ($events as $event): ?><li><strong><?= esc(ucwords(str_replace('_', ' ', $event['event_code']))) ?></strong> <?= esc((string) $event['occurred_at']) ?> · Operator #<?= (int) $event['actor_user_id'] ?><p><?= nl2br(esc((string) $event['note'])) ?></p></li><?php endforeach; ?></ol>
+<?php foreach ($vehicleDamage['related'] ?? [] as $related): ?><?php if ((int) $related['current_condition_item_id'] === (int) $item['id']): ?><p><a href="/fleet/vehicles/<?= (int) $vehicle['id'] ?>/damage/<?= (int) $related['id'] ?>">Historical record #<?= (int) $related['id'] ?> · <?= esc((string) $related['description']) ?></a></p><?php endif; ?><?php endforeach; ?>
+<details class="capital-disclosure"><summary>Attach evidence</summary><form action="<?= $base ?>/evidence" method="post"><?= csrf_field() ?><div class="damage-form-grid issue-filters">
+<label>Existing private vehicle file ID<input type="number" min="1" name="file_id" value="<?= esc((string) ($formData['file_id'] ?? ''), 'attr') ?>"></label><label>Existing private vehicle image ID<input type="number" min="1" name="image_id" value="<?= esc((string) ($formData['image_id'] ?? ''), 'attr') ?>"></label>
+<label>External evidence reference (text only)<input name="external_reference" maxlength="500" value="<?= esc((string) ($formData['external_reference'] ?? ''), 'attr') ?>"></label><label>Evidence label<input name="evidence_label" maxlength="190" value="<?= esc((string) ($formData['evidence_label'] ?? ''), 'attr') ?>"></label></div><p>Supply one reference. Evidence remains on this original record.</p><button type="submit" class="secondary-action">Attach evidence</button></form></details>
+</section>

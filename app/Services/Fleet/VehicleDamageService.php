@@ -34,6 +34,8 @@ class VehicleDamageService
         'tire' => 'Tire',
         'interior' => 'Interior',
         'missing_broken_part' => 'Missing / broken part',
+        'puncture_cut' => 'Puncture / cut',
+        'mechanical_underbody' => 'Mechanical / underbody',
         'other' => 'Other',
     ];
 
@@ -41,7 +43,7 @@ class VehicleDamageService
         'cosmetic' => 'Cosmetic',
         'moderate' => 'Moderate',
         'severe' => 'Severe',
-        'unsafe' => 'Unsafe',
+        'unsafe' => 'Safety-critical',
     ];
 
     public const STATUSES = [
@@ -71,6 +73,7 @@ class VehicleDamageService
         $history = $this->enrich($companyId, $this->repo()->historyForVehicle($companyId, $vehicleId));
 
         return [
+            'related' => $this->enrich($companyId, $this->repo()->relatedForVehicle($companyId, $vehicleId)),
             'current' => $current,
             'history' => $history,
             'has_unsafe' => array_any($current, static fn (array $item): bool => $item['severity_code'] === 'unsafe'),
@@ -129,9 +132,16 @@ class VehicleDamageService
             'updated_by' => $actorUserId,
             'updated_at' => $now,
         ];
+        if (! empty($data['panel_code'])) {
+            if (! isset(\Config\VehicleDamage::PANELS[$data['panel_code']])) {
+                return $this->failure('panel_code', 'Choose a valid panel.');
+            }
+            $values['panel_code'] = $data['panel_code'];
+        }
 
         $this->db->transBegin();
         try {
+            $this->repo()->lockVehicle($companyId, $vehicleId);
             $id = $this->repo()->insertItem($values);
             $this->repo()->insertEvent($this->eventValues(
                 $companyId,
@@ -146,7 +156,7 @@ class VehicleDamageService
                 null,
             ));
             $this->addEvidence($companyId, $vehicleId, $id, $data, $actorUserId, $now);
-            $this->audit('created', $id, null, $values, $actorUserId);
+            $this->audit('created', $id, null, $values + ['evidence' => $this->repo()->evidence($companyId, $id)], $actorUserId);
             if ($this->db->transStatus() === false) {
                 throw new \RuntimeException('Damage item transaction failed.');
             }
@@ -163,7 +173,7 @@ class VehicleDamageService
     /** @return array{success:bool,id?:int,errors:array<string,string>} */
     public function correctDetails(int $companyId, int $vehicleId, int $itemId, array $data, int $actorUserId): array
     {
-        $item = $this->repo()->item($companyId, $vehicleId, $itemId);
+        $item = $this->repo()->canonicalItem($companyId, $vehicleId, $itemId);
         if ($item === null) {
             return $this->failure('item', 'Damage item not found in the active fleet company.');
         }
@@ -196,7 +206,7 @@ class VehicleDamageService
     /** @return array{success:bool,id?:int,errors:array<string,string>} */
     public function changeSeverity(int $companyId, int $vehicleId, int $itemId, string $severity, string $note, int $actorUserId): array
     {
-        $item = $this->repo()->item($companyId, $vehicleId, $itemId);
+        $item = $this->repo()->canonicalItem($companyId, $vehicleId, $itemId);
         if ($item === null) {
             return $this->failure('item', 'Damage item not found in the active fleet company.');
         }
@@ -224,7 +234,7 @@ class VehicleDamageService
      */
     public function worsen(int $companyId, int $vehicleId, int $itemId, array $data, int $actorUserId, array $trustedContext = []): array
     {
-        $item = $this->repo()->item($companyId, $vehicleId, $itemId);
+        $item = $this->repo()->canonicalItem($companyId, $vehicleId, $itemId);
         if ($item === null || ! in_array($item['status_code'], ['open', 'accepted_unrepaired'], true)) {
             return $this->failure('item', 'Only current physical damage can be marked worsened.');
         }
@@ -244,9 +254,12 @@ class VehicleDamageService
         } catch (\InvalidArgumentException $exception) {
             return $this->failure('context', $exception->getMessage());
         }
-        $occurredAt = isset($data['occurred_at']) && trim((string) $data['occurred_at']) !== ''
-            ? $this->dateTime((string) $data['occurred_at'])
-            : date('Y-m-d H:i:s');
+        try {
+            $occurredAt = isset($data['occurred_at']) && trim((string) $data['occurred_at']) !== ''
+                ? $this->dateTime((string) $data['occurred_at']) : date('Y-m-d H:i:s');
+        } catch (\InvalidArgumentException $exception) {
+            return $this->failure('occurred_at', $exception->getMessage());
+        }
         $values = ['severity_code' => $severity, 'updated_by' => $actorUserId, 'updated_at' => date('Y-m-d H:i:s')];
 
         return $this->updateWithEvent($item, $values, 'worsened', $note, $actorUserId, $context, $occurredAt);
@@ -255,7 +268,7 @@ class VehicleDamageService
     /** @return array{success:bool,id?:int,errors:array<string,string>} */
     public function transitionStatus(int $companyId, int $vehicleId, int $itemId, string $status, string $note, int $actorUserId): array
     {
-        $item = $this->repo()->item($companyId, $vehicleId, $itemId);
+        $item = $this->repo()->canonicalItem($companyId, $vehicleId, $itemId);
         if ($item === null) {
             return $this->failure('item', 'Damage item not found in the active fleet company.');
         }
@@ -289,6 +302,7 @@ class VehicleDamageService
     private function enrich(int $companyId, array $items): array
     {
         foreach ($items as &$item) {
+            $item['panel_label'] = \Config\VehicleDamage::PANELS[$item['panel_code'] ?? ''] ?? null;
             $item['zone_label'] = self::ZONES[$item['zone_code']] ?? ucfirst(str_replace('_', ' ', (string) $item['zone_code']));
             $item['damage_type_label'] = self::DAMAGE_TYPES[$item['damage_type_code']] ?? ucfirst(str_replace('_', ' ', (string) $item['damage_type_code']));
             $item['severity_label'] = self::SEVERITIES[$item['severity_code']] ?? ucfirst((string) $item['severity_code']);
@@ -299,6 +313,54 @@ class VehicleDamageService
         unset($item);
 
         return $items;
+    }
+
+    /** An observation records history without changing physical severity or discovery. */
+    public function observe(int $companyId, int $vehicleId, int $itemId, string $note, int $actorUserId, array $context = []): array
+    {
+        $item = $this->repo()->canonicalItem($companyId, $vehicleId, $itemId);
+        if ($item === null || trim($note) === '' || mb_strlen($note) > 2000) {
+            return $this->failure('item', 'Choose an owned condition and supply an observation note.');
+        }
+        try {
+            $context = $this->resolveSourceContext($companyId, $vehicleId, $context);
+        } catch (\InvalidArgumentException $exception) {
+            return $this->failure('context', $exception->getMessage());
+        }
+
+        return $this->updateWithEvent($item, ['updated_by' => $actorUserId, 'updated_at' => date('Y-m-d H:i:s')], 'observed_existing', $note, $actorUserId, $context);
+    }
+
+    /** Evidence stays attached to its authorized original parent, including historical provenance. */
+    public function attachEvidence(int $companyId, int $vehicleId, int $itemId, array $data, int $actorUserId): array
+    {
+        $this->db->transBegin();
+        try {
+            if ($actorUserId < 1) {
+                throw new \InvalidArgumentException('An authenticated operator is required.');
+            }
+            $this->repo()->lockVehicle($companyId, $vehicleId);
+            $this->repo()->lockItem($companyId, $vehicleId, $itemId);
+            $before = $this->repo()->evidence($companyId, $itemId);
+            $this->addEvidence($companyId, $vehicleId, $itemId, $data, $actorUserId, date('Y-m-d H:i:s'));
+            $after = $this->repo()->evidence($companyId, $itemId);
+            if (count($after) !== count($before) + 1) {
+                throw new \InvalidArgumentException('Supply one evidence reference.');
+            }
+            $item = $this->repo()->item($companyId, $vehicleId, $itemId);
+            $this->repo()->insertEvent($this->eventValues($companyId, $itemId, 'evidence_attached', date('Y-m-d H:i:s'), $actorUserId, null, null, $item, $item, 'Evidence attached to original parent.'));
+            $this->audit('updated', $itemId, ['evidence' => $before], ['evidence' => $after], $actorUserId);
+            if (! $this->db->transStatus()) {
+                throw new \RuntimeException('Evidence transaction failed.');
+            }
+            $this->db->transCommit();
+
+            return ['success' => true, 'id' => $itemId, 'errors' => []];
+        } catch (Throwable $exception) {
+            $this->db->transRollback();
+
+            return $this->failure('evidence', $exception->getMessage());
+        }
     }
 
     /** @return array<string,string> */
@@ -394,6 +456,12 @@ class VehicleDamageService
         $new = array_merge($item, $values);
         $this->db->transBegin();
         try {
+            $this->repo()->lockVehicle((int) $item['company_id'], (int) $item['fleet_vehicle_id']);
+            $this->repo()->lockItem((int) $item['company_id'], (int) $item['fleet_vehicle_id'], (int) $item['id']);
+            $locked = $this->repo()->item((int) $item['company_id'], (int) $item['fleet_vehicle_id'], (int) $item['id']);
+            if ($locked !== $item || ! empty($locked['current_condition_item_id'])) {
+                throw new \RuntimeException('Condition changed concurrently. Reload before updating.');
+            }
             if (! $this->repo()->updateItem((int) $item['company_id'], (int) $item['fleet_vehicle_id'], (int) $item['id'], $values)) {
                 throw new \RuntimeException('Damage item changed before it could be updated.');
             }
@@ -409,7 +477,7 @@ class VehicleDamageService
                 $new,
                 $note,
             ));
-            $this->audit('updated', (int) $item['id'], $item, $new, $actorUserId);
+            $this->audit('updated', (int) $item['id'], $item, $new + ['reason' => $note], $actorUserId);
             if ($this->db->transStatus() === false) {
                 throw new \RuntimeException('Damage item update transaction failed.');
             }
@@ -450,6 +518,9 @@ class VehicleDamageService
         $fileId = $this->nullableId($data['file_id'] ?? null);
         $imageId = $this->nullableId($data['image_id'] ?? null);
         $external = trim((string) ($data['external_reference'] ?? ''));
+        if (mb_strlen($external) > 500) {
+            throw new \InvalidArgumentException('Evidence reference must be 500 characters or fewer.');
+        }
         $provided = ($fileId === null ? 0 : 1) + ($imageId === null ? 0 : 1) + ($external === '' ? 0 : 1);
         if ($provided === 0) {
             return;

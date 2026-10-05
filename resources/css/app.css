@@ -5423,7 +5423,8 @@ h3 {
 
 .damage-context strong,
 .damage-context span,
-.damage-evidence li {
+.damage-evidence li,
+.vehicle-damage-section a {
   overflow-wrap: anywhere;
 }
 
@@ -5473,6 +5474,46 @@ h3 {
 
 .damage-item-unsafe {
   border-color: var(--danger, #dc2626);
+}
+
+.damage-area {
+  display: block;
+  min-width: 0;
+  margin: 1rem 0;
+}
+
+.damage-incident-page :is(form, label, .mapping-card) {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.damage-incident-page form,
+.damage-incident-page label {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.damage-incident-page :is(input, select, textarea) {
+  width: 100%;
+}
+
+.damage-incident-page input[type="checkbox"] {
+  width: auto;
+  justify-self: start;
+}
+
+.damage-incident-page :is(p, a, dd, li, h1, h2, h3, label) {
+  overflow-wrap: anywhere;
+}
+
+.vehicle-damage-section fieldset,
+.vehicle-damage-section :is(input, select, textarea) {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.vehicle-damage-section fieldset > button {
+  margin-top: 0.75rem;
 }
 
 .damage-facts {

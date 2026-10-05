@@ -41,6 +41,8 @@ class VehicleDamageRepository
             ->where('vehicles.company_id', $companyId)
             ->where('trips.fleet_vehicle_id', $vehicleId)
             ->where('trips.id', $tripId)
+            ->where('trips.company_id', $companyId)
+            ->where('trips.deleted_at', null)
             ->where('vehicles.deleted_at', null)
             ->get()->getRowArray();
 
@@ -97,26 +99,32 @@ class VehicleDamageRepository
 
     public function fileBelongsToVehicle(int $companyId, int $vehicleId, int $fileId): bool
     {
-        return $this->db->table('vehicle_files links')
+        $metadata = $this->db->table('vehicle_files links')->select('evidence.*')
             ->join('fleet_vehicles vehicles', 'vehicles.id = links.fleet_vehicle_id')
             ->join('files evidence', 'evidence.id = links.file_id')
             ->where('vehicles.company_id', $companyId)
             ->where('vehicles.id', $vehicleId)
             ->where('links.file_id', $fileId)
             ->where('evidence.deleted_at', null)
-            ->countAllResults() > 0;
+            ->where('vehicles.deleted_at', null)
+            ->get()->getRowArray();
+
+        return $metadata !== null && $this->privateMetadata($metadata);
     }
 
     public function imageBelongsToVehicle(int $companyId, int $vehicleId, int $imageId): bool
     {
-        return $this->db->table('vehicle_images links')
+        $metadata = $this->db->table('vehicle_images links')->select('evidence.*')
             ->join('fleet_vehicles vehicles', 'vehicles.id = links.fleet_vehicle_id')
             ->join('images evidence', 'evidence.id = links.image_id')
             ->where('vehicles.company_id', $companyId)
             ->where('vehicles.id', $vehicleId)
             ->where('links.image_id', $imageId)
             ->where('evidence.deleted_at', null)
-            ->countAllResults() > 0;
+            ->where('vehicles.deleted_at', null)
+            ->get()->getRowArray();
+
+        return $metadata !== null && $this->privateMetadata($metadata);
     }
 
     /** @return list<array<string, mixed>> */
@@ -126,7 +134,12 @@ class VehicleDamageRepository
             return [];
         }
 
-        return $this->itemBuilder($companyId, $vehicleId)
+        $builder = $this->itemBuilder($companyId, $vehicleId);
+        if ($this->db->fieldExists('current_condition_item_id', 'vehicle_damage_items')) {
+            $builder->where('damage.current_condition_item_id', null);
+        }
+
+        return $builder
             ->whereIn('damage.status_code', ['open', 'accepted_unrepaired'])
             ->orderBy("damage.severity_code = 'unsafe'", 'DESC', false)
             ->orderBy('damage.discovered_at', 'ASC')
@@ -167,7 +180,8 @@ class VehicleDamageRepository
     {
         return $this->db->table('vehicle_damage_item_events events')
             ->select('events.*, trips.turo_reservation_id')
-            ->join('turo_trips_normalized trips', 'trips.id = events.source_turo_trip_normalized_id', 'left')
+            ->join('vehicle_damage_items parent', 'parent.id = events.vehicle_damage_item_id AND parent.company_id = events.company_id')
+            ->join('turo_trips_normalized trips', 'trips.id = events.source_turo_trip_normalized_id AND trips.company_id = parent.company_id AND trips.fleet_vehicle_id = parent.fleet_vehicle_id AND trips.deleted_at IS NULL', 'left')
             ->where('events.company_id', $companyId)
             ->where('events.vehicle_damage_item_id', $itemId)
             ->orderBy('events.occurred_at', 'ASC')
@@ -178,14 +192,22 @@ class VehicleDamageRepository
     /** @return list<array<string, mixed>> */
     public function evidence(int $companyId, int $itemId): array
     {
-        return $this->db->table('vehicle_damage_item_evidence evidence')
-            ->select('evidence.*, files.original_filename, files.path AS file_path, images.path AS image_path, images.alt_text')
+        $rows = $this->db->table('vehicle_damage_item_evidence evidence')
+            ->select('evidence.*, files.original_filename, files.path AS file_path, files.storage_disk AS file_storage_disk, images.path AS image_path, images.storage_disk AS image_storage_disk, images.alt_text')
             ->join('files', 'files.id = evidence.file_id', 'left')
             ->join('images', 'images.id = evidence.image_id', 'left')
+            ->join('vehicle_damage_items parent', 'parent.id = evidence.vehicle_damage_item_id AND parent.company_id = evidence.company_id')
+            ->select('parent.fleet_vehicle_id AS evidence_vehicle_id')
             ->where('evidence.company_id', $companyId)
             ->where('evidence.vehicle_damage_item_id', $itemId)
+            ->groupStart()->where('evidence.file_id', null)->orWhere('files.deleted_at', null)->groupEnd()
+            ->groupStart()->where('evidence.image_id', null)->orWhere('images.deleted_at', null)->groupEnd()
             ->orderBy('evidence.id', 'ASC')
             ->get()->getResultArray();
+
+        return array_values(array_filter($rows, fn (array $row): bool =>
+            ($row['file_id'] === null || $this->fileBelongsToVehicle($companyId, (int) $row['evidence_vehicle_id'], (int) $row['file_id']))
+            && ($row['image_id'] === null || $this->imageBelongsToVehicle($companyId, (int) $row['evidence_vehicle_id'], (int) $row['image_id']))));
     }
 
     /** @return list<array<string, mixed>> */
@@ -216,6 +238,57 @@ class VehicleDamageRepository
         return (int) $this->db->insertID();
     }
 
+    /** Resolve exactly one hop; malformed relationships fail closed. @return array<string,mixed>|null */
+    public function canonicalItem(int $companyId, int $vehicleId, int $itemId): ?array
+    {
+        $item = $this->item($companyId, $vehicleId, $itemId);
+        if ($item === null || ($item['current_condition_item_id'] ?? null) === null) {
+            return $item;
+        }
+        $target = $this->item($companyId, $vehicleId, (int) $item['current_condition_item_id']);
+        if ((int) $item['current_condition_item_id'] < 1 || $target === null || ($target['current_condition_item_id'] ?? null) !== null || (int) $target['id'] === $itemId) {
+            throw new \RuntimeException('Invalid canonical condition relationship.');
+        }
+
+        return $target;
+    }
+
+    /** Serialize all condition relationship writes for a vehicle, including incoming links. */
+    public function lockVehicle(int $companyId, int $vehicleId): void
+    {
+        $sql = $this->db->table('fleet_vehicles')->where('company_id', $companyId)->where('id', $vehicleId)->where('deleted_at', null)->getCompiledSelect();
+        $result = $this->db->query($sql . ($this->db->getPlatform() === 'SQLite3' ? '' : ' FOR UPDATE'));
+        if ($result === false) {
+            throw new \RuntimeException('Vehicle state is locked by another update. Reload and retry.');
+        }
+        $row = $result->getRowArray();
+        if ($row === null) {
+            throw new \InvalidArgumentException('Vehicle not found in the active fleet company.');
+        }
+    }
+
+    public function lockItem(int $companyId, int $vehicleId, int $itemId): void
+    {
+        $sql = $this->db->table('vehicle_damage_items')->where('company_id', $companyId)->where('fleet_vehicle_id', $vehicleId)->where('id', $itemId)->getCompiledSelect();
+        $result = $this->db->query($sql . ($this->db->getPlatform() === 'SQLite3' ? '' : ' FOR UPDATE'));
+        if ($result === false) {
+            throw new \RuntimeException('Condition state is locked by another update. Reload and retry.');
+        }
+        if ($result->getRowArray() === null) {
+            throw new \InvalidArgumentException('Condition not found for this vehicle and company.');
+        }
+    }
+
+    /** @return list<array<string,mixed>> */
+    public function relatedForVehicle(int $companyId, int $vehicleId): array
+    {
+        if (! $this->db->fieldExists('current_condition_item_id', 'vehicle_damage_items')) {
+            return [];
+        }
+
+        return $this->itemBuilder($companyId, $vehicleId)->where('damage.current_condition_item_id IS NOT NULL', null, false)->orderBy('damage.id')->get()->getResultArray();
+    }
+
     public function updateItem(int $companyId, int $vehicleId, int $itemId, array $values): bool
     {
         $this->db->table('vehicle_damage_items')
@@ -224,7 +297,7 @@ class VehicleDamageRepository
             ->where('id', $itemId)
             ->update($values);
 
-        return $this->db->affectedRows() === 1;
+        return $this->db->affectedRows() === 1 || $this->item($companyId, $vehicleId, $itemId) !== null;
     }
 
     public function insertEvent(array $values): int
@@ -247,11 +320,26 @@ class VehicleDamageRepository
             ->select('damage.*, trips.turo_reservation_id, claims.claim_number')
             ->select('claim_status.code AS claim_status_code, claim_status.name AS claim_status_name')
             ->select('exceptions.status AS recovery_exception_status, exceptions.note AS recovery_exception_note')
-            ->join('turo_trips_normalized trips', 'trips.id = damage.discovered_turo_trip_normalized_id AND trips.fleet_vehicle_id = damage.fleet_vehicle_id', 'left')
+            ->join('turo_trips_normalized trips', 'trips.id = damage.discovered_turo_trip_normalized_id AND trips.fleet_vehicle_id = damage.fleet_vehicle_id AND trips.company_id = damage.company_id AND trips.deleted_at IS NULL', 'left')
             ->join('damage_claims claims', 'claims.id = damage.damage_claim_id AND claims.fleet_vehicle_id = damage.fleet_vehicle_id', 'left')
             ->join('lookup_values claim_status', 'claim_status.id = claims.claim_status_lookup_value_id', 'left')
             ->join('vehicle_recovery_exceptions exceptions', 'exceptions.id = damage.vehicle_recovery_exception_id AND exceptions.company_id = damage.company_id', 'left')
             ->where('damage.company_id', $companyId)
             ->where('damage.fleet_vehicle_id', $vehicleId);
+    }
+
+    private function privateMetadata(array $metadata): bool
+    {
+        $path = str_replace('\\', '/', (string) ($metadata['path'] ?? ''));
+        if (($metadata['storage_disk'] ?? '') !== 'local' || $path === '' || str_starts_with($path, '/') || str_starts_with($path, 'public/') || preg_match('/[:\x00-\x1F\x7F]/', $path)) {
+            return false;
+        }
+        foreach (explode('/', $path) as $segment) {
+            if ($segment === '' || $segment === '.' || $segment === '..') {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

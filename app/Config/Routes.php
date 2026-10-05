@@ -52,6 +52,15 @@ $routes->group('', ['filter' => 'session'], static function (RouteCollection $ro
         $routes->post('(:num)/health/observations/(:num)/correct', 'VehicleHealth::correctObservation/$1/$2');
         $routes->post('(:num)/health/observations/(:num)/void', 'VehicleHealth::voidObservation/$1/$2');
         $routes->post('(:num)/damage', 'VehicleDamage::createForVehicle/$1');
+        $routes->get('(:num)/damage-incidents/new', 'VehicleDamageIncidents::new/$1');
+        $routes->post('(:num)/damage-incidents', 'VehicleDamageIncidents::create/$1');
+        $routes->get('(:num)/damage-incidents/(:num)', 'VehicleDamageIncidents::show/$1/$2');
+        $routes->post('(:num)/damage-incidents/(:num)/trip', 'VehicleDamageIncidents::attributeTrip/$1/$2');
+        $routes->post('(:num)/damage-incidents/(:num)/areas', 'VehicleDamageIncidents::attachArea/$1/$2');
+        $routes->get('(:num)/damage/(:num)', 'VehicleDamageIncidents::item/$1/$2');
+        $routes->get('(:num)/damage/(:num)/link-preview', 'VehicleDamageIncidents::linkPreview/$1/$2');
+        $routes->post('(:num)/damage/(:num)/link', 'VehicleDamageIncidents::linkHistorical/$1/$2');
+        $routes->post('(:num)/damage/(:num)/evidence', 'VehicleDamageIncidents::attachEvidence/$1/$2');
         $routes->post('(:num)/damage/(:num)/correct', 'VehicleDamage::correct/$1/$2');
         $routes->post('(:num)/damage/(:num)/severity', 'VehicleDamage::changeSeverity/$1/$2');
         $routes->post('(:num)/damage/(:num)/worsen', 'VehicleDamage::worsenForVehicle/$1/$2');

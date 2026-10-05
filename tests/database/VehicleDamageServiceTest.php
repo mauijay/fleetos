@@ -299,12 +299,12 @@ final class VehicleDamageServiceTest extends CIUnitTestCase
     {
         $this->connection->query('CREATE TABLE ' . $this->table('companies') . ' (id INTEGER PRIMARY KEY, name VARCHAR(80))');
         $this->connection->query('CREATE TABLE ' . $this->table('fleet_vehicles') . ' (id INTEGER PRIMARY KEY, company_id INTEGER, vehicle_status_id INTEGER, fleet_code VARCHAR(80), display_name VARCHAR(150), out_of_service_date DATE NULL, deleted_at DATETIME NULL)');
-        $this->connection->query('CREATE TABLE ' . $this->table('turo_trips_normalized') . ' (id INTEGER PRIMARY KEY, company_id INTEGER, fleet_vehicle_id INTEGER, turo_reservation_id VARCHAR(80), starts_at DATETIME, ends_at DATETIME)');
+        $this->connection->query('CREATE TABLE ' . $this->table('turo_trips_normalized') . ' (id INTEGER PRIMARY KEY, company_id INTEGER, fleet_vehicle_id INTEGER, turo_reservation_id VARCHAR(80), starts_at DATETIME, ends_at DATETIME, deleted_at DATETIME NULL)');
         $this->connection->query('CREATE TABLE ' . $this->table('trip_movement_events') . ' (id INTEGER PRIMARY KEY, company_id INTEGER, turo_trip_normalized_id INTEGER, fleet_vehicle_id INTEGER, event_code VARCHAR(40), occurred_at DATETIME, voided_at DATETIME NULL)');
         $this->connection->query('CREATE TABLE ' . $this->table('vehicle_recovery_exceptions') . ' (id INTEGER PRIMARY KEY, company_id INTEGER, turo_trip_normalized_id INTEGER, fleet_vehicle_id INTEGER, trip_movement_event_id INTEGER, exception_code VARCHAR(40), note TEXT NULL, status VARCHAR(20))');
         $this->connection->query('CREATE TABLE ' . $this->table('damage_claims') . ' (id INTEGER PRIMARY KEY, fleet_vehicle_id INTEGER, claim_status_lookup_value_id INTEGER NULL, claim_number VARCHAR(120) NULL, closed_on DATE NULL, deleted_at DATETIME NULL)');
-        $this->connection->query('CREATE TABLE ' . $this->table('images') . ' (id INTEGER PRIMARY KEY, path VARCHAR(255), alt_text VARCHAR(190) NULL, deleted_at DATETIME NULL)');
-        $this->connection->query('CREATE TABLE ' . $this->table('files') . ' (id INTEGER PRIMARY KEY, path VARCHAR(255), original_filename VARCHAR(190) NULL, deleted_at DATETIME NULL)');
+        $this->connection->query('CREATE TABLE ' . $this->table('images') . ' (id INTEGER PRIMARY KEY, path VARCHAR(255), storage_disk VARCHAR(80) DEFAULT "local", alt_text VARCHAR(190) NULL, deleted_at DATETIME NULL)');
+        $this->connection->query('CREATE TABLE ' . $this->table('files') . ' (id INTEGER PRIMARY KEY, path VARCHAR(255), storage_disk VARCHAR(80) DEFAULT "local", original_filename VARCHAR(190) NULL, deleted_at DATETIME NULL)');
         $this->connection->query('CREATE TABLE ' . $this->table('vehicle_images') . ' (id INTEGER PRIMARY KEY, fleet_vehicle_id INTEGER, image_id INTEGER)');
         $this->connection->query('CREATE TABLE ' . $this->table('vehicle_files') . ' (id INTEGER PRIMARY KEY, fleet_vehicle_id INTEGER, file_id INTEGER)');
         $this->connection->query('CREATE TABLE ' . $this->table('lookup_types') . ' (id INTEGER PRIMARY KEY, code VARCHAR(80))');
