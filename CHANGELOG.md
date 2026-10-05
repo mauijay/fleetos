@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.27.0 — Damage Incident Ledger
+
+Release date: 2026-10-04
+
+### Added
+
+- Add first-class vehicle damage incidents distinct from persistent physical conditions.
+- Add repeatable panel-level damage areas for multi-panel incidents.
+- Add explicit incident effects for new damage, worsened existing damage, and observation of existing damage.
+- Add precise panel classification while preserving legacy damage-zone compatibility.
+- Add audited trip/reservation attribution and post-create incident/context linking.
+- Add historical "link as worsened existing damage" reconciliation without deleting or recreating existing records.
+- Add canonical current-condition projection shared by vehicle detail and Movement Checklist.
+- Add incident detail/history views, relationship previews, and responsive multi-area entry.
+
+### Changed
+
+- Preserve linked historical damage records while preventing explicitly related duplicates from inflating current-condition counts.
+- Harden damage mutations with company/vehicle ownership checks, row locking, canonical-condition validation, and audit history.
+- Exclude soft-deleted trip/evidence metadata from new damage workflows.
+- Add minimum SQLite compatibility handling for fresh migration-chain verification without changing MariaDB production schema intent or replaying already-applied migrations.
+
+### Release Boundaries
+
+- Includes one new additive production migration for Damage Ledger B1.
+- Existing damage rows/events/evidence are preserved without inferred historical links.
+- Historical damage reconciliation remains an explicit operator action.
+- Repair jobs, mitigation, estimates, repair costs, claim workflow redesign, recovery economics, and financial integration are deferred to later phases.
+
 ## v0.26.0 — Extras Verification Freshness Gate
 
 Release date: 2026-10-04
