@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.26.0 — Extras Verification Freshness Gate
+
+Release date: 2026-10-04
+
+### Added
+
+- Add a shared Extras verification freshness policy for pickup preparation.
+- Distinguish never-verified, current, stale, empty, and nonempty Extras evidence.
+- Add a `Refresh Turo Extras` action for company-owned reservations requiring verification.
+- Surface freshness and refresh requirements consistently across the Extras workspace, Movement Checklist, Command Center, Movement Board, Operations Queue, and readiness fallback paths.
+- Add advisory and blocking behavior based on pickup proximity and verification age.
+
+### Changed
+
+- Keep overdue pickups unresolved when no authoritative same-trip handoff exists, even after scheduled pickup/end times pass.
+- Retire pickup verification requirements only on same-trip lifecycle closure or legitimate inactive/terminal states.
+- Preserve failed/partial observation overlays without advancing the last verified timestamp.
+- Keep purchased-Extra fulfillment independent from source-verification freshness.
+- Preserve next-trip ownership so future verification work does not block current return readiness.
+- Prioritize urgent near-pickup verification work ahead of less urgent refresh candidates.
+
+### Release Boundaries
+
+- No migration or schema change.
+- No unattended Turo access is introduced.
+- Deployment does not capture or import any live Extras.
+- Existing source snapshots remain the authority for verification state.
+
 ## v0.25.2 — Cross-Trip Vehicle Position Projection Fix
 
 Release date: 2026-10-02
