@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.27.2 — Historical Damage Attribution
+
+Release date: 2026-10-05
+
+### Added
+
+- Add a dedicated historical-original incident backfill flow that reuses an existing physical damage condition instead of creating a duplicate condition.
+- Add audited post-create trip/reservation attribution for historical damage incidents.
+- Allow explicit operator-attributed causation for mixed incident memberships while preserving each membership's effect.
+- Allow historical incident memberships to preserve an unknown panel without inferring physical location from legacy text.
+- Add stale-preview, duplicate-submission, and concurrency protections for historical attribution workflows.
+
+### Changed
+
+- Keep normal current incident creation strict: new damage still requires a panel and creates a new physical condition.
+- Keep incident-level causation separate from condition-level membership effects.
+- Preserve canonical current-condition counts, severity, status, evidence, and historical events when adding provenance.
+- Avoid duplicate audit entries when attribution is unchanged.
+
+### Release Boundaries
+
+- No migration or schema change.
+- Existing Damage Ledger B1 data and canonical relationships remain unchanged by deployment.
+- No repair, claim, recovery, or financial-economics functionality is introduced.
+- Historical attribution remains an explicit operator action.
+- Deployment must not run `php spark migrate`; the migration ledger must remain unchanged.
+
 ## v0.27.1 — Damage Presentation Hotfix
 
 Release date: 2026-10-05
