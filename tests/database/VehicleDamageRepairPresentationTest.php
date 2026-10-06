@@ -93,7 +93,7 @@ final class VehicleDamageRepairPresentationTest extends CIUnitTestCase
                 $seen++;
             }
         }
-        $this->assertSame(20, $seen);
+        $this->assertSame(31, $seen);
         ShieldServices::auth()->logout();
         $this->get('/fleet/vehicles/10/damage-repairs')->assertRedirectTo('login');
     }
@@ -144,6 +144,74 @@ final class VehicleDamageRepairPresentationTest extends CIUnitTestCase
         CoreServices::routes()->resetRoutes();
         CoreServices::routes()->loadRoutes();
         $this->withRoutes();
+    }
+
+    public function testB22EmptyHistoricalCurrentAndPrivateDownloadPresentation(): void
+    {
+        $work = new VehicleDamageRepairService($this->connection);
+        $created = $work->createJob(1, 10, Fixture::creation($this->connection, [Fixture::condition($this->connection), Fixture::condition($this->connection)]), 7);
+        $this->assertTrue($created['success']);
+        $job = (int) $created['id'];
+        $this->authenticate();
+        $base = '/fleet/vehicles/10/damage-repairs/' . $job;
+        $this->assertStringContainsString('No repair estimate recorded.', $this->get($base)->getBody());
+        $repository = new VehicleDamageRepairRepository($this->connection);
+        $common = ['command_key' => VehicleDamageRepairService::commandKey(), 'expected_version' => 1, 'quote_series_key' => VehicleDamageRepairService::commandKey(), 'amount' => '0', 'currency' => 'USD', 'amount_confirmed' => '1', 'currency_confirmed' => '1', 'scope_membership_ids' => array_column($repository->members(1, 10, $job), 'id')];
+        $historical = $work->createEstimate(1, 10, $job, $common + ['recording_mode' => 'historical_incomplete', 'historical_recording_reason' => 'Synthetic source details incomplete'], 7);
+        $this->assertTrue($historical['success'], json_encode($historical));
+        $body = $this->get($base)->getBody();
+        $this->assertStringContainsString('Historical estimate — source details incomplete', html_entity_decode($body, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+        $this->assertStringNotContainsString('/estimates/' . $historical['estimate_id'] . '/accept', $body);
+        $temp = tempnam(sys_get_temp_dir(), 'b22_web_');
+        file_put_contents($temp, "%PDF-1.4\n% Synthetic authorized source " . bin2hex(random_bytes(16)) . "\n%%EOF\n");
+        $upload = new \CodeIgniter\HTTP\Files\UploadedFile($temp, 'synthetic-source.pdf', 'application/pdf', filesize($temp), UPLOAD_ERR_OK);
+        $current = $work->createEstimate(1, 10, $job, array_replace($common, ['command_key' => VehicleDamageRepairService::commandKey(), 'expected_version' => 2, 'quote_series_key' => VehicleDamageRepairService::commandKey(), 'recording_mode' => 'current_quote', 'vendor_snapshot' => 'Synthetic web vendor', 'quote_date' => '2026-10-06', 'vendor_confirmed' => '1', 'date_confirmed' => '1', 'scope_confirmed' => '1', 'document' => ['kind_code' => 'estimate', 'upload' => $upload]]), 7);
+        $this->assertTrue($current['success'], json_encode($current));
+        $documents = new \App\Repositories\VehicleDamageRepairDocumentRepository($this->connection);
+        $doc = $documents->document(1, 10, $job, $current['document_id']);
+        $binary = (new \App\Services\Files\RepairDocumentStorageService($this->connection))->resolve(1, $doc, $documents->metadata($doc));
+        try {
+            $before = $this->rows();
+            foreach ([$base, $base . '/estimates/new', $base . '/estimates/' . $current['estimate_id'] . '/revision', $base . '/documents/new'] as $url) {
+                $this->get($url)->assertOK();
+            }
+            $body = $this->get($base)->getBody();
+            foreach (['USD 0.00', 'Synthetic web vendor', 'Frozen scope', 'Download private document'] as $label) {
+                $this->assertStringContainsString($label, $body);
+            }
+            foreach (['Actual cost', 'Host loss', 'Paid'] as $label) {
+                $this->assertStringNotContainsString($label, $body);
+            }
+            $controller = new \App\Controllers\VehicleDamageRepairs();
+            $controller->initController(CoreServices::request(), CoreServices::response(), CoreServices::logger());
+            $response = $controller->downloadDocument(10, $job, $current['document_id']);
+            $this->assertSame('application/pdf', $response->getHeaderLine('Content-Type'));
+            $this->assertSame('nosniff', $response->getHeaderLine('X-Content-Type-Options'));
+            $this->assertStringContainsString('private', $response->getHeaderLine('Cache-Control'));
+            $this->assertStringContainsString('no-store', $response->getHeaderLine('Cache-Control'));
+            $this->assertStringStartsWith('attachment; filename="synthetic-source.pdf"', $response->getHeaderLine('Content-Disposition'));
+            foreach ([[11, $job, $current['document_id']], [10, 999, $current['document_id']], [10, $job, 999]] as [$v, $j, $d]) {
+                try {
+                    $controller->downloadDocument($v, $j, $d);
+                    $this->fail('Foreign context must be not found.');
+                } catch (\CodeIgniter\Exceptions\PageNotFoundException) {
+                    $this->addToAssertionCount(1);
+                }
+            }
+            $this->assertSame($before, $this->rows());
+            $request = $this->getMockBuilder(\CodeIgniter\HTTP\IncomingRequest::class)->disableOriginalConstructor()->onlyMethods(['getPost', 'getFile'])->getMock();
+            $request->expects($this->atLeastOnce())->method('getPost')->willReturn(array_replace($common, ['command_key' => VehicleDamageRepairService::commandKey(), 'expected_version' => 3, 'recording_mode' => 'historical_incomplete', 'historical_recording_reason' => 'Synthetic malformed multipart input', 'document' => 'malformed']));
+            $request->expects($this->once())->method('getFile')->with('repair_document')->willReturn($upload);
+            $controller->initController($request, CoreServices::response(), CoreServices::logger());
+            $rejected = $controller->createEstimate(10, $job);
+            $this->assertStringEndsWith($base, $rejected->getHeaderLine('Location'));
+            $this->assertSame(['work' => 'Choose a valid document source.'], CoreServices::session()->getFlashdata('damage_work_errors'));
+            $this->assertSame($before, $this->rows());
+        } finally {
+            if ($binary !== null && is_file($binary['path'])) {
+                unlink($binary['path']);
+            }
+        }
     }
 
     private function rows(): array

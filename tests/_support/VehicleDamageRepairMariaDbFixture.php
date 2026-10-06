@@ -18,7 +18,7 @@ final class VehicleDamageRepairMariaDbFixture
     private BaseConnection $admin;
     private array $configuration;
 
-    public function __construct(bool $upgrade = false, string $prefix = '')
+    public function __construct(bool $upgrade = false, string $prefix = '', int $through = 31)
     {
         $this->configuration = json_decode((string) getenv('B21_MARIADB_CONFIG'), true, 512, JSON_THROW_ON_ERROR);
         // Build the accepted baseline through its real migrations. Its generated
@@ -41,7 +41,11 @@ final class VehicleDamageRepairMariaDbFixture
                     }
                 }
             } else {
-                $runner->latest();
+                foreach (glob(__DIR__ . '/../../app/Database/Migrations/*.php') as $path) {
+                    if (strcmp(basename($path), $through === 30 ? '2026-10-06-000031' : '9999') < 0) {
+                        $runner->force($path, 'App');
+                    }
+                }
             }
             if ($prefix !== '') {
                 $renames = [];
@@ -81,7 +85,7 @@ final class VehicleDamageRepairMariaDbFixture
     }
 
     /** Start a separate PHP process/connection while the parent owns an uncommitted vehicle lock. */
-    public function contend(string $operation, array $arguments): array
+    public function contend(string $operation, array $arguments, ?\Closure $beforeRelease = null): array
     {
         $parentTransaction = $this->db->query('SELECT @@in_transaction AS active')->getRowArray();
         if ((int) $parentTransaction['active'] !== 1) {
@@ -98,6 +102,9 @@ final class VehicleDamageRepairMariaDbFixture
             $contention = json_decode((string) fgets($pipes[1]), true, 512, JSON_THROW_ON_ERROR);
             // The real service call must hit MariaDB's lock timeout while the winner holds its lock.
             // Release it, then retry the same preview; B2 also exercises connection reuse.
+            if ($beforeRelease !== null) {
+                $beforeRelease();
+            }
             $this->db->transCommit();
             fwrite($pipes[0], "retry\n");
             fclose($pipes[0]);
@@ -116,7 +123,7 @@ final class VehicleDamageRepairMariaDbFixture
                 throw new RuntimeException('MariaDB contender failed: ' . $errors);
             }
 
-            return ['blocked' => $contention['lock_timeout'] && ! $contention['attempt']['success'], 'result' => $result];
+            return ['blocked' => $contention['lock_timeout'] && ! $contention['attempt']['success'], 'result' => $result['receipt'], 'locks' => $result['locks']];
         } finally {
             if (is_resource($process)) {
                 proc_terminate($process);
@@ -130,8 +137,12 @@ final class VehicleDamageRepairMariaDbFixture
         $request = json_decode((string) fgets(STDIN), true, 512, JSON_THROW_ON_ERROR);
         $db = self::connect($request['configuration']);
         $lockTimeout = false;
-        Events::on('DBQuery', static function (Query $query) use (&$lockTimeout): void {
+        $lockTrace = [];
+        Events::on('DBQuery', static function (Query $query) use (&$lockTimeout, &$lockTrace): void {
             $lockTimeout = $lockTimeout || $query->db->error()['code'] === 1205;
+            if (str_contains(strtoupper($query->getQuery()), 'FOR UPDATE')) {
+                $lockTrace[] = $query->getQuery();
+            }
         });
         $operation = static function (BaseConnection $connection) use ($request): array {
             if ($request['operation'] === 'link') {
@@ -140,7 +151,7 @@ final class VehicleDamageRepairMariaDbFixture
             if ($request['operation'] === 'reopenCondition') {
                 return (new \App\Services\Fleet\VehicleDamageService($connection))->reopenRepairedCondition(...$request['arguments']);
             }
-            $methods = ['createJob', 'complete', 'recordMembershipResult', 'confirmConditionRepaired', 'addCondition'];
+            $methods = ['createJob', 'complete', 'recordMembershipResult', 'confirmConditionRepaired', 'addCondition', 'withdrawCondition', 'createEstimate', 'createRevision', 'acceptEstimate', 'rejectEstimate', 'withdrawEstimate', 'attachDocument', 'archiveDocument'];
             if (! in_array($request['operation'], $methods, true)) {
                 throw new RuntimeException('Unknown contention operation.');
             }
@@ -156,8 +167,9 @@ final class VehicleDamageRepairMariaDbFixture
             $db->close();
             $db = self::connect($request['configuration']);
         }
+        $lockTrace = [];
         $result = $operation($db);
-        echo json_encode($result, JSON_THROW_ON_ERROR) . PHP_EOL;
+        echo json_encode(['receipt' => $result, 'locks' => $lockTrace], JSON_THROW_ON_ERROR) . PHP_EOL;
         $db->close();
     }
 

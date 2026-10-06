@@ -1,0 +1,11 @@
+<?php $base = '/fleet/vehicles/' . (int) $vehicle['id'] . '/damage-repairs/' . (int) $job['id']; ?>
+<section class="section"><h1>Add repair document</h1><p>Choose one upload, owned source document, or external reference. Corrections archive the old document and create a new one.</p>
+<form action="<?= $base ?>/documents" method="post" enctype="multipart/form-data"><?= csrf_field() ?><?= view('vehicle_damage_repairs/_command', ['workAction' => 'document_attach']) ?>
+<div class="damage-form-grid issue-filters"><label>Document kind<select name="document[kind_code]"><?php foreach (\Config\VehicleDamageRepairDocuments::KINDS as $code => $label): ?><option value="<?= esc($code, 'attr') ?>"><?= esc($label) ?></option><?php endforeach; ?></select></label>
+<label>Estimate (optional)<select name="document[estimate_id]"><option value="">Job only</option><?php foreach ($estimates as $estimate): ?><option value="<?= (int) $estimate['id'] ?>"><?= esc($estimate['vendor_snapshot'] ?? 'Unknown vendor') ?> · revision <?= (int) $estimate['revision_number'] ?></option><?php endforeach; ?></select></label>
+<label>Membership (optional)<select name="document[membership_id]"><option value="">Job / estimate scope</option><?php foreach ($members as $m): ?><option value="<?= (int) $m['id'] ?>"><?= esc($conditionsById[$m['vehicle_damage_item_id']]['description']) ?></option><?php endforeach; ?></select></label>
+<label>Upload (maximum 10 MiB)<input type="file" name="repair_document" accept="application/pdf,image/jpeg,image/png,image/webp"></label>
+<label>External reference (text or HTTPS)<input name="document[external_reference]" maxlength="500"></label>
+<label>Reuse source document ID (optional)<input name="document[source_document_id]" inputmode="numeric"></label><label>Source job ID (required for reuse)<input name="document[source_job_id]" inputmode="numeric"></label><label>Source vehicle ID (if different)<input name="document[source_vehicle_id]" inputmode="numeric"></label>
+<label>Label<input name="document[label]" maxlength="190"></label><label>Note<textarea name="document[note]" maxlength="2000"></textarea></label></div>
+<button type="submit">Attach document</button> <a href="<?= $base ?>">Cancel</a></form></section>

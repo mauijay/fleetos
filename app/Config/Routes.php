@@ -66,6 +66,17 @@ $routes->group('', ['filter' => 'session'], static function (RouteCollection $ro
         $routes->get('(:num)/damage-repairs/(:num)/conditions/(:num)/confirm-repair', 'VehicleDamageRepairs::repairPreview/$1/$2/$3', ['as' => 'damage-repairs.conditions.repair-preview']);
         $routes->get('(:num)/damage/(:num)/reopen', 'VehicleDamageRepairs::reopenConditionPreview/$1/$2', ['as' => 'damage-repairs.condition-reopen-preview']);
         $routes->post('(:num)/damage/(:num)/reopen', 'VehicleDamageRepairs::reopenCondition/$1/$2', ['as' => 'damage-repairs.condition-reopen']);
+        $routes->get('(:num)/damage-repairs/(:num)/estimates/new', 'VehicleDamageRepairs::estimateForm/$1/$2');
+        $routes->post('(:num)/damage-repairs/(:num)/estimates', 'VehicleDamageRepairs::createEstimate/$1/$2');
+        $routes->get('(:num)/damage-repairs/(:num)/estimates/(:num)/revision', 'VehicleDamageRepairs::estimateForm/$1/$2/$3');
+        $routes->post('(:num)/damage-repairs/(:num)/estimates/(:num)/revision', 'VehicleDamageRepairs::createRevision/$1/$2/$3');
+        foreach (['accept' => 'acceptEstimate', 'reject' => 'rejectEstimate', 'withdraw' => 'withdrawEstimate'] as $path => $action) {
+            $routes->post('(:num)/damage-repairs/(:num)/estimates/(:num)/' . $path, 'VehicleDamageRepairs::' . $action . '/$1/$2/$3');
+        }
+        $routes->get('(:num)/damage-repairs/(:num)/documents/new', 'VehicleDamageRepairs::documentForm/$1/$2');
+        $routes->post('(:num)/damage-repairs/(:num)/documents', 'VehicleDamageRepairs::attachDocument/$1/$2');
+        $routes->post('(:num)/damage-repairs/(:num)/documents/(:num)/archive', 'VehicleDamageRepairs::archiveDocument/$1/$2/$3');
+        $routes->get('(:num)/damage-repairs/(:num)/documents/(:num)/download', 'VehicleDamageRepairs::downloadDocument/$1/$2/$3');
         $routes->get('(:num)/damage-incidents/new', 'VehicleDamageIncidents::new/$1');
         $routes->post('(:num)/damage-incidents', 'VehicleDamageIncidents::create/$1');
         $routes->get('(:num)/damage-incidents/(:num)', 'VehicleDamageIncidents::show/$1/$2');

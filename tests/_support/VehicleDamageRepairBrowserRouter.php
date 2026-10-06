@@ -5,6 +5,13 @@ if (PHP_SAPI !== 'cli-server' || ! in_array($_SERVER['REMOTE_ADDR'] ?? '', ['127
     http_response_code(403);
     exit;
 }
+// MigrationRunner's test-environment history formatter initializes CLI streams.
+// cli-server does not define these CLI constants; keep fixture output off the HTTP body.
+foreach (['STDIN', 'STDOUT', 'STDERR'] as $stream) {
+    if (! defined($stream)) {
+        define($stream, fopen('php://temp', 'w+'));
+    }
+}
 $root = dirname(__DIR__, 2);
 $directory = realpath((string) getenv('B21_BROWSER_DIR'));
 if ($directory === false || ! str_starts_with(strtolower($directory), strtolower(realpath($root . '/build') . DIRECTORY_SEPARATOR))) {
@@ -28,7 +35,8 @@ $configuration['database'] = $directory . '/synthetic.sqlite';
 $configuration['DBPrefix'] = '';
 $db = \Config\Database::connect($configuration, false);
 if (! $db->tableExists('vehicle_damage_repair_jobs')) {
-    (new \CodeIgniter\Database\MigrationRunner(new \Config\Migrations(), $db))->setNamespace('App')->latest();
+    $runner = (new \CodeIgniter\Database\MigrationRunner(new \Config\Migrations(), $db))->setNamespace('App');
+    $runner->latest();
 }
 if ($db->table('companies')->countAllResults() === 0) {
     \Tests\Support\VehicleDamageDatabaseFixture::seed($db);
@@ -46,7 +54,7 @@ $items = new \App\Repositories\VehicleDamageRepository($db);
 $conditions = new \App\Services\Fleet\VehicleDamageService($db);
 $repairs = new \App\Repositories\VehicleDamageRepairRepository($db);
 $read = new \App\Services\Fleet\VehicleDamageReadService($conditions, $items, $repairs);
-foreach (['vehicleDamageRepository' => $items, 'vehicleDamageService' => $conditions, 'vehicleDamageRepairRepository' => $repairs, 'vehicleDamageRepairService' => new \App\Services\Fleet\VehicleDamageRepairService($db), 'vehicleDamageReadService' => $read] as $name => $instance) {
+foreach (['vehicleDamageRepository' => $items, 'vehicleDamageService' => $conditions, 'vehicleDamageRepairRepository' => $repairs, 'vehicleDamageRepairService' => new \App\Services\Fleet\VehicleDamageRepairService($db), 'vehicleDamageRepairEstimateRepository' => new \App\Repositories\VehicleDamageRepairEstimateRepository($db), 'vehicleDamageRepairDocumentRepository' => new \App\Repositories\VehicleDamageRepairDocumentRepository($db), 'repairDocumentStorageService' => new \App\Services\Files\RepairDocumentStorageService($db), 'vehicleDamageReadService' => $read] as $name => $instance) {
     \Config\Services::injectMock($name, $instance);
 }
 \Config\Services::injectMock('operationalFactsRepository', new class ($db) extends \App\Repositories\OperationalFactsRepository {
@@ -104,6 +112,23 @@ try {
         $result = $request->is('post') ? $controller->create(10) : $controller->index(10);
     } elseif ($path === '/fleet/vehicles/10/damage-repairs/new') {
         $result = $controller->new(10);
+    } elseif (preg_match('~^/fleet/vehicles/10/damage-repairs/(\d+)/estimates(?:/(new)|/(\d+)/(revision|accept|reject|withdraw))?$~', $path, $match)) {
+        if (($match[2] ?? '') === 'new') {
+            $result = $controller->estimateForm(10, (int) $match[1]);
+        } elseif (! empty($match[3])) {
+            $method = ($match[4] === 'revision') ? ($request->is('post') ? 'createRevision' : 'estimateForm') : ['accept' => 'acceptEstimate', 'reject' => 'rejectEstimate', 'withdraw' => 'withdrawEstimate'][$match[4]];
+            $result = $controller->{$method}(10, (int) $match[1], (int) $match[3]);
+        } else {
+            $result = $controller->createEstimate(10, (int) $match[1]);
+        }
+    } elseif (preg_match('~^/fleet/vehicles/10/damage-repairs/(\d+)/documents(?:/(new)|/(\d+)/(archive|download))?$~', $path, $match)) {
+        if (($match[2] ?? '') === 'new') {
+            $result = $controller->documentForm(10, (int) $match[1]);
+        } elseif (! empty($match[3])) {
+            $result = $controller->{$match[4] === 'archive' ? 'archiveDocument' : 'downloadDocument'}(10, (int) $match[1], (int) $match[3]);
+        } else {
+            $result = $controller->attachDocument(10, (int) $match[1]);
+        }
     } elseif (preg_match('~^/fleet/vehicles/10/damage-repairs/(\d+)(?:/(details|conditions|schedule|start|defer|resume|cancel|complete|reopen))?$~', $path, $match)) {
         $method = ['' => 'show', 'details' => 'correctDetails', 'conditions' => 'addCondition', 'reopen' => 'reopenJob', 'schedule' => 'schedule', 'start' => 'start', 'defer' => 'defer', 'resume' => 'resume', 'cancel' => 'cancel', 'complete' => 'complete'][$match[2] ?? ''];
         $result = $controller->{$method}(10, (int) $match[1]);
@@ -127,6 +152,9 @@ try {
         header('Connection: close');
         echo $result;
     }
+} catch (\CodeIgniter\Exceptions\PageNotFoundException) {
+    http_response_code(404);
+    echo 'Not found.';
 } catch (Throwable $exception) {
     http_response_code(500);
     echo htmlspecialchars($exception::class . ': ' . $exception->getMessage());

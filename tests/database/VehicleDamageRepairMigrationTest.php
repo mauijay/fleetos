@@ -16,6 +16,18 @@ use Tests\Support\VehicleDamageRepairMariaDbFixture;
 #[RunTestsInSeparateProcesses]
 final class VehicleDamageRepairMigrationTest extends CIUnitTestCase
 {
+    /** Keep the accepted B2.1 migration inventory scoped to its own migration. */
+    private function throughB21(MigrationRunner $runner): bool
+    {
+        $applied = array_column($runner->getHistory(''), 'version');
+        foreach (glob(__DIR__ . '/../../app/Database/Migrations/*.php') as $path) {
+            if (strcmp(basename($path), '2026-10-06-000031') < 0 && ! in_array(explode('_', basename($path))[0], $applied, true)) {
+                $runner->force($path, 'App');
+            }
+        }
+        return true;
+    }
+
     public static function engines(): array
     {
         return [['sqlite', false, ''], ['sqlite', true, ''], ['mariadb', false, ''], ['mariadb', true, ''], ['sqlite', true, 'x_'], ['mariadb', true, 'x_']];
@@ -29,7 +41,7 @@ final class VehicleDamageRepairMigrationTest extends CIUnitTestCase
             if (! getenv('B21_MARIADB_CONFIG')) {
                 $this->markTestSkipped('Requires disposable B21 MariaDB release gate.');
             }
-            $fixture = new VehicleDamageRepairMariaDbFixture($upgrade, $prefix);
+            $fixture = new VehicleDamageRepairMariaDbFixture($upgrade, $prefix, 30);
             $db = $fixture->db;
         } else {
             $db = Database::connect('tests', false);
@@ -46,7 +58,7 @@ final class VehicleDamageRepairMigrationTest extends CIUnitTestCase
                     }
                 }
             } else {
-                $runner->latest();
+                $this->throughB21($runner);
             }
             VehicleDamageDatabaseFixture::seed($db);
         }
@@ -67,7 +79,7 @@ final class VehicleDamageRepairMigrationTest extends CIUnitTestCase
                     $beforeFields[$table] = $db->getFieldNames($table);
                 }
             }
-            $this->assertTrue($runner->latest());
+            $this->assertTrue($this->throughB21($runner));
             $db->resetDataCache();
             $preservation = [];
             foreach ($before as $table => $rows) {
@@ -95,9 +107,9 @@ final class VehicleDamageRepairMigrationTest extends CIUnitTestCase
             $this->assertArrayHasKey('damage_event_repair_job_event_idx', $db->getIndexData('vehicle_damage_item_events'));
             $reference = array_filter($db->getForeignKeyData('vehicle_damage_item_events'), static fn ($fk): bool => str_ends_with($fk->foreign_table_name, 'vehicle_damage_repair_job_events'));
             $this->assertCount(1, $reference);
-            $history = $runner->getHistory();
-            $this->assertTrue($runner->latest());
-            $this->assertEquals($history, $runner->getHistory());
+            $history = $runner->getHistory('');
+            $this->assertTrue($this->throughB21($runner));
+            $this->assertEquals($history, $runner->getHistory(''));
             $inventory = [];
             foreach (['vehicle_damage_repair_jobs', 'vehicle_damage_repair_job_items', 'vehicle_damage_repair_job_events', 'vehicle_damage_item_events'] as $table) {
                 $inventory[$table] = ['fields' => $db->getFieldData($table), 'indexes' => $db->getIndexData($table), 'foreign_keys' => $db->getForeignKeyData($table)];

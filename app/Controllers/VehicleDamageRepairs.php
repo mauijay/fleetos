@@ -134,6 +134,89 @@ class VehicleDamageRepairs extends BaseController
         return $this->result($vehicle, $result, '/fleet/vehicles/' . $vehicle . '/damage/' . $item . '/reopen', isset($this->request->getPost()['job_id']));
     }
 
+    public function estimateForm(int $v, int $j, ?int $previous = null): string
+    {
+        $context = $this->jobContext($v, $j);
+        Services::vehicleDamageRepairEstimateRepository()->requireReady();
+        $estimate = $previous === null ? null : Services::vehicleDamageRepairEstimateRepository()->estimate($context['companyId'], $v, $j, $previous);
+        if ($previous !== null && $estimate === null) {
+            throw PageNotFoundException::forPageNotFound();
+        }
+        return $this->render('estimate_form', $context + ['previousEstimate' => $estimate]);
+    }
+    public function documentForm(int $v, int $j): string
+    {
+        $context = $this->jobContext($v, $j);
+        Services::vehicleDamageRepairEstimateRepository()->requireReady();
+        return $this->render('document_form', $context);
+    }
+    public function createEstimate(int $v, int $j): RedirectResponse
+    {
+        return $this->quoteCommand('createEstimate', $v, $j);
+    }
+    public function createRevision(int $v, int $j, int $id): RedirectResponse
+    {
+        return $this->quoteCommand('createRevision', $v, $j, $id);
+    }
+    public function acceptEstimate(int $v, int $j, int $id): RedirectResponse
+    {
+        return $this->quoteCommand('acceptEstimate', $v, $j, $id);
+    }
+    public function rejectEstimate(int $v, int $j, int $id): RedirectResponse
+    {
+        return $this->quoteCommand('rejectEstimate', $v, $j, $id);
+    }
+    public function withdrawEstimate(int $v, int $j, int $id): RedirectResponse
+    {
+        return $this->quoteCommand('withdrawEstimate', $v, $j, $id);
+    }
+    public function attachDocument(int $v, int $j): RedirectResponse
+    {
+        return $this->quoteCommand('attachDocument', $v, $j);
+    }
+    public function archiveDocument(int $v, int $j, int $id): RedirectResponse
+    {
+        return $this->quoteCommand('archiveDocument', $v, $j, $id);
+    }
+
+    public function downloadDocument(int $v, int $j, int $id): \CodeIgniter\HTTP\DownloadResponse
+    {
+        try {
+            $company = $this->company();
+            $this->actor();
+        } catch (RuntimeException) {
+            throw PageNotFoundException::forPageNotFound();
+        }
+        $repository = Services::vehicleDamageRepairDocumentRepository();
+        $document = $repository->document($company, $v, $j, $id);
+        $resolved = $document === null ? null : Services::repairDocumentStorageService()->resolve($company, $document, $repository->metadata($document));
+        if ($resolved === null) {
+            throw PageNotFoundException::forPageNotFound();
+        }
+        $response = $this->response->download($resolved['path'], null)->setFileName(Services::repairDocumentStorageService()->filename($document))
+            ->setContentType($resolved['metadata']['mime_type'], '')->setHeader('X-Content-Type-Options', 'nosniff')->setHeader('Cache-Control', 'private, no-store');
+        $response->buildHeaders();
+        return $response;
+    }
+
+    private function quoteCommand(string $method, int $v, int $j, ?int $id = null): RedirectResponse
+    {
+        $this->jobContext($v, $j);
+        $data = $this->request->getPost();
+        if ($id !== null) {
+            $data[$method === 'createRevision' ? 'previous_estimate_id' : ($method === 'archiveDocument' ? 'document_id' : 'estimate_id')] = $id;
+        }
+        $upload = $this->request->getFile('repair_document');
+        if ($upload !== null && $upload->getError() !== UPLOAD_ERR_NO_FILE && (! isset($data['document']) || is_array($data['document']))) {
+            $data['document']['upload'] = $upload;
+        }
+        if (isset($data['document']) && is_array($data['document']) && empty($data['document']['upload']) && empty($data['document']['source_document_id']) && empty($data['document']['external_reference'])) {
+            unset($data['document']);
+        }
+        $result = Services::vehicleDamageRepairService()->{$method}($this->company(), $v, $j, $data, $this->actor());
+        return $this->result($v, $result, '/fleet/vehicles/' . $v . '/damage-repairs/' . $j);
+    }
+
     private function command(string $method, int $vehicle, int $job, ?int $member = null, ?string $failure = null): RedirectResponse
     {
         $data = $this->request->getPost();
@@ -174,7 +257,19 @@ class VehicleDamageRepairs extends BaseController
         if ($record === null) {
             throw PageNotFoundException::forPageNotFound();
         }
-        return $context + ['job' => $record, 'members' => Services::vehicleDamageRepairRepository()->members($context['companyId'], $vehicle, $job), 'events' => Services::vehicleDamageRepairRepository()->events($context['companyId'], $vehicle, $job)];
+        $estimateRepository = Services::vehicleDamageRepairEstimateRepository();
+        $b22Ready = $estimateRepository->ready();
+        $estimates = $b22Ready ? $estimateRepository->estimates($context['companyId'], $vehicle, $job) : [];
+        $documents = $b22Ready ? Services::vehicleDamageRepairDocumentRepository()->documents($context['companyId'], $vehicle, $job) : [];
+        $estimateStates = [];
+        $documentStates = [];
+        foreach ($estimates as $estimate) {
+            $estimateStates[$estimate['id']] = $estimateRepository->fingerprint($context['companyId'], $vehicle, $job, (int) $estimate['id']);
+        }
+        foreach ($documents as $document) {
+            $documentStates[$document['id']] = Services::vehicleDamageRepairDocumentRepository()->fingerprint($context['companyId'], $vehicle, $job, (int) $document['id']);
+        }
+        return $context + ['b22Ready' => $b22Ready, 'estimates' => $estimates, 'repairDocuments' => $documents, 'estimateStates' => $estimateStates, 'documentStates' => $documentStates, 'estimateScopes' => $b22Ready ? $estimateRepository->scope($context['companyId'], $job) : [], 'job' => $record, 'members' => Services::vehicleDamageRepairRepository()->members($context['companyId'], $vehicle, $job), 'events' => Services::vehicleDamageRepairRepository()->events($context['companyId'], $vehicle, $job)];
     }
 
     private function ownedMember(array $context, int $id): array

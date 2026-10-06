@@ -2,6 +2,8 @@
 
 B2.1 records vehicle work separately from physical damage. The canonical B1 condition remains the authority for current damage. A vendor report or completed job does not remove damage from that projection. Only an explicit operator inspection confirms physical repair.
 
+[B2.2 repair estimates and private documents](vehicle-damage-repair-estimates.md) extend this same job aggregate with frozen quotes, source documents, and explicit accepted-estimate selection. They do not change the work or physical-outcome semantics described here.
+
 ## Records and authority
 
 `vehicle_damage_repair_jobs` records one continuing effort/order, its intent (mitigation or repair), category, vendor snapshot, lifecycle and aggregate version. `vehicle_damage_repair_job_items` associates any number of canonical conditions with that effort. Multiple jobs may address the same condition. Withdrawal preserves the membership, result and history. `vehicle_damage_repair_job_events` contains immutable snapshots, operator, occurrence/recording times, resulting version, command identity and committed receipt. The repositories expose no event update/delete or membership deletion methods.
