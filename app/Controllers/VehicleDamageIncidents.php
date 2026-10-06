@@ -7,6 +7,7 @@ use CodeIgniter\Exceptions\PageNotFoundException;
 use CodeIgniter\HTTP\RedirectResponse;
 use CodeIgniter\Shield\Config\Services as ShieldServices;
 use Config\Services;
+use InvalidArgumentException;
 use RuntimeException;
 
 class VehicleDamageIncidents extends BaseController
@@ -21,6 +22,25 @@ class VehicleDamageIncidents extends BaseController
         $result = Services::vehicleDamageIncidentService()->create($this->companyId(), $vehicleId, $this->request->getPost(), $this->actor());
 
         return $this->result($result, '/fleet/vehicles/' . $vehicleId . '/damage-incidents/' . ($result['id'] ?? 'new'), '/fleet/vehicles/' . $vehicleId . '/damage-incidents/new');
+    }
+
+    public function historicalOriginal(int $vehicleId, int $itemId): string
+    {
+        $context = $this->context($vehicleId);
+        try {
+            $preview = Services::vehicleDamageIncidentService()->historicalOriginalPreview($this->companyId(), $vehicleId, $itemId);
+        } catch (InvalidArgumentException) {
+            throw PageNotFoundException::forPageNotFound();
+        }
+
+        return $this->render('historical_original', $context + ['historicalPreview' => $preview]);
+    }
+
+    public function backfillOriginal(int $vehicleId, int $itemId): RedirectResponse
+    {
+        $result = Services::vehicleDamageIncidentService()->backfillOriginal($this->companyId(), $vehicleId, $itemId, $this->request->getPost(), $this->actor());
+
+        return $this->result($result, $this->incidentUrl($vehicleId, (int) ($result['id'] ?? 0)), '/fleet/vehicles/' . $vehicleId . '/damage/' . $itemId . '/historical-original');
     }
 
     public function show(int $vehicleId, int $incidentId): string

@@ -58,6 +58,8 @@ $routes->group('', ['filter' => 'session'], static function (RouteCollection $ro
         $routes->post('(:num)/damage-incidents/(:num)/trip', 'VehicleDamageIncidents::attributeTrip/$1/$2');
         $routes->post('(:num)/damage-incidents/(:num)/areas', 'VehicleDamageIncidents::attachArea/$1/$2');
         $routes->get('(:num)/damage/(:num)', 'VehicleDamageIncidents::item/$1/$2');
+        $routes->get('(:num)/damage/(:num)/historical-original', 'VehicleDamageIncidents::historicalOriginal/$1/$2');
+        $routes->post('(:num)/damage/(:num)/historical-original', 'VehicleDamageIncidents::backfillOriginal/$1/$2');
         $routes->get('(:num)/damage/(:num)/link-preview', 'VehicleDamageIncidents::linkPreview/$1/$2');
         $routes->post('(:num)/damage/(:num)/link', 'VehicleDamageIncidents::linkHistorical/$1/$2');
         $routes->post('(:num)/damage/(:num)/evidence', 'VehicleDamageIncidents::attachEvidence/$1/$2');

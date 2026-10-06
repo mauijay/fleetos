@@ -208,6 +208,132 @@ final class VehicleDamagePresentationTest extends CIUnitTestCase
         $this->assertSame([], $this->incidents->trips(1, 10));
     }
 
+    public function testHistoricalBackfillScreenAndPostReuseUnknownPanelCondition(): void
+    {
+        $id = $this->createDamage('Synthetic historical original', null);
+        $this->authenticate();
+        $before = $this->damageRows();
+        $url = '/fleet/vehicles/10/damage/' . $id . '/historical-original';
+        $response = $this->get($url);
+        $response->assertOK();
+        $html = $response->getBody();
+        $this->assertStringContainsString('Unknown / Not specified', $html);
+        $this->assertStringContainsString('No new damage condition will be created', $html);
+        $this->assertStringContainsString('SYNTHETIC-RESERVATION-100', $html);
+        $this->assertStringNotContainsString('SYNTHETIC-RESERVATION-200', $html);
+        $this->assertStringNotContainsString('name="panel_code"', $html);
+        $this->assertStringContainsString('name="confirmed"', $html);
+        foreach (array_keys(\Config\VehicleDamage::ATTRIBUTIONS) as $type) {
+            $this->assertStringContainsString('value="' . $type . '"', $html);
+        }
+        $this->assertSame($before, $this->damageRows());
+        $service = new VehicleDamageIncidentService($this->connection);
+        $data = ['trip_id' => 100, 'attribution_type' => 'operator_attributed_cause', 'reason' => 'Synthetic authoritative original incident', 'confirmed' => '1', 'expected_state' => $service->historicalOriginalPreview(1, 10, $id)['expected_state']];
+        $security = CoreServices::security();
+        $response = $this->post($url, $data + [$security->getTokenName() => $security->getHash()]);
+        $incident = $this->incidents->forVehicle(1, 10)[0];
+        $response->assertRedirectTo('/fleet/vehicles/10/damage-incidents/' . $incident['id']);
+        foreach (['vehicle_damage_items', 'vehicle_damage_item_events', 'vehicle_damage_item_evidence'] as $table) {
+            $this->assertSame($before[$table], $this->damageRows()[$table]);
+        }
+        $this->assertNull($this->incidents->memberships(1, 10, (int) $incident['id'])[0]['panel_code']);
+        $show = $this->get('/fleet/vehicles/10/damage-incidents/' . $incident['id']);
+        $show->assertOK();
+        $this->assertStringContainsString('Unknown / Not specified', $show->getBody());
+        $this->assertStringContainsString('name="reason"', $show->getBody());
+        $this->get($url)->assertOK();
+        $this->assertStringNotContainsString('name="confirmed"', $this->get($url)->getBody());
+    }
+
+    public function testHistoricalRoutesRejectUnownedItemAndStaleSubmission(): void
+    {
+        $id = $this->createDamage('Synthetic owned condition', null);
+        $other = $this->createDamage('Synthetic unowned condition', 200, 2, 20);
+        $this->authenticate();
+        foreach (['/fleet/vehicles/10/damage/' . $other . '/historical-original', '/fleet/vehicles/11/damage/' . $id . '/historical-original'] as $unownedUrl) {
+            try {
+                $this->get($unownedUrl);
+                $this->fail('Unowned condition must not be accessible.');
+            } catch (\CodeIgniter\Exceptions\PageNotFoundException $exception) {
+                $this->assertSame(404, $exception->getCode());
+            }
+        }
+        $before = $this->damageRows();
+        $url = '/fleet/vehicles/10/damage/' . $id . '/historical-original';
+        $security = CoreServices::security();
+        $this->post($url, ['trip_id' => 100, 'confirmed' => '1', 'expected_state' => 'stale', 'reason' => 'Synthetic stale request', $security->getTokenName() => $security->getHash()])->assertRedirectTo($url);
+        $this->assertSame($before, $this->damageRows());
+    }
+
+    public function testHistoricalBackfillPostWithoutCsrfCannotMutateRecords(): void
+    {
+        $id = $this->createDamage('Synthetic protected condition', null);
+        $this->authenticate();
+        $before = $this->damageRows();
+        $this->expectException(\CodeIgniter\Security\Exceptions\SecurityException::class);
+        try {
+            $this->post('/fleet/vehicles/10/damage/' . $id . '/historical-original', ['confirmed' => '1']);
+        } finally {
+            $this->assertSame($before, $this->damageRows());
+        }
+    }
+
+    public function testHistoricalStaleValidationPreservesEnteredContextAndRequiresFreshConfirmation(): void
+    {
+        $id = $this->createDamage('Synthetic retained historical context', null);
+        $this->authenticate();
+        $url = '/fleet/vehicles/10/damage/' . $id . '/historical-original';
+        $data = ['trip_id' => 100, 'confirmed' => '1', 'expected_state' => 'stale', 'attribution_type' => 'suspected_cause', 'reason' => 'Synthetic retained operator reason', 'discovered_at' => '2026-09-25 07:30:17'];
+        $security = CoreServices::security();
+        $before = $this->damageRows();
+        $this->post($url, $data + [$security->getTokenName() => $security->getHash()])->assertRedirectTo($url);
+        $screen = $this->withSession()->get($url);
+        $screen->assertOK();
+        $html = $screen->getBody();
+        $this->assertStringContainsString('Reload if the condition changed', $html);
+        $this->assertStringContainsString('Synthetic retained operator reason', $html);
+        $this->assertStringContainsString('value="100" selected', $html);
+        $this->assertStringContainsString('value="suspected_cause" selected', $html);
+        $this->assertStringContainsString('value="2026-09-25 07:30:17"', $html);
+        $this->assertStringNotContainsString('value="1" checked', $html);
+        $preview = (new VehicleDamageIncidentService($this->connection))->historicalOriginalPreview(1, 10, $id);
+        $this->assertStringContainsString('value="' . $preview['expected_state'] . '"', $html);
+        $this->assertSame($before, $this->damageRows());
+        $data['expected_state'] = $preview['expected_state'];
+        $this->withSession()->post($url, $data + [$security->getTokenName() => $security->getHash()])->assertRedirect();
+        $this->assertCount(1, $this->incidents->forVehicle(1, 10));
+    }
+
+    public function testHistoricalBackfillRequiresAdminPermissionBeforeControllerAccess(): void
+    {
+        $id = $this->createDamage('Synthetic permission-protected condition', null);
+        $this->authenticate();
+        ShieldServices::auth()->user()->removePermission('admin.access');
+        $before = $this->damageRows();
+        $url = '/fleet/vehicles/10/damage/' . $id . '/historical-original';
+        $this->get($url)->assertRedirectTo((new \Config\Auth())->permissionDeniedRedirect());
+        $security = CoreServices::security();
+        $this->post($url, [$security->getTokenName() => $security->getHash(), 'confirmed' => '1'])->assertRedirectTo((new \Config\Auth())->permissionDeniedRedirect());
+        $this->assertSame($before, $this->damageRows());
+    }
+
+    public function testHistoricalRoutesRequireSessionPermissionAndCsrf(): void
+    {
+        $this->authenticate();
+        foreach (['GET', 'POST'] as $method) {
+            $filters = (new \CodeIgniter\Commands\Utilities\Routes\FilterCollector())->get($method, 'fleet/vehicles/10/damage/999/historical-original')['before'];
+            $this->assertContains('session', $filters);
+            $this->assertContains('permission:admin.access', $filters);
+            if ($method === 'POST') {
+                $this->assertContains('csrf', $filters);
+            }
+        }
+        ShieldServices::auth()->logout();
+        $before = $this->damageRows();
+        $this->get('/fleet/vehicles/10/damage/999/historical-original')->assertRedirectTo('login');
+        $this->assertSame($before, $this->damageRows());
+    }
+
     private function authenticate(): void
     {
         $runner = new MigrationRunner(new Migrations(), $this->connection);

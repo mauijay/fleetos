@@ -33,6 +33,20 @@ class VehicleDamageIncidentRepository
         return (int) $this->db->insertID();
     }
 
+    /** One original incident per condition; callers serialize creation with the vehicle lock. */
+    public function originalIncidentForItem(int $companyId, int $vehicleId, int $itemId): ?int
+    {
+        $row = $this->db->table('vehicle_damage_incident_items links')->select('links.vehicle_damage_incident_id')
+            ->join('vehicle_damage_incidents incidents', 'incidents.id = links.vehicle_damage_incident_id AND incidents.company_id = links.company_id')
+            ->join('vehicle_damage_items damage', 'damage.id = links.vehicle_damage_item_id AND damage.company_id = links.company_id AND damage.fleet_vehicle_id = incidents.fleet_vehicle_id')
+            ->join('fleet_vehicles vehicles', 'vehicles.id = incidents.fleet_vehicle_id AND vehicles.company_id = incidents.company_id AND vehicles.deleted_at IS NULL')
+            ->where('links.company_id', $companyId)->where('incidents.fleet_vehicle_id', $vehicleId)
+            ->where('links.vehicle_damage_item_id', $itemId)->where('links.effect_code', 'new_damage')
+            ->orderBy('links.id')->get()->getRowArray();
+
+        return $row === null ? null : (int) $row['vehicle_damage_incident_id'];
+    }
+
     /** @return array<string,mixed>|null */
     public function incident(int $companyId, int $vehicleId, int $id): ?array
     {

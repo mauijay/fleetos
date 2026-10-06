@@ -38,6 +38,7 @@ class VehicleDamageIncidentService
                 throw new InvalidArgumentException('Record between 1 and 40 damage areas.');
             }
             $values = $this->incidentValues($companyId, $vehicleId, $data, $actor);
+            $this->causalMemberships($values['attribution_type'], array_column($areas, 'effect_code'));
             $id = $this->incidents->insert($values);
             foreach ($areas as $area) {
                 if (! is_array($area)) {
@@ -51,11 +52,67 @@ class VehicleDamageIncidentService
         });
     }
 
+    /** Read-only confirmation data for backfilling an original incident, never a new condition. */
+    public function historicalOriginalPreview(int $companyId, int $vehicleId, int $itemId): array
+    {
+        $item = $this->items->item($companyId, $vehicleId, $itemId);
+        if ($item === null || ($item['current_condition_item_id'] ?? null) !== null) {
+            throw new InvalidArgumentException('Choose an existing canonical condition in this vehicle and company.');
+        }
+        $created = array_values(array_filter($this->items->events($companyId, $itemId), static fn (array $event): bool => $event['event_code'] === 'created'));
+        if (count($created) !== 1 || ! isset(VehicleDamageService::SEVERITIES[$created[0]['new_severity_code']], VehicleDamageService::DAMAGE_TYPES[$item['damage_type_code']])
+            || ($item['panel_code'] !== null && ! isset(VehicleDamage::PANELS[$item['panel_code']]))) {
+            throw new InvalidArgumentException('The original condition snapshot is unavailable. Review its recorded history first.');
+        }
+
+        return [
+            'item' => $item,
+            'snapshot' => ['panel_code' => $item['panel_code'], 'damage_type_code' => $item['damage_type_code'], 'severity_code' => $created[0]['new_severity_code']],
+            'expected_state' => hash('sha256', self::fingerprint($item) . serialize($created[0])),
+            'original_incident_id' => $this->incidents->originalIncidentForItem($companyId, $vehicleId, $itemId),
+        ];
+    }
+
+    /** Historical provenance only: incident and membership audits, no condition/event/evidence writes. */
+    public function backfillOriginal(int $companyId, int $vehicleId, int $itemId, array $data, int $actor): array
+    {
+        return $this->transaction($companyId, $vehicleId, $actor, function () use ($companyId, $vehicleId, $itemId, $data, $actor): int {
+            $this->items->lockItem($companyId, $vehicleId, $itemId);
+            $preview = $this->historicalOriginalPreview($companyId, $vehicleId, $itemId);
+            if (($data['confirmed'] ?? '') !== '1' || ! hash_equals($preview['expected_state'], (string) ($data['expected_state'] ?? ''))) {
+                throw new InvalidArgumentException('Explicitly confirm the unchanged historical preview. Reload if the condition changed.');
+            }
+            if ($preview['original_incident_id'] !== null) {
+                throw new InvalidArgumentException('This condition already has an original incident. Use its attribution action instead.');
+            }
+            if (! empty($data['panel_code']) && $data['panel_code'] !== $preview['snapshot']['panel_code']) {
+                throw new InvalidArgumentException('Panel assignment is a separate action; backfill preserves the recorded panel.');
+            }
+            $reason = $this->text($data['reason'] ?? '', true);
+            $tripId = $this->positiveId($data['trip_id'] ?? null);
+            if ($tripId === null) {
+                throw new InvalidArgumentException('Choose the authoritative historical trip.');
+            }
+            $values = $this->incidentValues($companyId, $vehicleId, [
+                'trip_id' => $tripId, 'attribution_type' => $data['attribution_type'] ?? 'unknown',
+                'discovered_at' => $data['discovered_at'] ?? $preview['item']['discovered_at'],
+                'occurred_at' => $data['occurred_at'] ?? null, 'overall_note' => $reason,
+            ], $actor);
+            $id = $this->incidents->insert($values);
+            $this->membership($companyId, $id, $itemId, 'new_damage', $preview['snapshot'], $reason, $actor);
+            $this->audit('vehicle_damage_incidents', $id, null, $values + ['reason' => $reason, 'historical_backfill' => true, 'existing_condition_id' => $itemId], $actor);
+
+            return $id;
+        });
+    }
+
     /** Post-create membership applies its explicitly selected effect transactionally. */
     public function attachArea(int $companyId, int $vehicleId, int $incidentId, array $area, int $actor): array
     {
         return $this->transaction($companyId, $vehicleId, $actor, function () use ($companyId, $vehicleId, $incidentId, $area, $actor): int {
-            $this->requireIncident($companyId, $vehicleId, $incidentId);
+            $incident = $this->requireIncident($companyId, $vehicleId, $incidentId);
+            $effects = array_column($this->incidents->memberships($companyId, $vehicleId, $incidentId), 'effect_code');
+            $this->causalMemberships($incident['attribution_type'], [...$effects, $area['effect_code'] ?? '']);
             $this->area($companyId, $vehicleId, $incidentId, $area, $actor);
 
             return $incidentId;
@@ -77,14 +134,14 @@ class VehicleDamageIncidentService
             }
             $type = (string) ($data['attribution_type'] ?? 'unknown');
             $this->attribution($type, $tripId);
-            if (in_array($type, ['suspected_cause', 'operator_attributed_cause'], true)
-                && array_any($this->incidents->memberships($companyId, $vehicleId, $incidentId), static fn (array $link): bool => $link['effect_code'] === 'observed_existing')) {
-                throw new InvalidArgumentException('An incident containing observations cannot attribute their cause.');
-            }
+            $this->causalMemberships($type, array_column($this->incidents->memberships($companyId, $vehicleId, $incidentId), 'effect_code'));
             $values = ['turo_trip_normalized_id' => $tripId, 'attribution_type' => $type, 'updated_by' => $actor, 'updated_at' => date('Y-m-d H:i:s')];
             // Existing movement/recovery context cannot be silently moved to a different trip.
             if ((! empty($before['trip_movement_event_id']) || ! empty($before['vehicle_recovery_exception_id'])) && (int) $before['turo_trip_normalized_id'] !== $tripId) {
                 throw new InvalidArgumentException('This incident has movement/recovery context on its original trip.');
+            }
+            if ((int) $before['turo_trip_normalized_id'] === $tripId && $before['attribution_type'] === $type) {
+                return $incidentId;
             }
             $this->incidents->update($companyId, $vehicleId, $incidentId, $values);
             $this->audit('vehicle_damage_incidents', $incidentId, $before, array_merge($before, $values, ['reason' => $reason]), $actor);
@@ -193,15 +250,15 @@ class VehicleDamageIncidentService
             }
             $itemId = (int) $item['id'];
             $this->items->lockItem($companyId, $vehicleId, $itemId);
+            if (array_any($this->incidents->memberships($companyId, $vehicleId, $incidentId), static fn (array $membership): bool => (int) $membership['vehicle_damage_item_id'] === $itemId)) {
+                throw new InvalidArgumentException('This condition is already attached to the incident.');
+            }
             if (! empty($item['panel_code']) && $item['panel_code'] !== $panel) {
                 throw new InvalidArgumentException('The selected panel must match the existing condition.');
             }
             if ($effect === 'observed_existing') {
                 if ($severity !== $item['severity_code']) {
                     throw new InvalidArgumentException('Observation severity must match the canonical condition; select worsening to increase it.');
-                }
-                if ($incident['attribution_type'] !== 'unknown' && $incident['attribution_type'] !== 'discovered_during_trip') {
-                    throw new InvalidArgumentException('An observation cannot attribute a cause.');
                 }
                 $result = $this->conditions->observe($companyId, $vehicleId, $itemId, $note, $actor, $context);
             } else {
@@ -254,7 +311,7 @@ class VehicleDamageIncidentService
             'trip_movement_event_id' => $eventId, 'vehicle_recovery_exception_id' => $exceptionId,
             'discovered_at' => $this->dateTime((string) ($data['discovered_at'] ?? '')),
             'occurred_at' => empty($data['occurred_at']) ? null : $this->dateTime((string) $data['occurred_at']),
-            'attribution_type' => $attribution, 'overall_note' => $this->text($data['overall_note'] ?? ''),
+            'attribution_type' => $attribution, 'overall_note' => $this->text($data['overall_note'] ?? '', in_array($attribution, ['suspected_cause', 'operator_attributed_cause'], true)),
             'created_by' => $actor, 'created_at' => $now, 'updated_by' => $actor, 'updated_at' => $now,
         ];
     }
@@ -263,6 +320,14 @@ class VehicleDamageIncidentService
     {
         if (! isset(VehicleDamage::ATTRIBUTIONS[$type]) || ($type !== 'unknown' && $tripId === null)) {
             throw new InvalidArgumentException('Choose valid attribution; attribution to a trip requires a normalized trip.');
+        }
+    }
+
+    /** Attribution describes the incident; observations retain their non-causal membership effect. */
+    private function causalMemberships(string $type, array $effects): void
+    {
+        if (in_array($type, ['suspected_cause', 'operator_attributed_cause'], true) && array_intersect($effects, ['new_damage', 'worsened']) === []) {
+            throw new InvalidArgumentException('An observation-only incident cannot attribute cause. It must include new damage or worsening.');
         }
     }
 
