@@ -90,6 +90,7 @@ class VehicleDamageIncidents extends BaseController
             'source' => $source, 'target' => $target,
             'sourceEvidenceCount' => count($repo->evidence($this->companyId(), $sourceId)),
             'targetEvidenceCount' => $target === null ? 0 : count($repo->evidence($this->companyId(), $targetId)),
+            'sourceHasWork' => Services::vehicleDamageRepairRepository()->hasAnyMembershipForCondition($this->companyId(), $vehicleId, $sourceId),
         ]);
     }
 

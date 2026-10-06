@@ -25,6 +25,12 @@ class VehicleDamage extends BaseConfig
         'operator_attributed_cause' => 'Cause attributed by operator',
     ];
     public const EFFECTS = ['new_damage' => 'New damage', 'worsened' => 'Worsens existing', 'observed_existing' => 'Observes existing'];
+    public const WORK_INTENTS = ['mitigation' => 'Temporary mitigation', 'repair' => 'Repair'];
+    public const WORK_CATEGORIES = ['detailing_cosmetic' => 'Detailing / cosmetic', 'body' => 'Body', 'wheel_tire' => 'Wheel / tire', 'glass' => 'Glass', 'interior' => 'Interior', 'damage_mechanical' => 'Damage-related mechanical', 'other' => 'Other'];
+    public const WORK_STATUSES = ['planned' => 'Planned', 'scheduled' => 'Scheduled', 'in_progress' => 'In progress', 'deferred' => 'Deferred', 'completed' => 'Completed', 'cancelled' => 'Cancelled'];
+    public const WORK_RESULTS = ['unassessed' => 'Unassessed', 'unchanged' => 'Unchanged', 'mitigated' => 'Mitigated — damage remains', 'partially_repaired' => 'Partially repaired', 'repair_reported' => 'Repair reported — inspection pending', 'repaired' => 'Confirmed repaired', 'failed' => 'Failed'];
+    public const REOPEN_REASONS = ['repair_failure' => 'Repair failure', 'residual_damage' => 'Residual damage', 'incorrect_repair_confirmation' => 'Incorrect repair confirmation'];
+    public const WORK_REOPEN_REASONS = ['continuing_order' => 'Continuing the same order', 'incorrect_cancellation' => 'Incorrect cancellation'];
 
     public static function zone(string $panel): string
     {

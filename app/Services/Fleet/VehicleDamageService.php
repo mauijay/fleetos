@@ -453,7 +453,6 @@ class VehicleDamageService
             return $this->failure('actor', 'An authenticated operator is required.');
         }
         $context ??= ['trip_id' => null, 'movement_event_id' => null];
-        $new = array_merge($item, $values);
         $this->db->transBegin();
         try {
             $this->repo()->lockVehicle((int) $item['company_id'], (int) $item['fleet_vehicle_id']);
@@ -462,22 +461,7 @@ class VehicleDamageService
             if ($locked !== $item || ! empty($locked['current_condition_item_id'])) {
                 throw new \RuntimeException('Condition changed concurrently. Reload before updating.');
             }
-            if (! $this->repo()->updateItem((int) $item['company_id'], (int) $item['fleet_vehicle_id'], (int) $item['id'], $values)) {
-                throw new \RuntimeException('Damage item changed before it could be updated.');
-            }
-            $this->repo()->insertEvent($this->eventValues(
-                (int) $item['company_id'],
-                (int) $item['id'],
-                $eventCode,
-                $occurredAt ?? date('Y-m-d H:i:s'),
-                $actorUserId,
-                $context['trip_id'],
-                $context['movement_event_id'],
-                $item,
-                $new,
-                $note,
-            ));
-            $this->audit('updated', (int) $item['id'], $item, $new + ['reason' => $note], $actorUserId);
+            $this->writeStateInTransaction($item, $values, $eventCode, $note, $actorUserId, $occurredAt ?? date('Y-m-d H:i:s'), $context);
             if ($this->db->transStatus() === false) {
                 throw new \RuntimeException('Damage item update transaction failed.');
             }
@@ -489,6 +473,41 @@ class VehicleDamageService
 
             return $this->failure('database', $exception->getMessage());
         }
+    }
+
+    /** Explicit reopening preserves the generic B1 terminal transition matrix. */
+    public function reopenRepairedCondition(int $companyId, int $vehicleId, int $itemId, array $data, int $actorUserId): array
+    {
+        return (new VehicleDamageRepairService($this->db, conditions: $this))->reopenCondition($companyId, $vehicleId, $itemId, $data, $actorUserId);
+    }
+
+    /** Transaction-internal writer: the repair orchestrator owns locks, validation and commit. */
+    public function writeRepairStateInTransaction(array $item, array $values, string $eventCode, string $note, int $actor, string $occurredAt, ?int $repairEvent, array $auditContext = []): void
+    {
+        if (! in_array($eventCode, ['repaired', 'repair_reopened'], true) || $actor < 1 || ($item['current_condition_item_id'] ?? null) !== null) {
+            throw new \InvalidArgumentException('Invalid physical repair event.');
+        }
+        if ($repairEvent !== null) {
+            $event = $this->db->table('vehicle_damage_repair_job_events')->where('company_id', $item['company_id'])->where('id', $repairEvent)->where('vehicle_damage_item_id', $item['id'])->get()->getRowArray();
+            if ($event === null) {
+                throw new \InvalidArgumentException('Repair event must belong to this condition and company.');
+            }
+        }
+        $this->writeStateInTransaction($item, $values, $eventCode, $note, $actor, $occurredAt, ['trip_id' => null, 'movement_event_id' => null], $repairEvent, $auditContext);
+    }
+
+    private function writeStateInTransaction(array $item, array $values, string $eventCode, string $note, int $actor, string $occurredAt, array $context, ?int $repairEvent = null, array $auditContext = []): void
+    {
+        if (! $this->repo()->updateItem((int) $item['company_id'], (int) $item['fleet_vehicle_id'], (int) $item['id'], $values)) {
+            throw new \RuntimeException('Damage item changed before it could be updated.');
+        }
+        $new = array_merge($item, $values);
+        $event = $this->eventValues((int) $item['company_id'], (int) $item['id'], $eventCode, $occurredAt, $actor, $context['trip_id'], $context['movement_event_id'], $item, $new, $note);
+        if ($repairEvent !== null) {
+            $event['repair_job_event_id'] = $repairEvent;
+        }
+        $this->repo()->insertEvent($event);
+        $this->audit('updated', (int) $item['id'], $item, $new + ['reason' => $note] + $auditContext, $actor);
     }
 
     /** @param array<string,mixed>|null $old @param array<string,mixed> $new @return array<string,mixed> */

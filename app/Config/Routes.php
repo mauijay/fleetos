@@ -52,6 +52,20 @@ $routes->group('', ['filter' => 'session'], static function (RouteCollection $ro
         $routes->post('(:num)/health/observations/(:num)/correct', 'VehicleHealth::correctObservation/$1/$2');
         $routes->post('(:num)/health/observations/(:num)/void', 'VehicleHealth::voidObservation/$1/$2');
         $routes->post('(:num)/damage', 'VehicleDamage::createForVehicle/$1');
+        $routes->get('(:num)/damage-repairs', 'VehicleDamageRepairs::index/$1', ['as' => 'damage-repairs.index']);
+        $routes->get('(:num)/damage-repairs/new', 'VehicleDamageRepairs::new/$1', ['as' => 'damage-repairs.new']);
+        $routes->get('(:num)/damage-repairs/condition-preview', 'VehicleDamageRepairs::conditionPreview/$1', ['as' => 'damage-repairs.condition-preview']);
+        $routes->post('(:num)/damage-repairs', 'VehicleDamageRepairs::create/$1', ['as' => 'damage-repairs.create']);
+        $routes->get('(:num)/damage-repairs/(:num)', 'VehicleDamageRepairs::show/$1/$2', ['as' => 'damage-repairs.show']);
+        foreach (['details' => 'correctDetails', 'conditions' => 'addCondition', 'schedule' => 'schedule', 'start' => 'start', 'defer' => 'defer', 'resume' => 'resume', 'cancel' => 'cancel', 'complete' => 'complete', 'reopen' => 'reopenJob'] as $path => $action) {
+            $routes->post('(:num)/damage-repairs/(:num)/' . $path, 'VehicleDamageRepairs::' . $action . '/$1/$2', ['as' => 'damage-repairs.' . $path]);
+        }
+        foreach (['withdraw' => 'withdrawCondition', 'result' => 'recordResult', 'confirm-repair' => 'confirmRepair'] as $path => $action) {
+            $routes->post('(:num)/damage-repairs/(:num)/conditions/(:num)/' . $path, 'VehicleDamageRepairs::' . $action . '/$1/$2/$3', ['as' => 'damage-repairs.conditions.' . $path]);
+        }
+        $routes->get('(:num)/damage-repairs/(:num)/conditions/(:num)/confirm-repair', 'VehicleDamageRepairs::repairPreview/$1/$2/$3', ['as' => 'damage-repairs.conditions.repair-preview']);
+        $routes->get('(:num)/damage/(:num)/reopen', 'VehicleDamageRepairs::reopenConditionPreview/$1/$2', ['as' => 'damage-repairs.condition-reopen-preview']);
+        $routes->post('(:num)/damage/(:num)/reopen', 'VehicleDamageRepairs::reopenCondition/$1/$2', ['as' => 'damage-repairs.condition-reopen']);
         $routes->get('(:num)/damage-incidents/new', 'VehicleDamageIncidents::new/$1');
         $routes->post('(:num)/damage-incidents', 'VehicleDamageIncidents::create/$1');
         $routes->get('(:num)/damage-incidents/(:num)', 'VehicleDamageIncidents::show/$1/$2');

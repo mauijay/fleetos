@@ -175,6 +175,9 @@ class VehicleDamageIncidentService
             if (! in_array($target['status_code'], ['open', 'accepted_unrepaired'], true)) {
                 throw new InvalidArgumentException('Choose a current canonical target.');
             }
+            if ((new \App\Repositories\VehicleDamageRepairRepository($this->db))->hasAnyMembershipForCondition($companyId, $vehicleId, $sourceId)) {
+                throw new InvalidArgumentException('This condition has repair/work history and must remain canonical. B2.1 cannot retarget that history. Choose another source or leave the conditions separate.');
+            }
             $ranks = array_flip(array_keys(VehicleDamageService::SEVERITIES));
             $severity = $ranks[$source['severity_code']] > $ranks[$target['severity_code']] ? $source['severity_code'] : $target['severity_code'];
             $result = $this->conditions->worsen($companyId, $vehicleId, $targetId, ['severity_code' => $severity, 'note' => $reason], $actor);

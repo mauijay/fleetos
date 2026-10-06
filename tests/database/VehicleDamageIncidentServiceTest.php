@@ -246,7 +246,13 @@ final class VehicleDamageIncidentServiceTest extends CIUnitTestCase
         $this->assertNull($after['current_condition_item_id']);
         unset($after['panel_code'], $after['current_condition_item_id']);
         $this->assertSame($before, $after);
-        $this->assertSame($events, $this->items->events(1, $itemId));
+        $upgradedEvents = $this->items->events(1, $itemId);
+        foreach ($upgradedEvents as &$event) {
+            $this->assertNull($event['repair_job_event_id']);
+            unset($event['repair_job_event_id']);
+        }
+        unset($event);
+        $this->assertSame($events, $upgradedEvents);
         $this->assertSame($evidence, $this->items->evidence(1, $itemId));
         $this->assertSame([], $this->connection->query('PRAGMA foreign_key_check')->getResultArray());
         $this->assertTrue($conditions->worsen(1, 10, $itemId, ['severity_code' => 'unsafe', 'note' => 'Synthetic legacy worsening'], 7)['success']);

@@ -577,12 +577,6 @@ parameters:
 			path: tests/session/ExampleSessionTest.php
 
 		-
-			message: '#^Constant HOMEPATH not found\.$#'
-			identifier: constant.notFound
-			count: 2
-			path: tests/unit/HealthTest.php
-
-		-
 			message: '#^Function service not found\.$#'
 			identifier: function.notFound
 			count: 1

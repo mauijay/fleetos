@@ -1,0 +1,9 @@
+<section class="section"><h1>Reopen repaired condition</h1><p><?= esc($condition['description']) ?></p><p>Prior repair: <?= esc((string) $condition['resolution_note']) ?> · <?= esc((string) $condition['resolved_at']) ?></p><p>Use this for failed, residual, or incorrectly confirmed repair. Record genuinely new damage as a new incident.</p>
+<?php if ($repairContext === null): ?><p>Manual / legacy repair history. No work job will be created.</p><?php endif; ?>
+<form action="/fleet/vehicles/<?= (int) $vehicle['id'] ?>/damage/<?= (int) $condition['id'] ?>/reopen" method="post">
+<?= csrf_field() ?><?= view('vehicle_damage_repairs/_command', ['workAction' => 'reopen_condition', 'job' => $repairContext['job'] ?? null]) ?>
+<?php if ($repairContext !== null): ?><input type="hidden" name="job_id" value="<?= (int) $repairContext['job']['id'] ?>"><input type="hidden" name="membership_id" value="<?= (int) $repairContext['membership_id'] ?>"><?php endif; ?>
+<input type="hidden" name="expected_condition_state" value="<?= esc($fingerprints[$condition['id']], 'attr') ?>">
+<label>Reason<select name="reason_category_code"><?php foreach (\Config\VehicleDamage::REOPEN_REASONS as $code => $label): ?><option value="<?= esc($code, 'attr') ?>" <?= ($formData['reason_category_code'] ?? '') === $code ? 'selected' : '' ?>><?= esc($label) ?></option><?php endforeach; ?></select></label>
+<label>Observation time<input type="datetime-local" name="observed_at" required value="<?= esc((string) ($formData['observed_at'] ?? date('Y-m-d\TH:i')), 'attr') ?>"></label>
+<label>Finding / reason<textarea name="note" required maxlength="2000"><?= esc((string) ($formData['note'] ?? '')) ?></textarea></label><label><input type="checkbox" name="confirmed" value="1" required> I confirm this is failed/residual repair or an incorrect earlier confirmation.</label><button class="primary-action" type="submit">Reopen condition</button></form></section>

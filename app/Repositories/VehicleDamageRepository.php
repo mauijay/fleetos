@@ -291,18 +291,24 @@ class VehicleDamageRepository
 
     public function updateItem(int $companyId, int $vehicleId, int $itemId, array $values): bool
     {
-        $this->db->table('vehicle_damage_items')
+        $updated = $this->db->table('vehicle_damage_items')
             ->where('company_id', $companyId)
             ->where('fleet_vehicle_id', $vehicleId)
             ->where('id', $itemId)
             ->update($values);
+
+        if (! $updated) {
+            return false;
+        }
 
         return $this->db->affectedRows() === 1 || $this->item($companyId, $vehicleId, $itemId) !== null;
     }
 
     public function insertEvent(array $values): int
     {
-        $this->db->table('vehicle_damage_item_events')->insert($values);
+        if (! $this->db->table('vehicle_damage_item_events')->insert($values)) {
+            throw new \RuntimeException('Damage event could not be recorded.');
+        }
 
         return (int) $this->db->insertID();
     }

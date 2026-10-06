@@ -5599,3 +5599,15 @@ h3 {
     width: 100%;
   }
 }
+
+.work-page { overflow-wrap: anywhere; }
+.work-page form { display: grid; gap: 1rem; min-width: 0; margin-block: 1rem; }
+.work-page label { display: grid; gap: .35rem; min-width: 0; }
+.work-page label:has(input[type="checkbox"]) { display: flex; align-items: flex-start; gap: .6rem; }
+.work-page input[type="checkbox"] { width: auto; flex: 0 0 auto; }
+.work-page input:not([type="checkbox"]), .work-page select, .work-page textarea { max-width: 100%; min-width: 0; width: 100%; }
+.work-page fieldset { min-width: 0; padding: 1rem; }
+.work-scope { border: 1px solid var(--border, #ccd5df); border-radius: .7rem; padding: 1rem; margin-block: 1rem; min-width: 0; overflow-wrap: anywhere; }
+.work-facts { display: flex; flex-wrap: wrap; gap: 1rem; }
+.work-actions { display: grid; gap: .7rem; }
+.work-badge { overflow-wrap: anywhere; }

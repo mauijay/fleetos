@@ -1,0 +1,2 @@
+<section class="section"><h1>Review canonical work target</h1><p>Selected original: <?= esc($preview['original']['description']) ?></p><p>Canonical condition: <?= esc($preview['canonical']['description']) ?> · <?= esc($preview['canonical']['status_code']) ?></p><p>Work will attach to the displayed canonical condition. Historical provenance stays on its original record.</p>
+<p><a href="/fleet/vehicles/<?= (int) $vehicle['id'] ?>/damage-repairs/new?selected_item_id=<?= (int) $preview['original']['id'] ?>">Continue with this work target</a></p></section>

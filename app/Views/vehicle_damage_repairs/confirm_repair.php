@@ -1,0 +1,6 @@
+<section class="section"><h1>Confirm physical repair</h1><p><?= esc($condition['description']) ?> · <?= esc($condition['status_code']) ?></p><p>Job completion and a reported repair do not confirm physical resolution. Confirm your inspection separately.</p>
+<form action="/fleet/vehicles/<?= (int) $vehicle['id'] ?>/damage-repairs/<?= (int) $job['id'] ?>/conditions/<?= (int) $member['id'] ?>/confirm-repair" method="post">
+<?= csrf_field() ?><?= view('vehicle_damage_repairs/_command', ['workAction' => 'confirm']) ?><input type="hidden" name="expected_condition_state" value="<?= esc($fingerprints[$condition['id']], 'attr') ?>">
+<label>Inspection time<input type="datetime-local" name="inspected_at" required value="<?= esc((string) ($formData['inspected_at'] ?? date('Y-m-d\TH:i')), 'attr') ?>"></label>
+<label>Inspection finding / reason<textarea name="inspection_note" maxlength="2000" required><?= esc((string) ($formData['inspection_note'] ?? '')) ?></textarea></label>
+<label><input type="checkbox" name="confirmed" value="1" required> I inspected this canonical condition and confirm it is physically repaired.</label><button class="primary-action" type="submit">Confirm condition repaired</button></form></section>

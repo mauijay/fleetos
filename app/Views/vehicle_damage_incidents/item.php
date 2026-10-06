@@ -4,6 +4,9 @@
 <p><?= nl2br(esc((string) $item['description'])) ?></p>
 <p><?= esc(\App\Services\Fleet\VehicleDamageService::SEVERITIES[$item['severity_code']]) ?> · <?= esc((string) $item['status_code']) ?></p>
 <p>Discovered <?= esc((string) $item['discovered_at']) ?> · Reservation <?= esc((string) ($item['turo_reservation_id'] ?? 'Not linked')) ?></p>
+<?= view('vehicle_damage_repairs/_badge', ['work' => $vehicleDamage['work'] ?? [], 'conditionId' => $item['id'], 'vehicleId' => $vehicle['id']]) ?>
+<?php if (($vehicleDamage['work']['ready'] ?? false) && $item['status_code'] === 'repaired' && $item['current_condition_item_id'] === null): ?><p>Repair history may be manual / legacy; work context is shown separately.</p><p><a href="<?= $base ?>/reopen">Review and reopen failed / residual repair</a></p><?php endif; ?>
+<?php if (($vehicleDamage['work']['ready'] ?? false) && $item['current_condition_item_id'] !== null): ?><p><a href="/fleet/vehicles/<?= (int) $vehicle['id'] ?>/damage-repairs/condition-preview?selected_item_id=<?= (int) $item['id'] ?>">Preview canonical work target</a></p><?php endif; ?>
 <?php if (! empty($item['current_condition_item_id'])): ?><p>Historical provenance for <a href="/fleet/vehicles/<?= (int) $vehicle['id'] ?>/damage/<?= (int) $item['current_condition_item_id'] ?>">canonical condition #<?= (int) $item['current_condition_item_id'] ?></a>.</p><?php else: ?>
 <p><a href="<?= $base ?>/link-preview">Link as worsened existing damage</a></p><?php endif; ?>
 <?php if (($item['current_condition_item_id'] ?? null) === null): ?><p><a href="<?= $base ?>/historical-original">Backfill original historical incident using this condition</a></p><?php endif; ?>
