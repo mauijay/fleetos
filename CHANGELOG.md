@@ -1,5 +1,48 @@
 # Changelog
 
+## v0.28.0 — Damage Repair Work Lifecycle
+
+Release date: 2026-10-06
+
+### Added
+
+- Add vehicle-scoped Damage Ledger Work & Repair jobs with support for one or multiple canonical damage conditions.
+- Add immutable repair/work history, aggregate versioning, persistent command idempotency, and concurrency protections.
+- Add historical mitigation recording without altering physical damage state.
+- Add repair lifecycle workflows for scheduling, starting, deferring, resuming, cancelling, completing, and reopening work.
+- Add per-condition work outcomes including mitigation, partial repair, repair reported, confirmed repair, and failed work.
+- Add explicit operator confirmation before a physical damage condition is marked repaired.
+- Add explicit reopening of repaired conditions while preserving prior repair history.
+- Add bounded Work & Repair visibility to the vehicle Damage & Condition workspace and Movement Checklist.
+- Add canonical-link integrity protection so conditions with retained repair/work history cannot be turned into historical aliases.
+
+### Fixed
+
+- Propagate audit persistence failures so associated business mutations can roll back instead of being treated as successful.
+- Ensure Turo trip import processing rolls back correctly when audit persistence fails.
+
+### Safety and Data Integrity
+
+- Job completion does not automatically mark physical damage repaired.
+- `repair_reported` remains distinct from operator-confirmed `repaired`.
+- Historical mitigation does not create physical repair events.
+- Work history attaches to canonical physical damage conditions.
+- Existing B1/B1.1 damage, incident, attribution, evidence, and provenance records are preserved.
+- Repair/work operations remain isolated from claims, recoveries, maintenance expenses, operating expenses, and financial reporting.
+
+### Schema
+
+- Add `vehicle_damage_repair_jobs`.
+- Add `vehicle_damage_repair_job_items`.
+- Add `vehicle_damage_repair_job_events`.
+- Add nullable `vehicle_damage_item_events.repair_job_event_id`.
+- Migration 000030 is forward additive and intentionally refuses destructive rollback.
+
+### Deferred
+
+- Repair estimates and quote revisions remain B2.2.
+- Repair documents, invoices, actual repair costs, vendor payments, claim recoveries, and financial reconciliation remain outside B2.1.
+
 ## v0.27.2 — Historical Damage Attribution
 
 Release date: 2026-10-05
