@@ -209,39 +209,46 @@ class TuroTripImportService
 
     private function persistNormalizedRow(RawTripRow $rawTripRow, int $rawTripId, ?int $actorUserId = null): RowImportResult
     {
+        $transactionDepth = $this->db->transDepth;
         $this->db->transStart();
-
-        $normalizedTrip = $this->normalizer->normalize($rawTripRow, $rawTripId);
-        $upsert = $this->normalizedTrips->upsert($normalizedTrip);
-        $retainedLocations = $this->scheduledLocations->retainForTrip(
-            (int) $upsert['id'],
-            $normalizedTrip->fleetVehicleId,
-            $this->normalizer->scheduledLocationText($rawTripRow->payload, 'pickup'),
-            $this->normalizer->scheduledLocationText($rawTripRow->payload, 'return'),
-        );
-        $tripAllocations = $this->allocationService->allocate($normalizedTrip);
-        $this->allocations->replaceForTrip($upsert['id'], $tripAllocations);
-
-        if ($upsert['created']) {
-            $this->audit->created($actorUserId, 'turo_trips_normalized', $upsert['id'], $upsert['new']);
-        } else {
-            $this->audit->updated($actorUserId, 'turo_trips_normalized', $upsert['id'], $upsert['old'], $upsert['new']);
-        }
-
-        $this->audit->imported($actorUserId, 'trip_month_allocations', $upsert['id'], ['allocation_count' => count($tripAllocations)]);
-        if ((bool) $upsert['materially_changed'] || $retainedLocations['material_changed']) {
-            $affectedVehicleIds = array_unique(array_filter([
+        try {
+            $normalizedTrip = $this->normalizer->normalize($rawTripRow, $rawTripId);
+            $upsert = $this->normalizedTrips->upsert($normalizedTrip);
+            $retainedLocations = $this->scheduledLocations->retainForTrip(
+                (int) $upsert['id'],
                 $normalizedTrip->fleetVehicleId,
-                isset($upsert['old']['fleet_vehicle_id']) ? (int) $upsert['old']['fleet_vehicle_id'] : null,
-            ], static fn (?int $vehicleId): bool => $vehicleId !== null && $vehicleId > 0));
-            foreach ($affectedVehicleIds as $vehicleId) {
-                $this->plans()->invalidateForWrite($vehicleId, 'material_trip_reconciliation', $actorUserId);
-            }
-        }
-        $this->db->transComplete();
+                $this->normalizer->scheduledLocationText($rawTripRow->payload, 'pickup'),
+                $this->normalizer->scheduledLocationText($rawTripRow->payload, 'return'),
+            );
+            $tripAllocations = $this->allocationService->allocate($normalizedTrip);
+            $this->allocations->replaceForTrip($upsert['id'], $tripAllocations);
 
-        if ($this->db->transStatus() === false) {
-            throw new RuntimeException("Database transaction failed for CSV row {$rawTripRow->rowNumber}.");
+            if ($upsert['created']) {
+                $this->audit->created($actorUserId, 'turo_trips_normalized', $upsert['id'], $upsert['new']);
+            } else {
+                $this->audit->updated($actorUserId, 'turo_trips_normalized', $upsert['id'], $upsert['old'], $upsert['new']);
+            }
+
+            $this->audit->imported($actorUserId, 'trip_month_allocations', $upsert['id'], ['allocation_count' => count($tripAllocations)]);
+            if ((bool) $upsert['materially_changed'] || $retainedLocations['material_changed']) {
+                $affectedVehicleIds = array_unique(array_filter([
+                    $normalizedTrip->fleetVehicleId,
+                    isset($upsert['old']['fleet_vehicle_id']) ? (int) $upsert['old']['fleet_vehicle_id'] : null,
+                ], static fn (?int $vehicleId): bool => $vehicleId !== null && $vehicleId > 0));
+                foreach ($affectedVehicleIds as $vehicleId) {
+                    $this->plans()->invalidateForWrite($vehicleId, 'material_trip_reconciliation', $actorUserId);
+                }
+            }
+            $this->db->transComplete();
+
+            if ($this->db->transStatus() === false) {
+                throw new RuntimeException("Database transaction failed for CSV row {$rawTripRow->rowNumber}.");
+            }
+        } catch (Throwable $exception) {
+            if ($this->db->transDepth > $transactionDepth) {
+                $this->db->transRollback();
+            }
+            throw $exception;
         }
 
         $this->projection()->projectTrip((int) $upsert['id'], true, 'import');
