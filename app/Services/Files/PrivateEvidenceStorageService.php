@@ -25,6 +25,8 @@ class PrivateEvidenceStorageService
         int $maxFileSizeBytes,
         ?string $documentDate = null,
         ?int $uploadedBy = null,
+        bool $private = false,
+        ?int $candidateId = null,
     ): array {
         $environment = defined('ENVIRONMENT') ? constant('ENVIRONMENT') : 'production';
         if (! $upload->isValid() && $environment !== 'testing') {
@@ -43,10 +45,27 @@ class PrivateEvidenceStorageService
             throw new RuntimeException('Evidence file type is not supported. Upload JPEG, PNG, WebP, or PDF evidence.');
         }
 
+        $filename = $upload->getClientName();
+        if ($filename === '' || strlen($filename) > 190 || preg_match('/[\x00-\x1F\x7F]/', $filename)) {
+            throw new RuntimeException('Evidence filename is invalid or too long.');
+        }
         $directory = $this->validatedStorageDirectory($storageDirectory);
+        $this->ensureDirectory($directory, $private ? 0700 : 0775);
         $checksum = hash_file('sha256', $tempPath);
-        $existing = $this->repo()->findByChecksumInDirectory($checksum, $directory);
+        $existing = $candidateId === 0 ? null : $this->repo()->findByChecksumInDirectory($checksum, $directory, $private, $candidateId);
+        if (($candidateId ?? 0) > 0 && $existing === null) {
+            throw new RuntimeException('Checksum candidate changed. Reload and retry.');
+        }
         if ($existing !== null) {
+            $metadata = [];
+            foreach ($existing as $field => $value) {
+                $metadata['file_' . $field] = $value;
+            }
+            if ($this->resolve($metadata, $directory, $allowedMimeTypes) === null
+                || (int) $existing['size_bytes'] !== $upload->getSize()
+                || $existing['mime_type'] !== $mimeType) {
+                throw new RuntimeException('Existing checksum candidate is unavailable or has changed.');
+            }
             return ['file_id' => (int) $existing['id'], 'duplicate' => true, 'file' => $existing, 'absolute_path' => null];
         }
 
@@ -59,31 +78,36 @@ class PrivateEvidenceStorageService
         };
         $relativePath = $directory . '/' . date('Y/m') . '/' . bin2hex(random_bytes(16)) . '.' . $extension;
         $absolutePath = $this->writableDirectory() . 'uploads' . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relativePath);
-        $parent = dirname($absolutePath);
-        if (! is_dir($parent) && ! mkdir($parent, 0775, true) && ! is_dir($parent)) {
-            throw new RuntimeException('Private evidence directory could not be created.');
+        $this->ensureDirectory(dirname($relativePath), $private ? 0700 : 0775);
+        $size = $upload->getSize();
+        if ($this->storageRoot(dirname($relativePath)) === null || file_exists($absolutePath) || is_link($absolutePath)) {
+            throw new RuntimeException('Private evidence destination is unsafe.');
         }
         if (! rename($tempPath, $absolutePath)) {
             throw new RuntimeException('Evidence file could not be stored.');
         }
 
         try {
+            if ($private && ! chmod($absolutePath, 0600)) {
+                throw new RuntimeException('Private file permissions could not be established.');
+            }
             $fileId = $this->repo()->create([
                 'storage_disk' => 'local',
                 'path' => $relativePath,
                 'original_filename' => $upload->getClientName(),
                 'mime_type' => $mimeType,
-                'size_bytes' => $upload->getSize(),
+                'size_bytes' => $size,
                 'document_date' => $documentDate,
                 'checksum' => $checksum,
                 'uploaded_by' => $uploadedBy,
             ]);
+            $file = $this->repo()->find($fileId) ?? [];
         } catch (\Throwable $exception) {
             @unlink($absolutePath);
             throw $exception;
         }
 
-        return ['file_id' => $fileId, 'duplicate' => false, 'file' => $this->repo()->find($fileId) ?? [], 'absolute_path' => $absolutePath];
+        return ['file_id' => $fileId, 'duplicate' => false, 'file' => $file, 'absolute_path' => $absolutePath];
     }
 
     /**
@@ -112,13 +136,17 @@ class PrivateEvidenceStorageService
             return null;
         }
         $path = realpath($this->writableDirectory() . 'uploads' . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relativePath));
-        if ($path === false || ! is_file($path) || ! $this->isWithin($path, $root)) {
+        if ($path === false || ! is_file($path) || ! $this->isWithin($path, $root) || ! $this->safeComponents($relativePath)) {
             return null;
         }
 
         $mimeType = (string) ($metadata['file_mime_type'] ?? '');
         $actualMimeType = (string) (new \finfo(FILEINFO_MIME_TYPE))->file($path);
         if (! in_array($mimeType, $allowedMimeTypes, true) || $actualMimeType !== $mimeType) {
+            return null;
+        }
+        if ((isset($metadata['file_size_bytes']) && filesize($path) !== (int) $metadata['file_size_bytes'])
+            || (! empty($metadata['file_checksum']) && ! hash_equals((string) $metadata['file_checksum'], (string) hash_file('sha256', $path)))) {
             return null;
         }
 
@@ -183,7 +211,7 @@ class PrivateEvidenceStorageService
     {
         $uploads = $this->writableDirectory() . 'uploads';
         $target = $uploads . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $directory);
-        if (! is_dir($target)) {
+        if (! is_dir($target) || ! $this->safeComponents($directory)) {
             return null;
         }
         $uploadsRoot = realpath($uploads);
@@ -192,9 +220,58 @@ class PrivateEvidenceStorageService
         return $uploadsRoot !== false && $root !== false && $this->isWithin($root, $uploadsRoot) ? $root : null;
     }
 
+    /** Walk from the trusted writable root; never follow a symlink component. */
+    private function safeComponents(string $relative): bool
+    {
+        $trusted = realpath($this->writableDirectory());
+        if ($trusted === false || is_link(rtrim($this->writableDirectory(), '/\\'))) {
+            return false;
+        }
+        $path = $trusted;
+        foreach (explode('/', 'uploads/' . str_replace('\\', '/', $relative)) as $segment) {
+            $path .= DIRECTORY_SEPARATOR . $segment;
+            if (is_link($path) || ! file_exists($path)) {
+                return false;
+            }
+            $resolved = realpath($path);
+            if ($resolved === false || ! $this->isWithin($resolved, $trusted)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private function ensureDirectory(string $relative, int $mode): void
+    {
+        $trusted = realpath($this->writableDirectory());
+        if ($trusted === false || is_link(rtrim($this->writableDirectory(), '/\\'))) {
+            throw new RuntimeException('Trusted private storage root is unavailable.');
+        }
+        $path = $trusted;
+        foreach (explode('/', 'uploads/' . $relative) as $segment) {
+            $path .= DIRECTORY_SEPARATOR . $segment;
+            if (is_link($path) || (file_exists($path) && ! is_dir($path))) {
+                throw new RuntimeException('Private storage contains an unsafe path component.');
+            }
+            if (! is_dir($path) && ! mkdir($path, $mode)) {
+                throw new RuntimeException('Private evidence directory could not be created.');
+            }
+            $resolved = realpath($path);
+            if ($resolved === false || ! $this->isWithin($resolved, $trusted)) {
+                throw new RuntimeException('Private storage escapes its trusted root.');
+            }
+            // Existing common upload directories retain legacy permissions.
+            if ($mode === 0700 && str_contains(str_replace('\\', '/', $path), '/repair-documents')) {
+                if (! chmod($path, $mode)) {
+                    throw new RuntimeException('Private directory permissions could not be established.');
+                }
+            }
+        }
+    }
+
     private function isSafeRelativePath(string $path, string $requiredRoot): bool
     {
-        if ($path === '' || str_contains($path, "\0") || preg_match('/[\x00-\x1F\x7F]/', $path) === 1) {
+        if ($path === '' || str_contains($path, ':') || str_contains($path, "\0") || preg_match('/[\x00-\x1F\x7F]/', $path) === 1) {
             return false;
         }
         $normalized = str_replace('\\', '/', $path);

@@ -17,7 +17,9 @@ class FileRepository
     public function create(array $data): int
     {
         $now = date('Y-m-d H:i:s');
-        $this->db->table('files')->insert(array_merge($data, ['created_at' => $now, 'updated_at' => $now]));
+        if (! $this->db->table('files')->insert(array_merge($data, ['created_at' => $now, 'updated_at' => $now]))) {
+            throw new \RuntimeException('Private file metadata could not be recorded.');
+        }
 
         return (int) $this->db->insertID();
     }
@@ -47,15 +49,16 @@ class FileRepository
     }
 
     /** @return array<string, mixed>|null */
-    public function findByChecksumInDirectory(string $checksum, string $directory): ?array
+    public function findByChecksumInDirectory(string $checksum, string $directory, bool $lock = false, ?int $candidateId = null): ?array
     {
-        $row = $this->db->table('files')
-            ->where('checksum', $checksum)
-            ->like('path', trim($directory, '/') . '/', 'after')
-            ->where('deleted_at', null)
-            ->get()
-            ->getRowArray();
-
-        return $row === null ? null : $row;
+        $builder = $this->db->table('files')->where('checksum', $checksum)->like('path', trim($directory, '/') . '/', 'after')->where('deleted_at', null)->orderBy('id')->limit(1);
+        if ($candidateId !== null) {
+            $builder->where('id', $candidateId);
+        }
+        $result = $this->db->query($builder->getCompiledSelect() . ($lock && $this->db->getPlatform() !== 'SQLite3' ? ' FOR UPDATE' : ''));
+        if ($result === false) {
+            throw new \RuntimeException('Checksum candidate metadata is unavailable.');
+        }
+        return $result->getRowArray();
     }
 }
