@@ -1,5 +1,51 @@
 # Changelog
 
+## v0.29.0 — Damage Repair Estimates & Documents
+
+Release date: 2026-10-06
+
+### Added
+
+- Add revisioned repair estimates to Damage Ledger Work & Repair jobs.
+- Add frozen estimate scope tied to the exact damage-condition memberships quoted at each revision.
+- Add explicit accepted-estimate selection while preserving competing vendors and revision history.
+- Add current-quote and historical-incomplete estimate modes so incomplete legacy quote facts remain clearly distinguished from authoritative current quotes.
+- Add estimate acceptance, rejection, withdrawal, supersession, and derived expiration behavior.
+- Add private repair documents with estimate, work-order, before-photo, after-photo, and other supported contexts.
+- Add repair-document archive/history without destructive deletion.
+- Add private authorized document download and source verification.
+- Add estimate/document concurrency, stale-state, versioning, and idempotent replay protections.
+
+### Changed
+
+- Harden private file storage validation for containment, symlinks, MIME, checksum identity, and authorized reuse.
+- Ensure uploaded-document rollback removes only newly created uncommitted binaries while preserving committed or reused content.
+- Strengthen multipart validation and upload replay hashing.
+- Harden migration failure handling for B2.2 partial-schema situations.
+
+### Safety and Data Integrity
+
+- Estimate amounts remain quoted proposals and never become actual repair costs automatically.
+- Historical-incomplete estimates cannot be accepted as authoritative current quotes.
+- Estimate acceptance does not schedule work, start repairs, alter physical damage, or create financial records.
+- Estimate scope is frozen per revision and is not rewritten by later membership or condition changes.
+- Private document access is authorized through company → vehicle → repair job → document context.
+- Archived documents remain part of authorized history.
+- B2.2 does not mutate claims, recoveries, maintenance expenses, operating expenses, or realized financial results.
+
+### Schema
+
+- Add `vehicle_damage_repair_estimates`.
+- Add `vehicle_damage_repair_estimate_items`.
+- Add `vehicle_damage_repair_documents`.
+- Add nullable `vehicle_damage_repair_jobs.accepted_estimate_id`.
+- Add supporting membership context uniqueness and ownership enforcement.
+- Migration 000031 is forward additive and intentionally refuses destructive rollback.
+
+### Deferred
+
+- Actual repair charges, invoices, vendor payments, credits/refunds, cost finalization, claim recoveries, and financial reconciliation remain B2.3.
+
 ## v0.28.0 — Damage Repair Work Lifecycle
 
 Release date: 2026-10-06
