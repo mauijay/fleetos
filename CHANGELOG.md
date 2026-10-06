@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.27.1 — Damage Presentation Hotfix
+
+Release date: 2026-10-05
+
+### Fixed
+
+- Fix authenticated Damage & Condition rendering against the real normalized-trip schema.
+- Remove invalid normalized-trip `company_id` assumptions from damage and incident queries.
+- Scope linked trip metadata through the trip's fleet vehicle and company ownership.
+- Preserve owned damage and incident records when optional linked trip metadata is deleted, unassigned, cross-company, or vehicle-mismatched.
+- Restore Movement Checklist known-damage rendering while preserving company and vehicle isolation.
+- Replace test-only fabricated normalized-trip company fields with the actual migrated schema.
+
+### Release Boundaries
+
+- No migration or schema change.
+- Existing Damage Ledger B1 schema and production data remain unchanged.
+- No live damage incident, historical-link, evidence, or claim mutation occurs on deployment.
+- Previously attributed post-deploy auth/commitment activity is preserved unchanged.
+- Deployment must not run `php spark migrate`; the migration ledger must remain unchanged.
+
 ## v0.27.0 — Damage Incident Ledger
 
 Release date: 2026-10-04
