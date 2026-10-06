@@ -1,7 +1,5 @@
 <?php
 
-use App\Database\Migrations\AddVehicleDamageIncidentsAndConditionLinks;
-use App\Database\Migrations\CreateVehicleDamageLedger;
 use App\Repositories\VehicleDamageIncidentRepository;
 use App\Repositories\VehicleDamageRepository;
 use App\Services\Fleet\VehicleDamageIncidentService;
@@ -12,9 +10,7 @@ use CodeIgniter\Test\CIUnitTestCase;
 use Config\Database;
 use PHPUnit\Framework\Attributes\PreserveGlobalState;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
-
-require_once __DIR__ . '/../../app/Database/Migrations/2026-09-25-000027_CreateVehicleDamageLedger.php';
-require_once __DIR__ . '/../../app/Database/Migrations/2026-10-05-000029_AddVehicleDamageIncidentsAndConditionLinks.php';
+use Tests\Support\VehicleDamageDatabaseFixture;
 
 /** @internal */
 #[PreserveGlobalState(false)]
@@ -30,11 +26,8 @@ final class VehicleDamageIncidentServiceTest extends CIUnitTestCase
     {
         parent::setUp();
         $this->connection = Database::connect('tests', false);
-        $this->dropTables();
-        $this->createPrerequisites();
-        (new CreateVehicleDamageLedger(Database::forge($this->connection)))->up();
-        (new AddVehicleDamageIncidentsAndConditionLinks(Database::forge($this->connection)))->up();
-        $this->seed();
+        VehicleDamageDatabaseFixture::migrate($this->connection, true);
+        VehicleDamageDatabaseFixture::seed($this->connection);
         $this->items = new VehicleDamageRepository($this->connection);
         $this->incidents = new VehicleDamageIncidentRepository($this->connection);
         $this->service = new VehicleDamageIncidentService($this->connection);
@@ -55,7 +48,7 @@ final class VehicleDamageIncidentServiceTest extends CIUnitTestCase
     {
         $id = $this->create(['trip_id' => 100, 'attribution_type' => 'discovered_during_trip']);
         $incident = $this->incidents->incident(1, 10, $id);
-        $this->assertSame('LOCAL-DAMAGE-TRIP-A', $incident['turo_reservation_id']);
+        $this->assertSame('SYNTHETIC-RESERVATION-100', $incident['turo_reservation_id']);
         $this->assertSame('discovered_during_trip', $incident['attribution_type']);
         $this->assertArrayNotHasKey('guest_name', $incident);
         foreach ([101, 200, 999] as $tripId) {
@@ -236,10 +229,10 @@ final class VehicleDamageIncidentServiceTest extends CIUnitTestCase
 
     public function testMigrationPreservesPreexistingPhaseADataAndForeignKeys(): void
     {
-        $this->dropTables();
-        $this->createPrerequisites();
-        (new CreateVehicleDamageLedger(Database::forge($this->connection)))->up();
-        $this->seed();
+        $this->connection = Database::connect('tests', false);
+        VehicleDamageDatabaseFixture::migrate($this->connection, false);
+        VehicleDamageDatabaseFixture::seed($this->connection);
+        $this->items = new VehicleDamageRepository($this->connection);
         $conditions = new VehicleDamageService($this->connection);
         $created = $conditions->create(1, 10, ['zone_code' => 'front', 'damage_type_code' => 'dent', 'severity_code' => 'unsafe', 'description' => 'Synthetic legacy damage', 'discovered_at' => '2026-09-25T09:30', 'trip_id' => 100, 'file_id' => 800], 7);
         $this->assertTrue($created['success']);
@@ -247,7 +240,7 @@ final class VehicleDamageIncidentServiceTest extends CIUnitTestCase
         $before = $this->items->item(1, 10, $itemId);
         $events = $this->items->events(1, $itemId);
         $evidence = $this->items->evidence(1, $itemId);
-        (new AddVehicleDamageIncidentsAndConditionLinks(Database::forge($this->connection)))->up();
+        VehicleDamageDatabaseFixture::migrate($this->connection);
         $after = $this->items->item(1, 10, $itemId);
         $this->assertNull($after['panel_code']);
         $this->assertNull($after['current_condition_item_id']);
@@ -336,74 +329,5 @@ final class VehicleDamageIncidentServiceTest extends CIUnitTestCase
     private function link(int $source, int $target): array
     {
         return $this->service->linkHistorical(1, 10, $source, $target, $this->linkData($source, $target), 7);
-    }
-    private function createPrerequisites(): void
-    {
-        $this->connection->query('CREATE TABLE ' . $this->table('companies') . ' (id INTEGER PRIMARY KEY, name VARCHAR(80))');
-        $this->connection->query('CREATE TABLE ' . $this->table('fleet_vehicles') . ' (id INTEGER PRIMARY KEY, company_id INTEGER, vehicle_status_id INTEGER, fleet_code VARCHAR(80), display_name VARCHAR(150), out_of_service_date DATE NULL, deleted_at DATETIME NULL)');
-        $this->connection->query('CREATE TABLE ' . $this->table('turo_trips_normalized') . ' (id INTEGER PRIMARY KEY, company_id INTEGER, fleet_vehicle_id INTEGER, turo_reservation_id VARCHAR(80), starts_at DATETIME, ends_at DATETIME, deleted_at DATETIME NULL)');
-        $this->connection->query('CREATE TABLE ' . $this->table('trip_movement_events') . ' (id INTEGER PRIMARY KEY, company_id INTEGER, turo_trip_normalized_id INTEGER, fleet_vehicle_id INTEGER, event_code VARCHAR(40), occurred_at DATETIME, voided_at DATETIME NULL)');
-        $this->connection->query('CREATE TABLE ' . $this->table('vehicle_recovery_exceptions') . ' (id INTEGER PRIMARY KEY, company_id INTEGER, turo_trip_normalized_id INTEGER, fleet_vehicle_id INTEGER, trip_movement_event_id INTEGER, exception_code VARCHAR(40), note TEXT NULL, status VARCHAR(20))');
-        $this->connection->query('CREATE TABLE ' . $this->table('damage_claims') . ' (id INTEGER PRIMARY KEY, fleet_vehicle_id INTEGER, claim_status_lookup_value_id INTEGER NULL, claim_number VARCHAR(120) NULL, closed_on DATE NULL, deleted_at DATETIME NULL)');
-        $this->connection->query('CREATE TABLE ' . $this->table('images') . ' (id INTEGER PRIMARY KEY, path VARCHAR(255), storage_disk VARCHAR(80) DEFAULT "local", alt_text VARCHAR(190) NULL, deleted_at DATETIME NULL)');
-        $this->connection->query('CREATE TABLE ' . $this->table('files') . ' (id INTEGER PRIMARY KEY, path VARCHAR(255), storage_disk VARCHAR(80) DEFAULT "local", original_filename VARCHAR(190) NULL, deleted_at DATETIME NULL)');
-        $this->connection->query('CREATE TABLE ' . $this->table('vehicle_images') . ' (id INTEGER PRIMARY KEY, fleet_vehicle_id INTEGER, image_id INTEGER)');
-        $this->connection->query('CREATE TABLE ' . $this->table('vehicle_files') . ' (id INTEGER PRIMARY KEY, fleet_vehicle_id INTEGER, file_id INTEGER)');
-        $this->connection->query('CREATE TABLE ' . $this->table('lookup_types') . ' (id INTEGER PRIMARY KEY, code VARCHAR(80))');
-        $this->connection->query('CREATE TABLE ' . $this->table('lookup_values') . ' (id INTEGER PRIMARY KEY, lookup_type_id INTEGER, code VARCHAR(80), name VARCHAR(120), is_active BOOLEAN)');
-        $this->connection->query('CREATE TABLE ' . $this->table('audit_logs') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, actor_user_id INTEGER NULL, action_lookup_value_id INTEGER NULL, table_name VARCHAR(120), record_id INTEGER, old_values TEXT NULL, new_values TEXT NULL, created_at DATETIME NULL)');
-    }
-
-    private function seed(): void
-    {
-        $this->connection->table('companies')->insertBatch([['id' => 1, 'name' => 'Company A'], ['id' => 2, 'name' => 'Company B']]);
-        $this->connection->table('fleet_vehicles')->insertBatch([
-            ['id' => 10, 'company_id' => 1, 'vehicle_status_id' => 1, 'fleet_code' => 'LOCAL-DAMAGE-10', 'display_name' => 'Damage Vehicle'],
-            ['id' => 11, 'company_id' => 1, 'vehicle_status_id' => 1, 'fleet_code' => 'LOCAL-DAMAGE-11', 'display_name' => 'Other Vehicle'],
-            ['id' => 20, 'company_id' => 2, 'vehicle_status_id' => 1, 'fleet_code' => 'OTHER-COMPANY-20', 'display_name' => 'Other Company'],
-        ]);
-        $this->connection->table('turo_trips_normalized')->insertBatch([
-            ['id' => 100, 'company_id' => 1, 'fleet_vehicle_id' => 10, 'turo_reservation_id' => 'LOCAL-DAMAGE-TRIP-A'],
-            ['id' => 102, 'company_id' => 1, 'fleet_vehicle_id' => 10, 'turo_reservation_id' => 'LOCAL-DAMAGE-TRIP-B'],
-            ['id' => 101, 'company_id' => 1, 'fleet_vehicle_id' => 11, 'turo_reservation_id' => 'LOCAL-OTHER-TRIP'],
-            ['id' => 200, 'company_id' => 2, 'fleet_vehicle_id' => 20, 'turo_reservation_id' => 'OTHER-COMPANY-TRIP'],
-        ]);
-        $this->connection->table('trip_movement_events')->insertBatch([
-            ['id' => 1000, 'company_id' => 1, 'turo_trip_normalized_id' => 100, 'fleet_vehicle_id' => 10, 'event_code' => 'vehicle_recovered', 'occurred_at' => '2026-09-25 09:00:00'],
-            ['id' => 1002, 'company_id' => 1, 'turo_trip_normalized_id' => 102, 'fleet_vehicle_id' => 10, 'event_code' => 'vehicle_recovered', 'occurred_at' => '2026-09-26 16:30:00'],
-            ['id' => 1001, 'company_id' => 1, 'turo_trip_normalized_id' => 101, 'fleet_vehicle_id' => 11, 'event_code' => 'vehicle_recovered', 'occurred_at' => '2026-09-25 09:00:00'],
-        ]);
-        $this->connection->table('vehicle_recovery_exceptions')->insertBatch([
-            ['id' => 500, 'company_id' => 1, 'turo_trip_normalized_id' => 100, 'fleet_vehicle_id' => 10, 'trip_movement_event_id' => 1000, 'exception_code' => 'damage', 'note' => 'Bumper scrape', 'status' => 'open'],
-            ['id' => 501, 'company_id' => 1, 'turo_trip_normalized_id' => 101, 'fleet_vehicle_id' => 11, 'trip_movement_event_id' => 1001, 'exception_code' => 'damage', 'note' => 'Other vehicle', 'status' => 'open'],
-        ]);
-        $this->connection->table('lookup_types')->insert(['id' => 1, 'code' => 'audit_action']);
-        $this->connection->table('lookup_values')->insertBatch([
-            ['id' => 1, 'lookup_type_id' => 1, 'code' => 'created', 'name' => 'Created', 'is_active' => 1],
-            ['id' => 2, 'lookup_type_id' => 1, 'code' => 'updated', 'name' => 'Updated', 'is_active' => 1],
-            ['id' => 3, 'lookup_type_id' => 2, 'code' => 'open', 'name' => 'Open', 'is_active' => 1],
-        ]);
-        $this->connection->table('damage_claims')->insertBatch([
-            ['id' => 700, 'fleet_vehicle_id' => 10, 'claim_status_lookup_value_id' => 3, 'claim_number' => 'CLAIM-700'],
-            ['id' => 701, 'fleet_vehicle_id' => 11, 'claim_status_lookup_value_id' => 3, 'claim_number' => 'CLAIM-701'],
-        ]);
-        $this->connection->table('files')->insertBatch([['id' => 800, 'path' => 'private/file-800', 'original_filename' => 'damage.pdf'], ['id' => 801, 'path' => 'private/file-801', 'original_filename' => 'other.pdf']]);
-        $this->connection->table('images')->insertBatch([['id' => 900, 'path' => 'private/image-900', 'alt_text' => 'Damage image'], ['id' => 901, 'path' => 'private/image-901', 'alt_text' => 'Other image']]);
-        $this->connection->table('vehicle_files')->insertBatch([['id' => 1, 'fleet_vehicle_id' => 10, 'file_id' => 800], ['id' => 2, 'fleet_vehicle_id' => 11, 'file_id' => 801]]);
-        $this->connection->table('vehicle_images')->insertBatch([['id' => 1, 'fleet_vehicle_id' => 10, 'image_id' => 900], ['id' => 2, 'fleet_vehicle_id' => 11, 'image_id' => 901]]);
-    }
-
-    private function dropTables(): void
-    {
-        $this->connection->query('PRAGMA foreign_keys = OFF');
-        foreach (['vehicle_damage_incident_items', 'vehicle_damage_incidents', 'vehicle_damage_item_evidence', 'vehicle_damage_item_events', 'vehicle_damage_items', 'audit_logs', 'vehicle_files', 'vehicle_images', 'files', 'images', 'damage_claims', 'vehicle_recovery_exceptions', 'trip_movement_events', 'turo_trips_normalized', 'fleet_vehicles', 'companies', 'lookup_values', 'lookup_types'] as $table) {
-            $this->connection->query('DROP TABLE IF EXISTS ' . $this->table($table));
-        }
-        $this->connection->query('PRAGMA foreign_keys = ON');
-    }
-
-    private function table(string $table): string
-    {
-        return $this->connection->getPrefix() . $table;
     }
 }

@@ -51,6 +51,7 @@ class VehicleDamageIncidentRepository
         return $this->db->table('vehicle_damage_incident_items links')->select('links.*, damage.description, damage.current_condition_item_id')
             ->join('vehicle_damage_incidents incidents', 'incidents.id = links.vehicle_damage_incident_id AND incidents.company_id = links.company_id')
             ->join('vehicle_damage_items damage', 'damage.id = links.vehicle_damage_item_id AND damage.company_id = links.company_id AND damage.fleet_vehicle_id = incidents.fleet_vehicle_id')
+            ->join('fleet_vehicles vehicles', 'vehicles.id = incidents.fleet_vehicle_id AND vehicles.company_id = incidents.company_id AND vehicles.deleted_at IS NULL')
             ->where('links.company_id', $companyId)->where('incidents.fleet_vehicle_id', $vehicleId)->where('incidents.id', $incidentId)->orderBy('links.id')->get()->getResultArray();
     }
 
@@ -64,6 +65,7 @@ class VehicleDamageIncidentRepository
     {
         return $this->db->table('audit_logs audit')->select('audit.*')
             ->join('vehicle_damage_incidents incidents', "incidents.id = audit.record_id AND audit.table_name = 'vehicle_damage_incidents'")
+            ->join('fleet_vehicles vehicles', 'vehicles.id = incidents.fleet_vehicle_id AND vehicles.company_id = incidents.company_id AND vehicles.deleted_at IS NULL')
             ->where('incidents.company_id', $companyId)->where('incidents.fleet_vehicle_id', $vehicleId)->where('incidents.id', $incidentId)
             ->orderBy('audit.id')->get()->getResultArray();
     }
@@ -71,14 +73,17 @@ class VehicleDamageIncidentRepository
     /** @return list<array<string,mixed>> */
     public function trips(int $companyId, int $vehicleId): array
     {
-        return $this->db->table('turo_trips_normalized')->select('id, turo_reservation_id')
-            ->where('company_id', $companyId)->where('fleet_vehicle_id', $vehicleId)->where('deleted_at', null)->orderBy('id', 'DESC')->get()->getResultArray();
+        return $this->db->table('turo_trips_normalized trips')->select('trips.id, trips.turo_reservation_id')
+            ->join('fleet_vehicles vehicles', 'vehicles.id = trips.fleet_vehicle_id')
+            ->where('vehicles.company_id', $companyId)->where('vehicles.deleted_at', null)
+            ->where('trips.fleet_vehicle_id', $vehicleId)->where('trips.deleted_at', null)->orderBy('trips.id', 'DESC')->get()->getResultArray();
     }
 
     private function builder(int $companyId, int $vehicleId): \CodeIgniter\Database\BaseBuilder
     {
         return $this->db->table('vehicle_damage_incidents incidents')->select('incidents.*, trips.turo_reservation_id')
-            ->join('turo_trips_normalized trips', 'trips.id = incidents.turo_trip_normalized_id AND trips.company_id = incidents.company_id AND trips.fleet_vehicle_id = incidents.fleet_vehicle_id AND trips.deleted_at IS NULL', 'left')
+            ->join('fleet_vehicles vehicles', 'vehicles.id = incidents.fleet_vehicle_id AND vehicles.company_id = incidents.company_id AND vehicles.deleted_at IS NULL')
+            ->join('turo_trips_normalized trips', 'trips.id = incidents.turo_trip_normalized_id AND trips.fleet_vehicle_id = incidents.fleet_vehicle_id AND trips.deleted_at IS NULL', 'left')
             ->where('incidents.company_id', $companyId)->where('incidents.fleet_vehicle_id', $vehicleId);
     }
 }
