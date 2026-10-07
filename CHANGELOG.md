@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.30.2 — HNL Staging Workflow Fix
+
+Release date: 2026-10-07
+
+### Fixed
+
+- Restore the structured HNL pickup-staging form when an airport pickup
+  checklist requires a new `stage_vehicle_at_hnl` fact.
+- Ensure the checklist “Record facts” action leads to an actionable staging
+  workflow instead of an empty/dead page anchor.
+- Allow operators to record a new authoritative HNL staging event after an
+  intervening trip while preserving historical staging and custody integrity.
+- Keep staging distinct from guest handoff and generic vehicle-position entry.
+
+### Safety
+
+- Existing active guest custody protections remain unchanged.
+- Historical HNL staging is never rewritten to satisfy a later reservation.
+- Successful staging updates vehicle position and readiness through existing
+  authoritative movement facts.
+- No repair-cost, estimate, claim, maintenance, expense, or financial behavior
+  changes.
+
 ## v0.30.1 — Repair Cost Schema Hardening
 
 Release date: 2026-10-07
