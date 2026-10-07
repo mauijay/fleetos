@@ -14,6 +14,7 @@ class VehicleDamageRepairEstimateService
     public readonly Estimates $estimates;
     public readonly VehicleDamageRepairDocumentService $documents;
     private VehicleDamageRepairRepository $work;
+    private array $lockedDocuments = [];
 
     public function __construct(private readonly BaseConnection $db)
     {
@@ -27,11 +28,20 @@ class VehicleDamageRepairEstimateService
     {
         foreach ([Estimates::ESTIMATES, Estimates::SCOPE, Estimates::DOCUMENTS] as $table) {
             $sql = $this->db->table($table)->where('company_id', $company)->whereIn('vehicle_damage_repair_job_id', $jobs)->orderBy('id')->getCompiledSelect();
-            if ($this->db->query($sql . ($this->db->getPlatform() === 'SQLite3' ? '' : ' FOR UPDATE')) === false) {
+            $result = $this->db->query($sql . ($this->db->getPlatform() === 'SQLite3' ? '' : ' FOR UPDATE'));
+            if ($result === false) {
                 throw new \RuntimeException('Estimate/document state is busy. Reload and retry.');
             }
+            if ($table === Estimates::DOCUMENTS) {
+                $this->lockedDocuments = $result->getResultArray();
+            }
         }
-        $docs = $this->db->table(Estimates::DOCUMENTS)->where('company_id', $company)->whereIn('vehicle_damage_repair_job_id', $jobs)->get()->getResultArray();
+    }
+
+    /** Called only after aggregate rows, including any B2.3 costs, are locked. */
+    public function lockMetadata(array $jobs, int $company): void
+    {
+        $docs = $this->lockedDocuments;
         foreach (['file_id', 'image_id'] as $key) {
             $ids = array_values(array_unique(array_filter(array_map('intval', array_column($docs, $key)))));
             if ($key === 'file_id' && $this->documents->uploadCandidateId > 0) {
@@ -184,6 +194,7 @@ class VehicleDamageRepairEstimateService
             $event = 'document_attached';
         } elseif ($action === 'b22_archive') {
             $id = (int) ($data['document_id'] ?? 0);
+            (new \App\Repositories\VehicleDamageRepairCostRepository($this->db))->archiveGuard($c, $j, $id);
             $doc = $this->documents->documents->document($c, $v, $j, $id);
             if ($doc === null || $doc['archived_at'] !== null) {
                 throw new InvalidArgumentException('Document is unavailable or already archived.');

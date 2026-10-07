@@ -73,6 +73,14 @@ $routes->group('', ['filter' => 'session'], static function (RouteCollection $ro
         foreach (['accept' => 'acceptEstimate', 'reject' => 'rejectEstimate', 'withdraw' => 'withdrawEstimate'] as $path => $action) {
             $routes->post('(:num)/damage-repairs/(:num)/estimates/(:num)/' . $path, 'VehicleDamageRepairs::' . $action . '/$1/$2/$3');
         }
+        $routes->get('(:num)/damage-repairs/(:num)/costs/new', 'VehicleDamageRepairs::costForm/$1/$2');
+        $routes->get('(:num)/damage-repairs/(:num)/costs/(:num)/replacement', 'VehicleDamageRepairs::costForm/$1/$2/$3');
+        $routes->post('(:num)/damage-repairs/(:num)/costs/review', 'VehicleDamageRepairs::reviewCost/$1/$2');
+        $routes->post('(:num)/damage-repairs/(:num)/costs', 'VehicleDamageRepairs::recordCost/$1/$2');
+        $routes->post('(:num)/damage-repairs/(:num)/costs/(:num)/replace', 'VehicleDamageRepairs::replaceCost/$1/$2/$3');
+        $routes->post('(:num)/damage-repairs/(:num)/costs/(:num)/void', 'VehicleDamageRepairs::voidCost/$1/$2/$3');
+        $routes->post('(:num)/damage-repairs/(:num)/costs/finalize', 'VehicleDamageRepairs::finalizeCost/$1/$2');
+        $routes->post('(:num)/damage-repairs/(:num)/costs/invalidate', 'VehicleDamageRepairs::invalidateCost/$1/$2');
         $routes->get('(:num)/damage-repairs/(:num)/documents/new', 'VehicleDamageRepairs::documentForm/$1/$2');
         $routes->post('(:num)/damage-repairs/(:num)/documents', 'VehicleDamageRepairs::attachDocument/$1/$2');
         $routes->post('(:num)/damage-repairs/(:num)/documents/(:num)/archive', 'VehicleDamageRepairs::archiveDocument/$1/$2/$3');

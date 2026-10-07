@@ -64,7 +64,7 @@ Routes remain under the existing authenticated admin vehicle group with POST CSR
 
 ## Boundaries and deferred work
 
-B2.1 does not write claims, normalized transactions, maintenance, expenses, financial activity, evidence/files/images, incident attribution, movement, commitments or availability. It does not create financial reporting entries or count maintenance twice. B2.2/B2.3 estimates, quote acceptance, uploads, invoices, payments, actual cost, claim recovery, net host cost and reconciliation remain deferred.
+B2.1 does not write claims, normalized transactions, maintenance, expenses, financial activity, evidence/files/images, incident attribution, movement, commitments or availability. It does not create financial reporting entries or count maintenance twice. B2.2 adds estimates and private documents; [B2.3](vehicle-damage-repair-costs.md) adds evidence-backed invoices, credits, vendor payments/refunds and invoiced-cost finalization. Recovery and reconciliation remain B3 work.
 
 ## Local validation
 

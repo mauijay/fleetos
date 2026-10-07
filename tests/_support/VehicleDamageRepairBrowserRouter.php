@@ -54,7 +54,7 @@ $items = new \App\Repositories\VehicleDamageRepository($db);
 $conditions = new \App\Services\Fleet\VehicleDamageService($db);
 $repairs = new \App\Repositories\VehicleDamageRepairRepository($db);
 $read = new \App\Services\Fleet\VehicleDamageReadService($conditions, $items, $repairs);
-foreach (['vehicleDamageRepository' => $items, 'vehicleDamageService' => $conditions, 'vehicleDamageRepairRepository' => $repairs, 'vehicleDamageRepairService' => new \App\Services\Fleet\VehicleDamageRepairService($db), 'vehicleDamageRepairEstimateRepository' => new \App\Repositories\VehicleDamageRepairEstimateRepository($db), 'vehicleDamageRepairDocumentRepository' => new \App\Repositories\VehicleDamageRepairDocumentRepository($db), 'repairDocumentStorageService' => new \App\Services\Files\RepairDocumentStorageService($db), 'vehicleDamageReadService' => $read] as $name => $instance) {
+foreach (['vehicleDamageRepository' => $items, 'vehicleDamageService' => $conditions, 'vehicleDamageRepairRepository' => $repairs, 'vehicleDamageRepairCostService' => new \App\Services\Fleet\VehicleDamageRepairCostService($db), 'vehicleDamageRepairCostReadService' => new \App\Services\Fleet\VehicleDamageRepairCostReadService($db), 'vehicleDamageRepairService' => new \App\Services\Fleet\VehicleDamageRepairService($db), 'vehicleDamageRepairEstimateRepository' => new \App\Repositories\VehicleDamageRepairEstimateRepository($db), 'vehicleDamageRepairDocumentRepository' => new \App\Repositories\VehicleDamageRepairDocumentRepository($db), 'repairDocumentStorageService' => new \App\Services\Files\RepairDocumentStorageService($db), 'vehicleDamageReadService' => $read] as $name => $instance) {
     \Config\Services::injectMock($name, $instance);
 }
 \Config\Services::injectMock('operationalFactsRepository', new class ($db) extends \App\Repositories\OperationalFactsRepository {
@@ -105,6 +105,24 @@ $request->setMethod($_SERVER['REQUEST_METHOD']);
 try {
     if ($request->is('post')) {
         \CodeIgniter\Config\Services::security()->verify($request);
+        if ($request->getPost('synthetic_lost_ack') === '1') {
+            // Only this loopback synthetic router can inject a real post-COMMIT
+            // fault plus one unavailable recovery; the next HTTP request is normal.
+            $injected = false;
+            \CodeIgniter\Events\Events::on('DBQuery', static function (\CodeIgniter\Database\Query $query) use (&$injected): void {
+                if (! $injected && trim(strtoupper($query->getQuery())) === 'COMMIT') {
+                    $injected = true;
+                    throw new RuntimeException('Synthetic browser acknowledgement lost AFTER COMMIT');
+                }
+            });
+            \Config\Services::injectMock('vehicleDamageRepairService', new class ($db) extends \App\Services\Fleet\VehicleDamageRepairService {
+                private int $calls = 0;
+                public function recordCostEntry(int $c, int $v, int $j, array $d, int $a): array
+                {
+                    return ++$this->calls === 1 ? parent::recordCostEntry($c, $v, $j, $d, $a) : ['success' => false, 'errors' => ['work' => 'Synthetic recovery temporarily unavailable']];
+                }
+            });
+        }
     }
     $controller = new \App\Controllers\VehicleDamageRepairs();
     $controller->initController($request, \CodeIgniter\Config\Services::response(), \CodeIgniter\Config\Services::logger());
@@ -120,6 +138,14 @@ try {
             $result = $controller->{$method}(10, (int) $match[1], (int) $match[3]);
         } else {
             $result = $controller->createEstimate(10, (int) $match[1]);
+        }
+    } elseif (preg_match('~^/fleet/vehicles/10/damage-repairs/(\d+)/costs(?:/(new|review|finalize|invalidate)|/(\d+)/(replacement|replace|void))?$~', $path, $match)) {
+        if (! empty($match[3])) {
+            $method = ['replacement' => 'costForm', 'replace' => 'replaceCost', 'void' => 'voidCost'][$match[4]];
+            $result = $controller->{$method}(10, (int) $match[1], (int) $match[3]);
+        } else {
+            $method = ['' => 'recordCost', 'new' => 'costForm', 'review' => 'reviewCost', 'finalize' => 'finalizeCost', 'invalidate' => 'invalidateCost'][$match[2] ?? ''];
+            $result = $controller->{$method}(10, (int) $match[1]);
         }
     } elseif (preg_match('~^/fleet/vehicles/10/damage-repairs/(\d+)/documents(?:/(new)|/(\d+)/(archive|download))?$~', $path, $match)) {
         if (($match[2] ?? '') === 'new') {
@@ -149,8 +175,17 @@ try {
         $result->send();
     } else {
         header('Content-Length: ' . strlen($result));
-        header('Connection: close');
-        echo $result;
+        session_write_close();
+        // The Windows development SAPI can reset a large buffered close-only response.
+        // Keep this synthetic transport bounded; application rendering is unchanged.
+        while (ob_get_level() > 0) {
+            ob_end_flush();
+        }
+        for ($offset = 0, $length = strlen($result); $offset < $length; $offset += 8192) {
+            echo substr($result, $offset, 8192);
+            flush();
+            usleep(1000);
+        }
     }
 } catch (\CodeIgniter\Exceptions\PageNotFoundException) {
     http_response_code(404);

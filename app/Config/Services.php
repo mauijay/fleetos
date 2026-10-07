@@ -445,6 +445,16 @@ class Services extends BaseService
         return $getShared ? static::getSharedInstance('vehicleDamageRepairRepository') : new \App\Repositories\VehicleDamageRepairRepository();
     }
 
+    public static function vehicleDamageRepairCostService(bool $getShared = true): \App\Services\Fleet\VehicleDamageRepairCostService
+    {
+        return $getShared ? static::getSharedInstance('vehicleDamageRepairCostService') : new \App\Services\Fleet\VehicleDamageRepairCostService(\Config\Database::connect());
+    }
+
+    public static function vehicleDamageRepairCostReadService(bool $getShared = true): \App\Services\Fleet\VehicleDamageRepairCostReadService
+    {
+        return $getShared ? static::getSharedInstance('vehicleDamageRepairCostReadService') : new \App\Services\Fleet\VehicleDamageRepairCostReadService();
+    }
+
     public static function vehicleDamageRepairEstimateRepository(bool $getShared = true): \App\Repositories\VehicleDamageRepairEstimateRepository
     {
         return $getShared ? static::getSharedInstance('vehicleDamageRepairEstimateRepository') : new \App\Repositories\VehicleDamageRepairEstimateRepository();

@@ -42,7 +42,7 @@ final class VehicleDamageRepairMariaDbFixture
                 }
             } else {
                 foreach (glob(__DIR__ . '/../../app/Database/Migrations/*.php') as $path) {
-                    if (strcmp(basename($path), $through === 30 ? '2026-10-06-000031' : '9999') < 0) {
+                    if (strcmp(basename($path), $through < 32 ? '2026-10-06-0000' . ($through + 1) : '9999') < 0) {
                         $runner->force($path, 'App');
                     }
                 }
@@ -85,7 +85,7 @@ final class VehicleDamageRepairMariaDbFixture
     }
 
     /** Start a separate PHP process/connection while the parent owns an uncommitted vehicle lock. */
-    public function contend(string $operation, array $arguments, ?\Closure $beforeRelease = null): array
+    public function contend(string $operation, array $arguments, ?\Closure $beforeRelease = null, ?\Closure $afterRelease = null): array
     {
         $parentTransaction = $this->db->query('SELECT @@in_transaction AS active')->getRowArray();
         if ((int) $parentTransaction['active'] !== 1) {
@@ -106,6 +106,9 @@ final class VehicleDamageRepairMariaDbFixture
                 $beforeRelease();
             }
             $this->db->transCommit();
+            if ($afterRelease !== null) {
+                $afterRelease();
+            }
             fwrite($pipes[0], "retry\n");
             fclose($pipes[0]);
             $resultLine = (string) fgets($pipes[1]);
@@ -124,6 +127,70 @@ final class VehicleDamageRepairMariaDbFixture
             }
 
             return ['blocked' => $contention['lock_timeout'] && ! $contention['attempt']['success'], 'result' => $result['receipt'], 'locks' => $result['locks']];
+        } finally {
+            if (is_resource($process)) {
+                proc_terminate($process);
+                proc_close($process);
+            }
+        }
+    }
+
+    /** Observe a live InnoDB wait, then let the canonical winner commit without retrying the contender. */
+    public function contendUntilCommit(string $operation, array $arguments, \Closure $winner, string $waitingTable = 'fleet_vehicles'): array
+    {
+        $process = null;
+        $pipes = [];
+        $blocked = false;
+        $engine = $this->db->query('SELECT ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=?', [$this->db->prefixTable($waitingTable)])->getRowArray()['ENGINE'];
+        if ($engine !== 'InnoDB') {
+            throw new RuntimeException('Live contention requires actual InnoDB rows.');
+        }
+        try {
+            $receipt = $winner(function () use ($operation, $arguments, $waitingTable, &$process, &$pipes, &$blocked): \DateTimeImmutable {
+                $process = proc_open([PHP_BINARY, '-c', (string) php_ini_loaded_file(), __FILE__], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, dirname(__DIR__, 2));
+                if (! is_resource($process)) {
+                    throw new RuntimeException('Could not start the live-wait contender.');
+                }
+                fwrite($pipes[0], json_encode(['configuration' => $this->configuration, 'operation' => $operation, 'arguments' => $arguments, 'live_wait' => true], JSON_THROW_ON_ERROR) . PHP_EOL);
+                fclose($pipes[0]);
+                stream_set_timeout($pipes[1], 15);
+                $thread = json_decode((string) fgets($pipes[1]), true, 512, JSON_THROW_ON_ERROR)['thread'];
+                // Readiness inspects real FK/check metadata before acquiring a row
+                // lock. Give that work time; the lock itself still has a 15s limit.
+                $deadline = microtime(true) + 45;
+                do {
+                    // The winner holds this indexed row. Observing the
+                    // contender still executing its FOR UPDATE after one second
+                    // proves a live wait without relying on cached InnoDB views.
+                    $wait = $this->admin->query('SELECT INFO FROM information_schema.PROCESSLIST WHERE ID=? AND COMMAND=\'Query\' AND TIME>=1', [$thread])->getRowArray();
+                    if ($wait !== null && str_contains($wait['INFO'] ?? '', '`' . $this->db->prefixTable($waitingTable) . '`') && str_contains($wait['INFO'] ?? '', 'FOR UPDATE')) {
+                        $blocked = true;
+                        break;
+                    }
+                    if (! proc_get_status($process)['running']) {
+                        throw new RuntimeException('Contender ' . $thread . ' exited before an observed lock wait: ' . stream_get_contents($pipes[1]) . stream_get_contents($pipes[2]));
+                    }
+                    usleep(50000);
+                } while (microtime(true) < $deadline);
+                if (! $blocked) {
+                    $state = $this->admin->query('SHOW PROCESSLIST')->getResultArray();
+                    throw new RuntimeException('The contender did not enter an observable InnoDB lock wait: ' . json_encode($state));
+                }
+                return new \DateTimeImmutable();
+            });
+            if (! ($receipt['success'] ?? false)) {
+                throw new RuntimeException('The canonical winner failed: ' . json_encode($receipt));
+            }
+            $result = json_decode((string) fgets($pipes[1]), true, 512, JSON_THROW_ON_ERROR);
+            $errors = stream_get_contents($pipes[2]);
+            fclose($pipes[1]);
+            fclose($pipes[2]);
+            $exit = proc_close($process);
+            $process = null;
+            if ($exit !== 0 || $errors !== '' || $result['lock_timeout']) {
+                throw new RuntimeException('The live-wait contender did not resume cleanly: ' . $errors);
+            }
+            return ['blocked' => $blocked, 'result' => $result['receipt'], 'locks' => $result['locks'], 'winner' => $receipt, 'snapshot_primed' => $result['snapshot_primed']];
         } finally {
             if (is_resource($process)) {
                 proc_terminate($process);
@@ -151,12 +218,35 @@ final class VehicleDamageRepairMariaDbFixture
             if ($request['operation'] === 'reopenCondition') {
                 return (new \App\Services\Fleet\VehicleDamageService($connection))->reopenRepairedCondition(...$request['arguments']);
             }
-            $methods = ['createJob', 'complete', 'recordMembershipResult', 'confirmConditionRepaired', 'addCondition', 'withdrawCondition', 'createEstimate', 'createRevision', 'acceptEstimate', 'rejectEstimate', 'withdrawEstimate', 'attachDocument', 'archiveDocument'];
+            $methods = ['createJob', 'complete', 'recordMembershipResult', 'confirmConditionRepaired', 'addCondition', 'withdrawCondition', 'createEstimate', 'createRevision', 'acceptEstimate', 'rejectEstimate', 'withdrawEstimate', 'attachDocument', 'archiveDocument', 'recordCostEntry', 'voidCostEntry', 'replaceCostEntry', 'finalizeRepairCost', 'invalidateCostFinalization'];
             if (! in_array($request['operation'], $methods, true)) {
                 throw new RuntimeException('Unknown contention operation.');
             }
             return (new \App\Services\Fleet\VehicleDamageRepairService($connection))->{$request['operation']}(...$request['arguments']);
         };
+        if (! empty($request['live_wait'])) {
+            $db->query('SET SESSION innodb_lock_wait_timeout = 15');
+            $snapshotPrimed = $request['operation'] === 'archiveDocument';
+            if ($snapshotPrimed) {
+                $db->transBegin();
+                // B2.2 still supports caller-owned transactions. Establish an old RR
+                // snapshot before waiting; archive authority must use current reads.
+                $db->table('vehicle_damage_repair_cost_entries')->get()->getResultArray();
+                $db->table('vehicle_damage_repair_documents')->get()->getResultArray();
+            }
+            // Bypass framework output buffering so the parent sees this barrier
+            // while the worker is still blocked inside its service call.
+            fwrite(STDOUT, json_encode(['thread' => (int) $db->query('SELECT CONNECTION_ID() AS thread')->getRowArray()['thread']], JSON_THROW_ON_ERROR) . PHP_EOL);
+            fflush(STDOUT);
+            $receipt = $operation($db);
+            if ($snapshotPrimed) {
+                $receipt['success'] ? $db->transCommit() : $db->transRollback();
+            }
+            fwrite(STDOUT, json_encode(['receipt' => $receipt, 'locks' => $lockTrace, 'lock_timeout' => $lockTimeout, 'snapshot_primed' => $snapshotPrimed], JSON_THROW_ON_ERROR) . PHP_EOL);
+            fflush(STDOUT);
+            $db->close();
+            return;
+        }
         $attempt = $operation($db);
         echo json_encode(['lock_timeout' => $lockTimeout, 'attempt' => $attempt], JSON_THROW_ON_ERROR) . PHP_EOL;
         flush();

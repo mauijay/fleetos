@@ -74,6 +74,10 @@ final class VehicleDamageRepairEstimatesMigrationTest extends CIUnitTestCase
                     foreach ($after as &$row) {
                         $this->assertNull($row['accepted_estimate_id']);
                         unset($row['accepted_estimate_id']);
+                        foreach (['cost_finalized_at', 'cost_finalized_by', 'cost_finalization_note'] as $field) {
+                            $this->assertNull($row[$field]);
+                            unset($row[$field]);
+                        }
                     } unset($row);
                 }
                 $this->assertSame($rows, $after, $table);

@@ -89,6 +89,12 @@ class VehicleDamageRepairDocumentService
         if ((int) ($external !== null) + (int) ($reuse > 0) + (int) $binary !== 1) {
             throw new InvalidArgumentException('Supply exactly one upload, owned source document, or external reference.');
         }
+        if (in_array($kind, \Config\VehicleDamageRepairCosts::DOCUMENT_KINDS, true)) {
+            (new \App\Repositories\VehicleDamageRepairCostRepository($this->db()))->requireReady();
+            if ($external !== null) {
+                throw new InvalidArgumentException('Monetary source documents require verified binary evidence.');
+            }
+        }
         $file = null;
         $image = null;
         $descriptor = null;

@@ -108,10 +108,22 @@ class VehicleDamageRepairRepository
 
     public function members(int $company, int $vehicle, int $job, bool $lock = false): array
     {
+        if ($lock) {
+            if ($this->job($company, $vehicle, $job, true) === null) {
+                return [];
+            }
+            // The owned vehicle/job has already been locked. Do not let a joined
+            // locking scan acquire another aggregate's membership or parent rows.
+            $table = $this->db->escapeIdentifiers($this->db->prefixTable('vehicle_damage_repair_job_items'));
+            $index = $this->db->getPlatform() === 'SQLite3' ? '' : ' FORCE INDEX (repair_items_job_active_idx)';
+            return $this->rows('SELECT * FROM ' . $table . $index . ' WHERE company_id = ' . $company
+                . ' AND vehicle_damage_repair_job_id = ' . $job . ' ORDER BY id', true);
+        }
         $builder = $this->db->table('vehicle_damage_repair_job_items members')->select('members.*')
             ->join('vehicle_damage_repair_jobs jobs', 'jobs.id = members.vehicle_damage_repair_job_id AND jobs.company_id = members.company_id')
             ->join('fleet_vehicles vehicles', 'vehicles.id = jobs.fleet_vehicle_id AND vehicles.company_id = jobs.company_id AND vehicles.deleted_at IS NULL')
-            ->where('members.company_id', $company)->where('jobs.fleet_vehicle_id', $vehicle)->where('jobs.id', $job)->orderBy('members.id');
+            ->where('members.company_id', $company)->where('members.vehicle_damage_repair_job_id', $job)
+            ->where('jobs.fleet_vehicle_id', $vehicle)->where('jobs.id', $job)->orderBy('members.id');
         return $this->rows($builder->getCompiledSelect(), $lock);
     }
 

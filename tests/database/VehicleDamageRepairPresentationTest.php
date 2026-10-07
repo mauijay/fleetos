@@ -93,7 +93,7 @@ final class VehicleDamageRepairPresentationTest extends CIUnitTestCase
                 $seen++;
             }
         }
-        $this->assertSame(31, $seen);
+        $this->assertSame(39, $seen);
         ShieldServices::auth()->logout();
         $this->get('/fleet/vehicles/10/damage-repairs')->assertRedirectTo('login');
     }
@@ -214,10 +214,90 @@ final class VehicleDamageRepairPresentationTest extends CIUnitTestCase
         }
     }
 
+    public function testB23CostScreensArePureAndStartWithUnknownAndBlankSourceFacts(): void
+    {
+        $created = (new VehicleDamageRepairService($this->connection))->createJob(1, 10, Fixture::creation($this->connection, [Fixture::condition($this->connection)]), 7);
+        $this->assertTrue($created['success']);
+        $this->authenticate();
+        $base = '/fleet/vehicles/10/damage-repairs/' . $created['id'];
+        $before = $this->rows();
+        $body = $this->get($base)->getBody();
+        $this->assertStringContainsString('Repair cost: Unknown', $body);
+        $this->assertStringContainsString('No vendor payments recorded', $body);
+        $form = $this->get($base . '/costs/new');
+        $form->assertOK();
+        $this->assertMatchesRegularExpression('/name="amount"[^>]*value=""/', $form->getBody());
+        $this->assertMatchesRegularExpression('/name="occurred_on"[^>]*value=""/', $form->getBody());
+        $this->assertStringContainsString('Review duplicate candidates', $form->getBody());
+        $this->assertSame($before, $this->rows());
+        foreach (['/fleet/vehicles/11/damage-repairs/' . $created['id'] . '/costs/new', $base . '/costs/999/replacement'] as $path) {
+            try {
+                $this->get($path);
+                $this->fail('Wrong owned cost context must fail closed.');
+            } catch (\CodeIgniter\Exceptions\PageNotFoundException) {
+                $this->addToAssertionCount(1);
+            }
+        }
+        $this->assertSame($before, $this->rows());
+    }
+
+    public function testB23PostRequiresCsrfBeforeAnyMonetaryWrite(): void
+    {
+        $created = (new VehicleDamageRepairService($this->connection))->createJob(1, 10, Fixture::creation($this->connection, [Fixture::condition($this->connection)]), 7);
+        $this->authenticate();
+        $this->expectException(\CodeIgniter\Security\Exceptions\SecurityException::class);
+        $this->post('/fleet/vehicles/10/damage-repairs/' . $created['id'] . '/costs', ['kind_code' => 'invoice']);
+    }
+
+    public function testUnresolvedCostAcknowledgementRetainsOriginalPayloadAcrossReloads(): void
+    {
+        $created = (new VehicleDamageRepairService($this->connection))->createJob(1, 10, Fixture::creation($this->connection, [Fixture::condition($this->connection)]), 7);
+        $this->assertTrue($created['success']);
+        $job = $created['id'];
+        $this->authenticate();
+        $original = ['command_key' => VehicleDamageRepairService::commandKey(), 'expected_version' => '1', 'kind_code' => 'invoice', 'amount' => '25.00', 'currency' => 'USD', 'occurred_on' => '2026-10-06', 'vendor_snapshot' => 'Synthetic unresolved vendor', 'confirmed' => '1', 'performed_work_confirmed' => '1', 'document' => ['kind_code' => 'invoice', 'descriptor' => ['checksum' => str_repeat('a', 64), 'mime_type' => 'application/pdf', 'size_bytes' => '48', 'original_filename' => 'synthetic-unresolved.pdf']]];
+        $posted = $original;
+        $calls = 0;
+        $service = $this->getMockBuilder(VehicleDamageRepairService::class)->disableOriginalConstructor()->onlyMethods(['recordCostEntry'])->getMock();
+        $service->expects($this->exactly(4))->method('recordCostEntry')->willReturnCallback(function ($c, $v, $j, $data, $actor) use (&$calls, $original, $job): array {
+            $this->assertSame([1, 10, $job], [$c, $v, $j]);
+            $this->assertGreaterThan(0, $actor);
+            $this->assertSame($original, $data, 'Even a later edited POST must recover the frozen original command.');
+            $calls++;
+            return match ($calls) {
+                1 => ['success' => false, 'uncertain' => true, 'retry_payload' => $original, 'errors' => ['work' => 'Synthetic acknowledgement unavailable']],
+                4 => ['success' => true, 'replayed' => true, 'id' => $job, 'errors' => []],
+                default => ['success' => false, 'errors' => ['work' => 'Synthetic recovery unavailable']],
+            };
+        });
+        Services::injectMock('vehicleDamageRepairService', $service);
+        $request = $this->getMockBuilder(\CodeIgniter\HTTP\IncomingRequest::class)->disableOriginalConstructor()->onlyMethods(['getPost', 'getFile'])->getMock();
+        $request->expects($this->exactly(3))->method('getPost')->willReturnCallback(static function () use (&$posted): array {
+            return $posted;
+        });
+        $request->expects($this->exactly(3))->method('getFile')->with('repair_document')->willReturn(null);
+        $controller = new \App\Controllers\VehicleDamageRepairs();
+        $controller->initController($request, CoreServices::response(), CoreServices::logger());
+        $before = $this->rows();
+        $controller->recordCost(10, $job);
+        foreach ([1, 2] as $reload) {
+            $html = $controller->show(10, $job);
+            $this->assertStringContainsString('Retry original cost command', $html);
+            $this->assertStringNotContainsString('Record invoice / credit / payment / refund', $html);
+            $this->assertSame($before, $this->rows());
+        }
+        $posted = ['command_key' => VehicleDamageRepairService::commandKey(), 'amount' => '999.00'];
+        $controller->recordCost(10, $job);
+        $this->assertStringContainsString('Retry original cost command', $controller->show(10, $job));
+        $controller->recordCost(10, $job);
+        $this->assertStringNotContainsString('Retry original cost command', $controller->show(10, $job));
+        $this->assertSame($before, $this->rows());
+    }
+
     private function rows(): array
     {
         $rows = [];
-        foreach (['vehicle_damage_items', 'vehicle_damage_item_events', 'vehicle_damage_repair_jobs', 'vehicle_damage_repair_job_items', 'vehicle_damage_repair_job_events', 'audit_logs'] as $table) {
+        foreach (['vehicle_damage_items', 'vehicle_damage_item_events', 'vehicle_damage_repair_jobs', 'vehicle_damage_repair_job_items', 'vehicle_damage_repair_job_events', 'vehicle_damage_repair_cost_entries', 'vehicle_damage_repair_estimates', 'vehicle_damage_repair_estimate_items', 'vehicle_damage_repair_documents', 'files', 'audit_logs'] as $table) {
             $rows[$table] = $this->connection->table($table)->get()->getResultArray();
         } return $rows;
     }
