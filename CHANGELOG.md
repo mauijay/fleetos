@@ -1,5 +1,44 @@
 # Changelog
 
+## v0.30.0 — Damage Repair Cost Tracking
+
+Release date: 2026-10-06
+
+### Added
+
+- Add evidence-backed Damage Ledger repair cost entries for vendor invoices, invoice credits, vendor payments, and vendor payment refunds.
+- Add immutable correction history using explicit void and same-kind replacement workflows.
+- Add separate derived totals for recorded invoiced work cost and recorded vendor payments.
+- Add explicit invoiced-cost finalization with immutable history and automatic invalidation when invoice or credit facts later change.
+- Add repair-cost source-document retention safeguards so monetary evidence cannot be archived after becoming part of cost history.
+- Add duplicate-warning review against existing repair costs, maintenance costs, and operating-expense records without automatic cross-domain reconciliation.
+- Add persistent idempotent replay, post-COMMIT lost-acknowledgement recovery, lineage validation, and real MariaDB concurrency protection for repair-cost commands.
+- Add Repair Costs presentation to Work & Repair job detail with invoice/credit, payment/refund, correction, and finalization history.
+
+### Safety and Data Integrity
+
+- Recorded invoiced work cost remains separate from vendor payments.
+- A vendor payment or deposit does not establish repair cost.
+- No invoice means repair cost remains unknown rather than zero.
+- A verified zero-dollar invoice may establish a known zero invoiced cost.
+- Repair cost finalization confirms final known invoiced work cost only; it does not imply full payment, recovery, claim settlement, or final host loss.
+- Monetary facts are immutable; corrections use explicit void and replacement lineage.
+- Cost entries require verified vendor-side source documents.
+- Existing estimates remain separate from actual invoiced work cost.
+- B2.3 does not mutate claims, recoveries, maintenance expenses, operating expenses, or realized financial reporting.
+
+### Schema
+
+- Add `vehicle_damage_repair_cost_entries`.
+- Add nullable repair-job cost-finalization metadata.
+- Add supporting repair-document context uniqueness for monetary-source references.
+- Migration 000032 is forward additive and intentionally refuses destructive rollback.
+
+### Deferred
+
+- Turo, guest, and insurance recoveries remain outside B2.3.
+- Unrecovered balance, net actual host cost, and financial reconciliation remain B3.
+
 ## v0.29.0 — Damage Repair Estimates & Documents
 
 Release date: 2026-10-06
