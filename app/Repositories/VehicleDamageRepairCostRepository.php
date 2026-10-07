@@ -2,6 +2,7 @@
 
 namespace App\Repositories;
 
+use App\Database\VehicleDamageRepairCostCharset;
 use App\Services\Fleet\RepairCostMoney;
 use CodeIgniter\Database\BaseConnection;
 use Config\Database;
@@ -41,6 +42,12 @@ class VehicleDamageRepairCostRepository
     }
 
     public function ready(): bool
+    {
+        return $this->schemaReady() && VehicleDamageRepairCostCharset::correct($this->db);
+    }
+
+    /** Structural prerequisites, also used before forward charset hardening. */
+    public function schemaReady(): bool
     {
         if (! (new VehicleDamageRepairEstimateRepository($this->db))->ready() || ! $this->db->tableExists(self::TABLE)
             || array_diff(explode(' ', self::FIELDS), $this->db->getFieldNames(self::TABLE)) !== []) {

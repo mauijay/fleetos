@@ -18,8 +18,13 @@ final class VehicleDamageRepairMariaDbFixture
     private BaseConnection $admin;
     private array $configuration;
 
-    public function __construct(bool $upgrade = false, string $prefix = '', int $through = 31)
+    public function __construct(bool $upgrade = false, string $prefix = '', int $through = 31, string $collation = 'utf8mb4_general_ci', bool $seed = true)
     {
+        $charset = match ($collation) {
+            'utf8mb4_general_ci' => 'utf8mb4',
+            'latin1_swedish_ci' => 'latin1',
+            default => throw new RuntimeException('Unsupported disposable database collation.'),
+        };
         $this->configuration = json_decode((string) getenv('B21_MARIADB_CONFIG'), true, 512, JSON_THROW_ON_ERROR);
         // Build the accepted baseline through its real migrations. Its generated
         // 64-character FK name prevents fresh nonempty prefixes; preserve those
@@ -28,7 +33,7 @@ final class VehicleDamageRepairMariaDbFixture
         $this->configuration['database'] = '';
         $this->admin = self::connect($this->configuration);
         $this->configuration['database'] = 'b21_synthetic_' . bin2hex(random_bytes(8));
-        $this->admin->query('CREATE DATABASE ' . $this->configuration['database'] . ' CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci');
+        $this->admin->query('CREATE DATABASE ' . $this->configuration['database'] . ' CHARACTER SET ' . $charset . ' COLLATE ' . $collation);
         $this->db = self::connect($this->configuration);
         try {
             $runner = (new MigrationRunner(new Migrations(), $this->db))->setNamespace('App');
@@ -42,7 +47,7 @@ final class VehicleDamageRepairMariaDbFixture
                 }
             } else {
                 foreach (glob(__DIR__ . '/../../app/Database/Migrations/*.php') as $path) {
-                    if (strcmp(basename($path), $through < 32 ? '2026-10-06-0000' . ($through + 1) : '9999') < 0) {
+                    if (preg_match('/^\d{4}-\d{2}-\d{2}-(\d+)_/', basename($path), $number) && (int) $number[1] <= $through) {
                         $runner->force($path, 'App');
                     }
                 }
@@ -57,7 +62,9 @@ final class VehicleDamageRepairMariaDbFixture
                 $this->configuration['DBPrefix'] = $prefix;
                 $this->db->resetDataCache();
             }
-            VehicleDamageDatabaseFixture::seed($this->db);
+            if ($seed) {
+                VehicleDamageDatabaseFixture::seed($this->db);
+            }
         } catch (\Throwable $exception) {
             $this->close();
             throw $exception;
