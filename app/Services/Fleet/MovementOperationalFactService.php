@@ -388,12 +388,33 @@ class MovementOperationalFactService
             (int) $checklist['fleet_vehicle_id'],
             (int) $checklist['turo_trip_normalized_id'],
         );
-        $active = $this->events->latestForTrip((int) $checklist['turo_trip_normalized_id']);
-        if (in_array($active['event_code'] ?? null, ['vehicle_staged', 'actual_handoff'], true)) {
-            throw new \InvalidArgumentException('This pickup is already staged or confirmed.');
-        }
+        $this->requireAvailableStaging($checklist, $data);
 
         return $this->recordObservation($checklist, $data, $actorUserId, 'vehicle_staged');
+    }
+
+    /** A historical stage remains immutable; only a new observation can establish current staging. */
+    private function requireAvailableStaging(array $checklist, array $data): void
+    {
+        $tripId = (int) $checklist['turo_trip_normalized_id'];
+        if ($this->events->activeForTrip($tripId, ['actual_handoff', 'actual_return', 'vehicle_recovered']) !== null) {
+            throw new \InvalidArgumentException('This pickup is already staged or confirmed.');
+        }
+        $stage = $this->events->activeForTrip($tripId, ['vehicle_staged']);
+        if ($stage === null) {
+            return;
+        }
+        $vehicleId = (int) $checklist['fleet_vehicle_id'];
+        $custody = $this->custody()->resolve($vehicleId);
+        if ($custody['custody'] !== 'operator' || (int) ($custody['basis_event_id'] ?? 0) === (int) $stage['id']) {
+            throw new \InvalidArgumentException('This pickup is already staged or confirmed.');
+        }
+        $occurredAt = (new \DateTimeImmutable($this->requiredPastTimestamp($data, 'Staging time')))->format('Y-m-d H:i:s');
+        if ($this->custody()->hasLaterTripLifecycle($vehicleId, $tripId)
+            || $occurredAt <= (string) $stage['occurred_at']
+            || $occurredAt <= (string) $custody['occurred_at']) {
+            throw new \InvalidArgumentException('Record new staging after the intervening movement, for the current pickup reservation.');
+        }
     }
 
     public function recordVehiclePosition(array $checklist, array $data, int $actorUserId): bool
@@ -827,6 +848,7 @@ class MovementOperationalFactService
                     (int) $checklist['fleet_vehicle_id'],
                     (int) $checklist['turo_trip_normalized_id'],
                 );
+                $this->requireAvailableStaging($checklist, $data);
             }
             if ($eventCode === 'actual_handoff') {
                 $this->rejectDuplicateHandoff($checklist);

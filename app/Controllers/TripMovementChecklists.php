@@ -503,12 +503,16 @@ class TripMovementChecklists extends BaseController
 
     public function stageAtHnl(int $id): RedirectResponse
     {
+        $checklist = Services::tripMovementChecklistService()->checklistForCompany($this->activeCompanyId(), $id);
+        if ($checklist === null) {
+            throw \CodeIgniter\Exceptions\PageNotFoundException::forPageNotFound();
+        }
         if (($inactive = $this->inactiveMovementRedirect($id)) !== null) {
             return $inactive;
         }
         $data = $this->movementFactData();
         try {
-            $ok = Services::movementOperationalFactService()->stageForChecklist(Services::tripMovementChecklistService()->checklist($id), $data, $this->actorUserId());
+            $ok = Services::movementOperationalFactService()->stageForChecklist($checklist, $data, $this->actorUserId());
             return $this->back($id, $ok, 'Vehicle staged at HNL. Guest pickup is not yet confirmed.', 'That vehicle could not be staged.', 'handoff-entry');
         } catch (\InvalidArgumentException $exception) {
             return $this->back($id, false, '', $exception->getMessage(), 'handoff-entry')->with('movement_fact_data', $data);

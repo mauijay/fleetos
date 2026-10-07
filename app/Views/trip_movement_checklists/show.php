@@ -58,6 +58,14 @@ $tripContext ??= null;
 $currentLocation ??= null;
 $isEarlyHandoffWarning ??= false;
 $readiness ??= null;
+$needsHnlStaging = $tripIsOperational && ($checklist['movement_type'] ?? null) === 'pickup'
+    && count(array_filter($readiness['requirements'] ?? [], static fn (array $requirement): bool =>
+        ($requirement['code'] ?? null) === 'airport_staging'
+        && ($requirement['status'] ?? null) === 'unsatisfied'
+        && ($requirement['blocking'] ?? false)
+        && ($requirement['relevant'] ?? true)
+        && ($requirement['actionable'] ?? true)
+        && ($requirement['action']['type'] ?? null) === 'record_fact')) > 0;
 $positionFormData ??= [];
 $showPositionForm ??= false;
 $canRecordRetroactiveHandoff ??= false;
@@ -368,10 +376,13 @@ $tripFacts ??= [
                 <?php
 $movementType = (string) (($correctingFacts || $repairingFacts) ? ($latestFacts['movement_type'] ?? $factTarget ?? $checklist['movement_type'] ?? 'movement') : ($checklist['movement_type'] ?? 'movement'));
                     $formAction = $correctingFacts ? '/operations/checklists/' . (int) $checklist['id'] . '/facts/correct' : '/operations/checklists/' . (int) $checklist['id'] . '/facts';
+                    if ($needsHnlStaging && ! $correctingFacts && ! $repairingFacts) {
+                        $formAction = '/operations/checklists/' . (int) $checklist['id'] . '/stage-at-hnl';
+                    }
                     $occurredAt = (string) ($factFormData['occurred_at'] ?? date('Y-m-d\TH:i'));
                     $occurredOn = substr($occurredAt, 0, 10);
                     $occurredTime = substr($occurredAt, 11, 5);
-                    $selectedLocation = (string) ($factFormData['location_class'] ?? 'unknown');
+                    $selectedLocation = (string) ($factFormData['location_class'] ?? ($needsHnlStaging ? 'airport_hnl' : 'unknown'));
                     $selectedGarage = (string) ($factFormData['airport_garage_code'] ?? '');
                     $selectedLevel = (string) ($factFormData['airport_parking_level'] ?? '');
                     $selectedRow = (string) ($factFormData['airport_parking_row'] ?? '');
@@ -437,12 +448,12 @@ $movementType = (string) (($correctingFacts || $repairingFacts) ? ($latestFacts[
                         <?php if ($isEarlyHandoffWarning): ?><label class="checkbox-row"><input type="checkbox" name="confirm_early_handoff" value="1" required><span>I reviewed the selected reservation and confirm this early guest pickup time is correct.</span></label><?php endif; ?>
                         <button class="primary-action" type="submit">Confirm Guest Pickup</button>
                     </form>
-                <?php elseif ($movementType === 'pickup' && $isHistoricalStagedPickup && ! $correctingFacts): ?>
+                <?php elseif ($movementType === 'pickup' && $isHistoricalStagedPickup && ! $correctingFacts && ! $needsHnlStaging): ?>
                     <div class="import-message tone-warning">
                         <strong>Historical staging only</strong>
                         <span>This stage no longer establishes the vehicle's current pickup state. Use Record missing handoff above only when the guest actually received the vehicle.</span>
                     </div>
-                <?php elseif (! $correctingFacts && ($tripFacts[$movementType] ?? null) !== null): ?>
+                <?php elseif (! $correctingFacts && ! $needsHnlStaging && ($tripFacts[$movementType] ?? null) !== null): ?>
                     <div class="import-message tone-success">
                             <strong><?php if ($movementType !== 'return'): ?>Guest pickup recorded<?php elseif (($tripFacts['return']['event_code'] ?? null) === 'vehicle_recovered'): ?>Vehicle recovery recorded<?php elseif (($tripFacts['return']['event_code'] ?? null) === 'guest_return_staged'): ?>Guest return report recorded<?php else: ?>Actual return recorded<?php endif; ?></strong>
                         <span>Use the <?= esc($movementType) ?> fact actions above to correct or repair this observation.</span>
@@ -450,7 +461,7 @@ $movementType = (string) (($correctingFacts || $repairingFacts) ? ($latestFacts[
                 <?php elseif ($movementType === 'return' && ! $correctingFacts): ?>
                     <p class="muted">Use Recover Vehicle above for a new return. Historical actual-return facts remain available for correction and audit.</p>
                 <?php else: ?>
-                <form id="handoff-entry" class="issue-filters" action="<?= esc($formAction, 'attr') ?>" method="post">
+                <form id="handoff-entry" tabindex="-1" class="issue-filters" action="<?= esc($formAction, 'attr') ?>" method="post">
                     <?= csrf_field() ?>
                     <?php if ($correctingFacts): ?>
                         <input type="hidden" name="event_id" value="<?= (int) ($factFormData['event_id'] ?? 0) ?>">
@@ -473,8 +484,8 @@ $movementType = (string) (($correctingFacts || $repairingFacts) ? ($latestFacts[
                     <?php if (! $correctingFacts && $movementType === 'pickup'): ?>
                         <?php if ($isEarlyHandoffWarning): ?><label class="checkbox-row"><input type="checkbox" name="confirm_early_handoff" value="1" required><span>I reviewed the selected reservation and confirm this early guest handoff time is correct.</span></label><?php endif; ?>
                         <button class="primary-action" type="submit" formaction="/operations/checklists/<?= (int) $checklist['id'] ?>/stage-at-hnl">Stage at HNL</button>
-                        <button class="secondary-action" type="submit">Record Guest Handoff</button>
-                        <p class="muted">For HNL, stage the vehicle first. Use guest handoff directly for Home, Waikiki, or Other delivery.</p>
+                        <?php if (! $needsHnlStaging): ?><button class="secondary-action" type="submit">Record Guest Handoff</button><?php endif; ?>
+                        <p class="muted"><?= $needsHnlStaging ? 'Record the actual HNL staging facts. Staging does not confirm guest pickup.' : 'For HNL, stage the vehicle first. Use guest handoff directly for Home, Waikiki, or Other delivery.' ?></p>
                     <?php else: ?>
                         <button class="primary-action" type="submit"><?= $correctingFacts ? 'Save Correction' : 'Record Actual Return' ?></button>
                     <?php endif; ?>
