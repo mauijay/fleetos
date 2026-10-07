@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.30.1 — Repair Cost Schema Hardening
+
+Release date: 2026-10-07
+
+### Fixed
+
+- Ensure the Damage Ledger repair-cost table uses the validated
+  `utf8mb4_general_ci` MariaDB collation regardless of the database server's
+  default charset/collation.
+- Preserve repair-cost columns, keys, foreign keys, named constraints,
+  AUTO_INCREMENT behavior, and existing data while applying the correction.
+- Add permanent migration coverage for databases whose default collation is
+  not UTF-8.
+
+### Safety
+
+- Historical migration 000032 remains unchanged.
+- Already-correct databases require no table conversion.
+- No repair-cost business records are created or modified by the migration.
+- No Damage Ledger, claim, maintenance, operating-expense, or financial
+  business behavior changes.
+
 ## v0.30.0 — Damage Repair Cost Tracking
 
 Release date: 2026-10-06
