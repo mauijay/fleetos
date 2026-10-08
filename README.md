@@ -32,6 +32,8 @@ and any database settings.
 
 An annotated Git release tag and its exact commit are the source of truth for application files. The retired `deploy-files.txt` manifest must not be used to assemble partial releases.
 
+Migration SQL plans use the shared [deployment SQL allowlist tooling](docs/deployment-sql-allowlist.md) for offline generation, full ordered verification and protected execution. SQL allowlist identity is byte-strict after canonicalizing line endings.
+
 Production does not provide Node.js. Run `npm ci` and `npm run build` in a compatible local environment, then transfer the generated `public/build` directory with the release. On production, run `composer install --no-dev --optimize-autoloader` from the checked-out tag.
 
 Before backup or migration, verify the configured database name from the protected production configuration without printing credentials. The expected database is `go808com_turofleet`; stop if the configured identity differs.
