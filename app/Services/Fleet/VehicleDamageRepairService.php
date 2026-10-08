@@ -164,6 +164,27 @@ class VehicleDamageRepairService
         return $this->run('b23_invalidate', $c, $v, $j, $d, $a);
     }
 
+    public function recordRecovery(int $c, int $v, int $j, array $d, int $a): array
+    {
+        return $this->run('b31_record', $c, $v, $j, $d, $a);
+    }
+    public function voidRecovery(int $c, int $v, int $j, array $d, int $a): array
+    {
+        return $this->run('b31_void', $c, $v, $j, $d, $a);
+    }
+    public function replaceRecovery(int $c, int $v, int $j, array $d, int $a): array
+    {
+        return $this->run('b31_replace', $c, $v, $j, $d, $a);
+    }
+    public function finalizeRecovery(int $c, int $v, int $j, array $d, int $a): array
+    {
+        return $this->run('b31_finalize', $c, $v, $j, $d, $a);
+    }
+    public function invalidateRecoveryFinalization(int $c, int $v, int $j, array $d, int $a): array
+    {
+        return $this->run('b31_invalidate', $c, $v, $j, $d, $a);
+    }
+
     /** Called by the explicit damage command; never by the generic status transition. */
     public function reopenCondition(int $c, int $v, int $condition, array $d, int $a): array
     {
@@ -177,8 +198,10 @@ class VehicleDamageRepairService
         $committing = false;
         $b22 = str_starts_with($action, 'b22_') ? new VehicleDamageRepairEstimateService($this->db) : null;
         $b23 = str_starts_with($action, 'b23_') ? new VehicleDamageRepairCostService($this->db) : null;
-        $shared = $b23 !== null ? $b23->sources : $b22;
+        $b31 = str_starts_with($action, 'b31_') ? new VehicleDamageRepairRecoveryService($this->db) : null;
+        $shared = $b31 !== null ? $b31->sources : ($b23 !== null ? $b23->sources : $b22);
         $costRepository = new \App\Repositories\VehicleDamageRepairCostRepository($this->db);
+        $recoveryRepository = new \App\Repositories\VehicleDamageRepairRecoveryRepository($this->db);
         $extraReceipt = [];
         $sourceJobs = [$jobId => $vehicle];
         try {
@@ -204,6 +227,13 @@ class VehicleDamageRepairService
                 $b23->costs->requireReady();
                 $data = $b23->normalize($data, $company, $vehicle, $jobId);
             }
+            if ($b31 !== null) {
+                $b31->recoveries->requireReady();
+                $data = $b31->normalize($data, $company, $vehicle, $jobId);
+            }
+            if ($shared !== null && $recoveryRepository->present()) {
+                $recoveryRepository->requireReady();
+            }
             if (($action === 'reopen_job' || $b22 !== null) && $costRepository->present()) {
                 $costRepository->requireReady();
             }
@@ -214,11 +244,11 @@ class VehicleDamageRepairService
             if (! preg_match('/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/D', $key)) {
                 throw new InvalidArgumentException('Supply a valid command UUID.');
             }
-            $hash = hash('sha256', json_encode([$action, $company, $vehicle, $jobId, $actor, ($b23 !== null ? $b23::semantic($data) : ($b22 === null ? $this->semantic($data) : $this->estimateSemantic($data)))], JSON_THROW_ON_ERROR));
-            if ($b23 !== null && $this->db->getPlatform() === 'SQLite3' && $this->db->transDepth > 0) {
+            $hash = hash('sha256', json_encode([$action, $company, $vehicle, $jobId, $actor, ($b31 !== null ? $b31::semantic($data) : ($b23 !== null ? $b23::semantic($data) : ($b22 === null ? $this->semantic($data) : $this->estimateSemantic($data))))], JSON_THROW_ON_ERROR));
+            if (($b23 !== null || $b31 !== null) && $this->db->getPlatform() === 'SQLite3' && $this->db->transDepth > 0) {
                 throw new InvalidArgumentException('Repair cost commands require ownership of the outer transaction.');
             }
-            if ($b23 !== null && $this->db->getPlatform() !== 'SQLite3' && $this->db->transDepth === 0) {
+            if (($b23 !== null || $b31 !== null) && $this->db->getPlatform() !== 'SQLite3' && $this->db->transDepth === 0) {
                 if ((int) $this->db->query('SELECT @@in_transaction AS active')->getRowArray()['active'] === 1) {
                     throw new InvalidArgumentException('Repair cost commands require ownership of the outer transaction.');
                 }
@@ -263,7 +293,7 @@ class VehicleDamageRepairService
                     return $receipt + ['replayed' => true, 'event_id' => (int) $prior['id']];
                 }
             }
-            if ($b23 !== null && $this->db->transDepth > 1) {
+            if (($b23 !== null || $b31 !== null) && $this->db->transDepth > 1) {
                 throw new InvalidArgumentException('Repair cost commands require ownership of the outer transaction.');
             }
             if ($b22 !== null && ($data['document']['upload'] ?? null) instanceof \CodeIgniter\HTTP\Files\UploadedFile && $this->db->transDepth > 1) {
@@ -308,6 +338,12 @@ class VehicleDamageRepairService
                     $costRepository->requireReady();
                     $costRepository->lock(array_keys($sourceJobs), $company);
                 }
+                if ($b31 !== null) {
+                    $b31->lockClaim($company, $vehicle, $jobId, $data);
+                }
+                if ($recoveryRepository->present()) {
+                    $recoveryRepository->lock(array_keys($sourceJobs), $company);
+                }
                 $shared->lockMetadata(array_keys($sourceJobs), $company);
             }
             $before = $job === null ? null : ['job' => $job, 'members' => $members];
@@ -316,6 +352,9 @@ class VehicleDamageRepairService
             }
             if ($b23 !== null) {
                 $before['b23'] = $b23->snapshot($company, $vehicle, $jobId);
+            }
+            if ($b31 !== null) {
+                $before['b31'] = $b31->snapshot($company, $vehicle, $jobId, $action === 'b31_invalidate');
             }
             $now = $this->commandClock === null ? date('Y-m-d H:i:s') : ($this->commandClock)()->format('Y-m-d H:i:s');
             $event = 'job_created';
@@ -359,7 +398,9 @@ class VehicleDamageRepairService
                     $this->repairs->insertMember(['company_id' => $company, 'vehicle_damage_repair_job_id' => $jobId, 'vehicle_damage_item_id' => $id, 'result_code' => $historical ? 'mitigated' : 'unassessed', 'note' => $this->text($selection['note'] ?? null, 2000), 'occurred_at' => $occurred, 'withdrawn_at' => null, 'withdrawn_by' => null, 'withdrawal_reason' => null, 'created_by' => $actor, 'updated_by' => $actor, 'created_at' => $now, 'updated_at' => $now]);
                 }
             } else {
-                if ($b23 !== null) {
+                if ($b31 !== null) {
+                    [$job, $event, $extraReceipt] = $b31->apply($action, $company, $vehicle, $job, $data, $actor, $now);
+                } elseif ($b23 !== null) {
                     [$job, $event, $extraReceipt] = $b23->apply($action, $company, $vehicle, $job, $data, $actor, $now);
                 } elseif ($b22 !== null) {
                     [$job, $event, $extraReceipt] = $b22->apply($action, $company, $vehicle, $job, $members, $locked, $data, $actor, $now);
@@ -370,7 +411,7 @@ class VehicleDamageRepairService
                 if ($action === 'reopen_job' && $costRepository->present()) {
                     $job = VehicleDamageRepairCostService::clearFinalization($job);
                 }
-                if ($b23 === null && $b22 === null && $job === $before['job'] && $afterMembers === $before['members'] && $physical === null) {
+                if ($b31 === null && $b23 === null && $b22 === null && $job === $before['job'] && $afterMembers === $before['members'] && $physical === null) {
                     throw new InvalidArgumentException('No change to record.');
                 }
                 $job['version'] = (int) $job['version'] + 1;
@@ -407,6 +448,16 @@ class VehicleDamageRepairService
                 foreach ($after['b23']['entries'] as $row) {
                     if (($oldEntries[$row['id']] ?? null) !== $row) {
                         $after['b23']['entry_ids'][] = (int) $row['id'];
+                    }
+                }
+            }
+            if ($b31 !== null) {
+                $after['b31'] = $b31->snapshot($company, $vehicle, $jobId, $action === 'b31_invalidate');
+                $oldEntries = array_column($before['b31']['entries'], null, 'id');
+                $after['b31']['entry_ids'] = [];
+                foreach ($after['b31']['entries'] as $row) {
+                    if (($oldEntries[$row['id']] ?? null) !== $row) {
+                        $after['b31']['entry_ids'][] = (int) $row['id'];
                     }
                 }
             }
@@ -447,6 +498,14 @@ class VehicleDamageRepairService
                     }
                 }
             }
+            if ($b31 !== null) {
+                $old = array_column($before['b31']['entries'], null, 'id');
+                foreach ($after['b31']['entries'] as $row) {
+                    if (($old[$row['id']] ?? null) !== $row) {
+                        $this->audit(\App\Repositories\VehicleDamageRepairRecoveryRepository::TABLE, (int) $row['id'], $old[$row['id']] ?? null, $row, $actor);
+                    }
+                }
+            }
             $committing = true;
             $this->commit();
             return $receipt + ['replayed' => false, 'event_id' => $eventId];
@@ -466,8 +525,9 @@ class VehicleDamageRepairService
                 // Re-enter through the owned context and locking replay lookup after rollback.
                 return $this->run($action, $company, $vehicle, $jobId, $data, $actor, false);
             }
-            if ($b23 !== null && $committing) {
-                return ['success' => false, 'uncertain' => true, 'retry_payload' => $b23::semantic($data) + ['command_key' => $key], 'errors' => ['work' => 'Commit outcome is uncertain. Preserve the source and retry the same command key and frozen descriptor to recover the committed receipt.']];
+            if (($b23 !== null || $b31 !== null) && $committing) {
+                $monetary = $b31 ?? $b23;
+                return ['success' => false, 'uncertain' => true, 'retry_payload' => $monetary::semantic($data) + ['command_key' => $key], 'errors' => ['work' => 'Commit outcome is uncertain. Preserve the source and retry the same command key and frozen descriptor to recover the committed receipt.']];
             }
             return ['success' => false, 'errors' => ['work' => $exception instanceof InvalidArgumentException || $exception instanceof RuntimeException ? $exception->getMessage() : 'Work could not be saved. Reload and retry.']];
         }

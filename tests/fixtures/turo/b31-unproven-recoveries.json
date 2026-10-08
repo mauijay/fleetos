@@ -1,0 +1,8 @@
+[
+  {"case":"generic_reimbursement","transaction_type":"Synthetic reimbursement","normalized_type":"reimbursement","event_class":"reimbursement","amount":"100.00","currency_code":"USD","transaction_date":"2026-10-06"},
+  {"case":"failed_payment","transaction_type":"Synthetic failed payment","normalized_type":"other","event_class":"cash_movement","amount":"100.00","currency_code":"USD","transaction_date":"2026-10-06"},
+  {"case":"approval","transaction_type":"Synthetic claim approval","normalized_type":"reimbursement","event_class":"reimbursement","amount":"100.00","currency_code":"USD","transaction_date":"2026-10-06"},
+  {"case":"forecast","transaction_type":"Synthetic forecast earnings","normalized_type":"earnings","event_class":"operating_revenue","amount":"100.00","currency_code":"USD","transaction_date":"2026-10-06"},
+  {"case":"aggregate_payout","transaction_type":"Synthetic aggregate payout","normalized_type":"payment","event_class":"cash_movement","amount":"100.00","currency_code":"USD","transaction_date":"2026-10-06"},
+  {"case":"unproven_reversal","transaction_type":"Synthetic reimbursement reversal","normalized_type":"reimbursement","event_class":"reimbursement","amount":"-10.00","currency_code":"USD","transaction_date":"2026-10-06"}
+]

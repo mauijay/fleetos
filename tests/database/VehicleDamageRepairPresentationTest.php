@@ -14,6 +14,7 @@ use CodeIgniter\Test\FeatureTestTrait;
 use Config\Database;
 use Config\Migrations;
 use Config\Services;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\PreserveGlobalState;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 use Tests\Support\VehicleDamageRepairDatabaseFixture as Fixture;
@@ -93,7 +94,7 @@ final class VehicleDamageRepairPresentationTest extends CIUnitTestCase
                 $seen++;
             }
         }
-        $this->assertSame(39, $seen);
+        $this->assertSame(47, $seen);
         ShieldServices::auth()->logout();
         $this->get('/fleet/vehicles/10/damage-repairs')->assertRedirectTo('login');
     }
@@ -144,6 +145,135 @@ final class VehicleDamageRepairPresentationTest extends CIUnitTestCase
         CoreServices::routes()->resetRoutes();
         CoreServices::routes()->loadRoutes();
         $this->withRoutes();
+    }
+
+    public function testB31OwnedScreensPrivateEvidenceAndFinalizationPresentationArePure(): void
+    {
+        $work = new VehicleDamageRepairService($this->connection);
+        $j = $work->createJob(1, 10, Fixture::creation($this->connection, [Fixture::condition($this->connection)]), 7)['id'];
+        $this->authenticate();
+        $base = '/fleet/vehicles/10/damage-repairs/' . $j;
+        $before = $this->rows();
+        foreach ([$base, $base . '/recoveries/new'] as $url) {
+            $response = $this->get($url);
+            $response->assertOK();
+            $this->assertStringContainsString('Turo', $response->getBody());
+        }
+        $this->assertStringContainsString('No recovery recorded', $this->get($base)->getBody());
+        $this->assertSame($before, $this->rows());
+        $tmp = tempnam(sys_get_temp_dir(), 'b31_synthetic_web_');
+        file_put_contents($tmp, "%PDF-1.4\n% Synthetic recovery web evidence " . bin2hex(random_bytes(8)) . "\n%%EOF\n");
+        $upload = new \CodeIgniter\HTTP\Files\UploadedFile($tmp, 'synthetic-web-recovery.pdf', 'application/pdf', filesize($tmp), UPLOAD_ERR_OK);
+        $result = $work->recordRecovery(1, 10, $j, \Tests\Support\VehicleDamageRepairRecoveryTestCase::facts(['source_reference' => str_repeat('SYNTHETIC-', 12), 'source_details' => 'Synthetic source <script>unsafe()</script>', 'note' => str_repeat('Synthetic note ', 100)]) + ['expected_version' => 1, 'command_key' => VehicleDamageRepairService::commandKey(), 'document' => ['kind_code' => 'recovery_payment', 'upload' => $upload]], 7);
+        $this->assertTrue($result['success'], json_encode($result));
+        $helper = new \App\Services\Fleet\VehicleDamageRepairRecoveryService($this->connection);
+        $doc = $helper->verifyDocument(1, 10, $j, $result['document_id'], 'recovery');
+        $binary = $helper->sources->documents->storage->resolve(1, $doc, $helper->sources->documents->documents->metadata($doc));
+        try {
+            $before = $this->rows();
+            foreach ([$base, $base . '/recoveries/new', $base . '/recoveries/' . $result['recovery_entry_id'] . '/replacement'] as $url) {
+                $response = $this->get($url);
+                $response->assertOK();
+                $this->assertStringNotContainsString('<script>unsafe()', $response->getBody());
+            }
+            $body = $this->get($base)->getBody();
+            $this->assertStringContainsString('Host-borne repair cost', $body);
+            $this->assertStringContainsString('Unknown', $body);
+            $this->assertStringContainsString('Private recovery evidence', $body);
+            $this->assertStringContainsString('Retained permanently', $body);
+            $this->assertStringNotContainsString('Archive document</summary>', $body);
+            $controller = new \App\Controllers\VehicleDamageRepairs();
+            $controller->initController(CoreServices::request(), CoreServices::response(), CoreServices::logger());
+            $response = $controller->downloadDocument(10, $j, $result['document_id']);
+            $this->assertSame('application/pdf', $response->getHeaderLine('Content-Type'));
+            $this->assertSame('nosniff', $response->getHeaderLine('X-Content-Type-Options'));
+            $this->assertStringContainsString('private, no-store', $response->getHeaderLine('Cache-Control'));
+            foreach ([[11, $j, $result['document_id']], [10, 999, $result['document_id']], [10, $j, 999]] as [$v, $job, $id]) {
+                try {
+                    $controller->downloadDocument($v, $job, $id);
+                    $this->fail('Private recovery evidence requires owned job context.');
+                } catch (\CodeIgniter\Exceptions\PageNotFoundException) {
+                    $this->addToAssertionCount(1);
+                }
+            }
+            $this->assertSame($before, $this->rows());
+            $final = $work->finalizeRecovery(1, 10, $j, ['command_key' => VehicleDamageRepairService::commandKey(), 'expected_version' => 2, 'confirmed' => '1', 'completeness_confirmed' => '1', 'expected_ledger_state' => $helper->ledgerFingerprint(1, 10, $j), 'note' => 'Synthetic finalized recovery before repair'], 7);
+            $this->assertTrue($final['success'], json_encode($final));
+            $this->assertStringContainsString('Finalized', $this->get($base)->getBody());
+            $this->assertStringNotContainsString('Final host-borne repair balance:', $this->get($base)->getBody());
+            $void = $work->voidRecovery(1, 10, $j, ['command_key' => VehicleDamageRepairService::commandKey(), 'expected_version' => 3, 'confirmed' => '1', 'reason' => 'Synthetic erroneous receipt correction', 'recovery_entry_id' => $result['recovery_entry_id'], 'expected_entry_state' => $helper->entryFingerprint(1, 10, $j, $result['recovery_entry_id'])], 7);
+            $this->assertTrue($void['success'], json_encode($void));
+            $before = $this->rows();
+            $body = $this->get($base)->getBody();
+            $this->assertStringContainsString('No recovery recorded', $body);
+            $this->assertStringNotContainsString('Source review required', $body);
+            $this->assertStringContainsString('Retained permanently', $body);
+            $this->assertSame($before, $this->rows());
+        } finally {
+            if (is_file($tmp)) {
+                unlink($tmp);
+            }
+            if ($binary !== null && is_file($binary['path'])) {
+                unlink($binary['path']);
+            }
+        }
+    }
+
+    public function testB31NonAdminCannotReadOrWriteAndMissingCsrfFailsBeforeController(): void
+    {
+        $this->authenticate(false);
+        $base = '/fleet/vehicles/10/damage-repairs/999/recoveries';
+        $before = $this->rows();
+        $this->get($base . '/new')->assertRedirectTo((new \Config\Auth())->permissionDeniedRedirect());
+        $security = CoreServices::security();
+        $this->post($base, [$security->getTokenName() => $security->getHash()])->assertRedirectTo((new \Config\Auth())->permissionDeniedRedirect());
+        $this->assertSame($before, $this->rows());
+    }
+
+    public function testB31MissingCsrfRejectsBeforeAnyRecoveryWrite(): void
+    {
+        $this->authenticate();
+        $before = $this->rows();
+        try {
+            $this->post('/fleet/vehicles/10/damage-repairs/999/recoveries', ['confirmed' => '1']);
+            $this->fail('CSRF must reject recovery POST.');
+        } catch (\CodeIgniter\Security\Exceptions\SecurityException) {
+            $this->assertSame($before, $this->rows());
+        }
+    }
+
+    public static function malformedRecoveryReviews(): array
+    {
+        return [
+            'scalar document' => [['document' => 'malformed']],
+            'array payer' => [['payer_snapshot' => ['malformed']]],
+            'array kind' => [['kind_code' => ['malformed']]],
+            'array version' => [['expected_version' => ['malformed']]],
+            'array command key' => [['command_key' => ['malformed'], 'document' => 'malformed']],
+            'array document label' => [['document' => ['label' => ['malformed']]]],
+            'scalar descriptor' => [['document' => ['descriptor' => 'malformed']]],
+            'nested descriptor' => [['document' => ['descriptor' => ['checksum' => ['malformed']]]]],
+        ];
+    }
+
+    #[DataProvider('malformedRecoveryReviews')]
+    public function testMalformedRecoveryReviewRendersValidationWithoutWriting(array $invalid): void
+    {
+        $created = (new VehicleDamageRepairService($this->connection))->createJob(1, 10, Fixture::creation($this->connection, [Fixture::condition($this->connection)]), 7);
+        $this->assertTrue($created['success']);
+        $this->authenticate();
+        $data = array_replace(\Tests\Support\VehicleDamageRepairRecoveryTestCase::facts() + ['command_key' => VehicleDamageRepairService::commandKey(), 'expected_version' => '1'], $invalid);
+        $request = $this->getMockBuilder(\CodeIgniter\HTTP\IncomingRequest::class)->disableOriginalConstructor()->onlyMethods(['getPost', 'getFile'])->getMock();
+        $request->expects($this->once())->method('getPost')->willReturn($data);
+        $request->expects($this->once())->method('getFile')->with('repair_document')->willReturn(null);
+        $controller = new \App\Controllers\VehicleDamageRepairs();
+        $controller->initController($request, CoreServices::response(), CoreServices::logger());
+        $before = $this->rows();
+        $body = $controller->reviewRecovery(10, $created['id']);
+        $this->assertStringContainsString('Record documented recovery', $body);
+        $this->assertStringContainsString('role="alert"', $body);
+        $this->assertStringNotContainsString('value="Array"', $body);
+        $this->assertSame($before, $this->rows());
     }
 
     public function testB22EmptyHistoricalCurrentAndPrivateDownloadPresentation(): void
@@ -294,10 +424,55 @@ final class VehicleDamageRepairPresentationTest extends CIUnitTestCase
         $this->assertSame($before, $this->rows());
     }
 
+    public function testUnresolvedRecoveryAcknowledgementRetainsOriginalPayloadAcrossEditedReloads(): void
+    {
+        $created = (new VehicleDamageRepairService($this->connection))->createJob(1, 10, Fixture::creation($this->connection, [Fixture::condition($this->connection)]), 7);
+        $this->assertTrue($created['success']);
+        $job = $created['id'];
+        $this->authenticate();
+        $original = \Tests\Support\VehicleDamageRepairRecoveryTestCase::facts() + ['command_key' => VehicleDamageRepairService::commandKey(), 'expected_version' => '1', 'document' => ['kind_code' => 'recovery_payment', 'descriptor' => ['checksum' => str_repeat('a', 64), 'mime_type' => 'application/pdf', 'size_bytes' => '48', 'original_filename' => 'synthetic-unresolved-recovery.pdf']]];
+        $posted = $original;
+        $calls = 0;
+        $service = $this->getMockBuilder(VehicleDamageRepairService::class)->disableOriginalConstructor()->onlyMethods(['recordRecovery'])->getMock();
+        $service->expects($this->exactly(4))->method('recordRecovery')->willReturnCallback(function ($c, $v, $j, $data, $actor) use (&$calls, $original, $job): array {
+            $this->assertSame([1, 10, $job], [$c, $v, $j]);
+            $this->assertGreaterThan(0, $actor);
+            $this->assertSame($original, $data, 'Even a later edited POST must recover the frozen original command.');
+            $calls++;
+            return match ($calls) {
+                1 => ['success' => false, 'uncertain' => true, 'retry_payload' => $original, 'errors' => ['work' => 'Synthetic acknowledgement unavailable']],
+                4 => ['success' => true, 'replayed' => true, 'id' => $job, 'errors' => []],
+                default => ['success' => false, 'errors' => ['work' => 'Synthetic recovery unavailable']],
+            };
+        });
+        Services::injectMock('vehicleDamageRepairService', $service);
+        $request = $this->getMockBuilder(\CodeIgniter\HTTP\IncomingRequest::class)->disableOriginalConstructor()->onlyMethods(['getPost', 'getFile'])->getMock();
+        $request->expects($this->exactly(3))->method('getPost')->willReturnCallback(static function () use (&$posted): array {
+            return $posted;
+        });
+        $request->expects($this->exactly(3))->method('getFile')->with('repair_document')->willReturn(null);
+        $controller = new \App\Controllers\VehicleDamageRepairs();
+        $controller->initController($request, CoreServices::response(), CoreServices::logger());
+        $before = $this->rows();
+        $controller->recordRecovery(10, $job);
+        foreach ([1, 2] as $reload) {
+            $html = $controller->show(10, $job);
+            $this->assertStringContainsString('Retry original recovery command', $html);
+            $this->assertStringNotContainsString('Record recovery / reversal', $html);
+            $this->assertSame($before, $this->rows());
+        }
+        $posted = ['command_key' => VehicleDamageRepairService::commandKey(), 'amount' => '999.00'];
+        $controller->recordRecovery(10, $job);
+        $this->assertStringContainsString('Retry original recovery command', $controller->show(10, $job));
+        $controller->recordRecovery(10, $job);
+        $this->assertStringNotContainsString('Retry original recovery command', $controller->show(10, $job));
+        $this->assertSame($before, $this->rows());
+    }
+
     private function rows(): array
     {
         $rows = [];
-        foreach (['vehicle_damage_items', 'vehicle_damage_item_events', 'vehicle_damage_repair_jobs', 'vehicle_damage_repair_job_items', 'vehicle_damage_repair_job_events', 'vehicle_damage_repair_cost_entries', 'vehicle_damage_repair_estimates', 'vehicle_damage_repair_estimate_items', 'vehicle_damage_repair_documents', 'files', 'audit_logs'] as $table) {
+        foreach (['vehicle_damage_items', 'vehicle_damage_item_events', 'vehicle_damage_repair_jobs', 'vehicle_damage_repair_job_items', 'vehicle_damage_repair_job_events', 'vehicle_damage_repair_cost_entries', 'vehicle_damage_repair_recovery_entries', 'vehicle_damage_repair_estimates', 'vehicle_damage_repair_estimate_items', 'vehicle_damage_repair_documents', 'files', 'audit_logs'] as $table) {
             $rows[$table] = $this->connection->table($table)->get()->getResultArray();
         } return $rows;
     }

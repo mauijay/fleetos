@@ -66,9 +66,9 @@ final class VehicleDamageRepairCostsMigrationTest extends CIUnitTestCase
                 $after = $db->table($table)->get()->getResultArray();
                 if (str_ends_with($table, 'vehicle_damage_repair_jobs')) {
                     foreach ($after as &$row) {
-                        foreach (['cost_finalized_at', 'cost_finalized_by', 'cost_finalization_note'] as $field) {
+                        foreach (['cost_finalized_at', 'cost_finalized_by', 'cost_finalization_note', 'recovery_finalized_at', 'recovery_finalized_by', 'recovery_finalization_note'] as $field) {
                             $this->assertNull($row[$field]);
-                            if ($upgrade) {
+                            if (! array_key_exists($field, $rows[0])) {
                                 unset($row[$field]);
                             }
                         }

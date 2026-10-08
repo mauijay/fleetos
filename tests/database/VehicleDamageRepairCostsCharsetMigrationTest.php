@@ -41,7 +41,7 @@ final class VehicleDamageRepairCostsCharsetMigrationTest extends CIUnitTestCase
             $rows = $this->rows($db);
             $this->assertSame($collation, $before['table']['TABLE_COLLATION']);
             $this->assertSame($collation === 'utf8mb4_general_ci', (new Costs($db))->ready());
-            $ledger = count(glob(__DIR__ . '/../../app/Database/Migrations/*.php')) - 1;
+            $ledger = self::acceptedAppMigrationCount() - 1;
             $this->assertSame($ledger, $db->table('migrations')->countAllResults());
             $sql = $this->apply($db);
             $after = $this->inventory($db);
@@ -70,7 +70,7 @@ final class VehicleDamageRepairCostsCharsetMigrationTest extends CIUnitTestCase
         $fixture = new Maria(false, '', 33, 'latin1_swedish_ci', false);
         try {
             $db = $fixture->db;
-            $this->assertSame(count(glob(__DIR__ . '/../../app/Database/Migrations/*.php')), $db->table('migrations')->countAllResults());
+            $this->assertSame(self::acceptedAppMigrationCount(), $db->table('migrations')->countAllResults());
             $this->assertCorrect($db, $this->inventory($db));
             foreach (['fleet_vehicles', 'vehicle_damage_items', 'vehicle_damage_repair_jobs', 'vehicle_damage_repair_documents', 'vehicle_damage_repair_estimates', Costs::TABLE, 'damage_claims', 'vehicle_maintenance', 'operating_expenses'] as $table) {
                 if ($db->tableExists($table)) {
@@ -235,7 +235,7 @@ final class VehicleDamageRepairCostsCharsetMigrationTest extends CIUnitTestCase
             }
             $this->assertSame([], $alters);
             $this->assertSame($before, $this->inventory($db));
-            $this->assertSame(count(glob(__DIR__ . '/../../app/Database/Migrations/*.php')) - 1, $db->table('migrations')->countAllResults());
+            $this->assertSame(self::acceptedAppMigrationCount() - 1, $db->table('migrations')->countAllResults());
         } finally {
             $fixture->close();
         }
@@ -257,7 +257,7 @@ final class VehicleDamageRepairCostsCharsetMigrationTest extends CIUnitTestCase
             $this->assertSame([], $this->apply($db));
             $this->assertSame($before, $db->query('SELECT type, name, sql FROM sqlite_master ORDER BY type,name')->getResultArray());
             $this->assertTrue((new Costs($db))->ready());
-            $this->assertSame(count(glob(__DIR__ . '/../../app/Database/Migrations/*.php')), $db->table('migrations')->countAllResults());
+            $this->assertSame(self::acceptedAppMigrationCount(), $db->table('migrations')->countAllResults());
             $migration = new \App\Database\Migrations\EnsureVehicleDamageRepairCostCharset(Database::forge($db));
             $this->expectException(RuntimeException::class);
             $this->expectExceptionMessage('forward-only');
@@ -265,6 +265,11 @@ final class VehicleDamageRepairCostsCharsetMigrationTest extends CIUnitTestCase
         } finally {
             $db->close();
         }
+    }
+
+    private static function acceptedAppMigrationCount(): int
+    {
+        return count(array_filter(glob(__DIR__ . '/../../app/Database/Migrations/*.php'), fn (string $path): bool => strcmp(basename($path), '2026-10-07-000034') < 0));
     }
 
     private function runner(BaseConnection $db): MigrationRunner

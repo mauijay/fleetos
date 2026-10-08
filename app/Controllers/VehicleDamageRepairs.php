@@ -199,6 +199,96 @@ class VehicleDamageRepairs extends BaseController
         return $response;
     }
 
+    public function recoveryForm(int $v, int $j, ?int $id = null): string
+    {
+        $context = $this->jobContext($v, $j);
+        if (! $context['repairRecoveries']['ready']) {
+            throw PageNotFoundException::forPageNotFound();
+        }
+        $old = null;
+        if ($id !== null) {
+            $old = array_column($context['repairRecoveries']['entries'], null, 'id')[$id] ?? null;
+            if ($old === null || $old['status_code'] !== 'recorded') {
+                throw PageNotFoundException::forPageNotFound();
+            }
+        }
+        return $this->render('recovery_form', $context + ['replacement' => $old, 'duplicateReview' => null, 'recoveryClaims' => Services::vehicleDamageRepairRecoveryService()->claimOptions($context['companyId'], $v, $j)]);
+    }
+
+    public function recordRecovery(int $v, int $j): RedirectResponse
+    {
+        return $this->recoveryCommand('recordRecovery', $v, $j);
+    }
+    public function replaceRecovery(int $v, int $j, int $id): RedirectResponse
+    {
+        return $this->recoveryCommand('replaceRecovery', $v, $j, $id);
+    }
+    public function voidRecovery(int $v, int $j, int $id): RedirectResponse
+    {
+        return $this->recoveryCommand('voidRecovery', $v, $j, $id);
+    }
+    public function finalizeRecovery(int $v, int $j): RedirectResponse
+    {
+        return $this->recoveryCommand('finalizeRecovery', $v, $j);
+    }
+    public function invalidateRecovery(int $v, int $j): RedirectResponse
+    {
+        return $this->recoveryCommand('invalidateRecoveryFinalization', $v, $j);
+    }
+
+    private function recoveryCommand(string $method, int $v, int $j, ?int $id = null): RedirectResponse
+    {
+        $context = $this->jobContext($v, $j);
+        $data = $this->request->getPost();
+        if ($id !== null) {
+            $data['recovery_entry_id'] = $id;
+        }
+        $upload = $this->request->getFile('repair_document');
+        if ($upload !== null && $upload->getError() !== UPLOAD_ERR_NO_FILE && (! isset($data['document']) || is_array($data['document']))) {
+            $data['document']['upload'] = $upload;
+        }
+        if (is_array($data['document'] ?? null) && is_string($data['kind_code'] ?? null)) {
+            $data['document']['kind_code'] = \Config\VehicleDamageRepairRecoveries::DOCUMENT_KINDS[$data['kind_code']] ?? '';
+        }
+        if (is_array($data['document_states'] ?? null) && is_scalar($data['repair_document_id'] ?? null)) {
+            $data['expected_document_state'] = $data['document_states'][$data['repair_document_id']] ?? '';
+        }
+        if (isset($data['document']) && is_array($data['document']) && empty($data['document']['upload']) && ! isset($data['document']['descriptor'])) {
+            unset($data['document']);
+        }
+        $retryKey = $this->recoveryRetryKey($v, $j);
+        $pending = $context['recoveryRetry'];
+        if ($pending !== null) {
+            // The retained server-side payload cannot be replaced by a new key or edited form.
+            $method = $pending['method'];
+            $data = $pending['payload'];
+        }
+        $result = Services::vehicleDamageRepairService()->{$method}($this->company(), $v, $j, $data, $this->actor());
+        if (($result['uncertain'] ?? false) && isset($result['retry_payload'])) {
+            // Recover a committed receipt with the original key/state and frozen source identity.
+            // No moved upload is re-read, and an uncommitted new source cannot be recreated here.
+            $recovered = Services::vehicleDamageRepairService()->{$method}($this->company(), $v, $j, $result['retry_payload'], $this->actor());
+            if ($recovered['success']) {
+                $result = $recovered;
+            }
+        }
+        $base = '/fleet/vehicles/' . $v . '/damage-repairs/' . $j;
+        if (($result['uncertain'] ?? false) || ($pending !== null && ! $result['success'])) {
+            CoreServices::session()->set($retryKey, $pending ?? ['method' => $method, 'payload' => $result['retry_payload']]);
+            return CoreServices::redirectresponse()->to($base)->with('damage_work_notice', 'Save outcome still needs verification. Retry the original command below with its retained key and source identity.');
+        }
+        if ($result['success']) {
+            CoreServices::session()->remove($retryKey);
+        }
+        $failure = $method === 'recordRecovery' ? $base . '/recoveries/new' : ($method === 'replaceRecovery' ? $base . '/recoveries/' . $id . '/replacement' : $base);
+        return $this->result($v, $result, $failure);
+    }
+
+    private function recoveryRetryKey(int $v, int $j): string
+    {
+        return 'damage_recovery_retry_' . $this->company() . '_' . $v . '_' . $j . '_' . $this->actor();
+    }
+
     public function costForm(int $v, int $j, ?int $id = null): string
     {
         $context = $this->jobContext($v, $j);
@@ -352,6 +442,53 @@ class VehicleDamageRepairs extends BaseController
         return $this->result($v, $result, '/fleet/vehicles/' . $v . '/damage-repairs/' . $j);
     }
 
+    /** POST preview reads sources only; the upload remains untouched until the material command. */
+    public function reviewRecovery(int $v, int $j): string
+    {
+        $context = $this->jobContext($v, $j);
+        $service = Services::vehicleDamageRepairRecoveryService();
+        $service->recoveries->requireReady();
+        $data = $this->request->getPost();
+        $review = null;
+        $old = null;
+        try {
+            $upload = $this->request->getFile('repair_document');
+            if ($upload !== null && $upload->getError() !== UPLOAD_ERR_NO_FILE) {
+                if (isset($data['document']) && ! is_array($data['document'])) {
+                    throw new \InvalidArgumentException('Choose valid recovery evidence.');
+                }
+                $data['document']['upload'] = $upload;
+                $data['document']['kind_code'] = is_string($data['kind_code'] ?? null) ? (\Config\VehicleDamageRepairRecoveries::DOCUMENT_KINDS[$data['kind_code']] ?? '') : '';
+            }
+            $data = $service->normalize($data, $context['companyId'], $v, $j);
+            $facts = $service->facts($data);
+            $checksum = $data['document']['descriptor']['checksum'] ?? null;
+            if (! empty($data['repair_document_id'])) {
+                $doc = $service->verifyDocument($context['companyId'], $v, $j, (int) $data['repair_document_id'], $facts['kind_code']);
+                $checksum = $doc['content_checksum'];
+            }
+            if (! empty($data['recovery_entry_id'])) {
+                $old = array_column($context['repairRecoveries']['entries'], null, 'id')[(int) $data['recovery_entry_id']] ?? null;
+                if ($old === null || $old['status_code'] !== 'recorded') {
+                    throw new \InvalidArgumentException('Recorded recovery correction target not found.');
+                }
+            }
+            $review = $service->duplicates($context['companyId'], $facts, $checksum, (int) ($old['id'] ?? 0));
+        } catch (\InvalidArgumentException $e) {
+            $context['errors'] = ['recovery' => $e->getMessage()];
+        }
+        // Invalid multipart shapes must also be safe to redisplay after rejection.
+        $scalars = static fn (array $fields): array => array_filter($fields, static fn (mixed $value): bool => $value === null || is_scalar($value));
+        $context['formData'] = $scalars($data);
+        if (is_array($data['document'] ?? null)) {
+            $context['formData']['document'] = $scalars(array_intersect_key($data['document'], array_flip(['label', 'note'])));
+            if (is_array($data['document']['descriptor'] ?? null)) {
+                $context['formData']['document']['descriptor'] = $scalars($data['document']['descriptor']);
+            }
+        }
+        return $this->render('recovery_form', $context + ['replacement' => $old, 'duplicateReview' => $review, 'recoveryClaims' => $service->claimOptions($context['companyId'], $v, $j)]);
+    }
+
     private function command(string $method, int $vehicle, int $job, ?int $member = null, ?string $failure = null): RedirectResponse
     {
         $data = $this->request->getPost();
@@ -404,7 +541,7 @@ class VehicleDamageRepairs extends BaseController
         foreach ($documents as $document) {
             $documentStates[$document['id']] = Services::vehicleDamageRepairDocumentRepository()->fingerprint($context['companyId'], $vehicle, $job, (int) $document['id']);
         }
-        return $context + ['costRetry' => CoreServices::session()->get($this->costRetryKey($vehicle, $job)), 'repairCosts' => Services::vehicleDamageRepairCostReadService()->workspace($context['companyId'], $vehicle, $job), 'b22Ready' => $b22Ready, 'estimates' => $estimates, 'repairDocuments' => $documents, 'estimateStates' => $estimateStates, 'documentStates' => $documentStates, 'estimateScopes' => $b22Ready ? $estimateRepository->scope($context['companyId'], $job) : [], 'job' => $record, 'members' => Services::vehicleDamageRepairRepository()->members($context['companyId'], $vehicle, $job), 'events' => Services::vehicleDamageRepairRepository()->events($context['companyId'], $vehicle, $job)];
+        return $context + ['recoveryRetry' => CoreServices::session()->get($this->recoveryRetryKey($vehicle, $job)), 'repairRecoveries' => Services::vehicleDamageRepairRecoveryReadService()->workspace($context['companyId'], $vehicle, $job), 'costRetry' => CoreServices::session()->get($this->costRetryKey($vehicle, $job)), 'repairCosts' => Services::vehicleDamageRepairCostReadService()->workspace($context['companyId'], $vehicle, $job), 'b22Ready' => $b22Ready, 'estimates' => $estimates, 'repairDocuments' => $documents, 'estimateStates' => $estimateStates, 'documentStates' => $documentStates, 'estimateScopes' => $b22Ready ? $estimateRepository->scope($context['companyId'], $job) : [], 'job' => $record, 'members' => Services::vehicleDamageRepairRepository()->members($context['companyId'], $vehicle, $job), 'events' => Services::vehicleDamageRepairRepository()->events($context['companyId'], $vehicle, $job)];
     }
 
     private function ownedMember(array $context, int $id): array

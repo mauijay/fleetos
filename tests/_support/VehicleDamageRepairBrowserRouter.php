@@ -54,7 +54,7 @@ $items = new \App\Repositories\VehicleDamageRepository($db);
 $conditions = new \App\Services\Fleet\VehicleDamageService($db);
 $repairs = new \App\Repositories\VehicleDamageRepairRepository($db);
 $read = new \App\Services\Fleet\VehicleDamageReadService($conditions, $items, $repairs);
-foreach (['vehicleDamageRepository' => $items, 'vehicleDamageService' => $conditions, 'vehicleDamageRepairRepository' => $repairs, 'vehicleDamageRepairCostService' => new \App\Services\Fleet\VehicleDamageRepairCostService($db), 'vehicleDamageRepairCostReadService' => new \App\Services\Fleet\VehicleDamageRepairCostReadService($db), 'vehicleDamageRepairService' => new \App\Services\Fleet\VehicleDamageRepairService($db), 'vehicleDamageRepairEstimateRepository' => new \App\Repositories\VehicleDamageRepairEstimateRepository($db), 'vehicleDamageRepairDocumentRepository' => new \App\Repositories\VehicleDamageRepairDocumentRepository($db), 'repairDocumentStorageService' => new \App\Services\Files\RepairDocumentStorageService($db), 'vehicleDamageReadService' => $read] as $name => $instance) {
+foreach (['vehicleDamageRepository' => $items, 'vehicleDamageService' => $conditions, 'vehicleDamageRepairRepository' => $repairs, 'vehicleDamageRepairRecoveryService' => new \App\Services\Fleet\VehicleDamageRepairRecoveryService($db), 'vehicleDamageRepairRecoveryReadService' => new \App\Services\Fleet\VehicleDamageRepairRecoveryReadService($db), 'vehicleDamageRepairCostService' => new \App\Services\Fleet\VehicleDamageRepairCostService($db), 'vehicleDamageRepairCostReadService' => new \App\Services\Fleet\VehicleDamageRepairCostReadService($db), 'vehicleDamageRepairService' => new \App\Services\Fleet\VehicleDamageRepairService($db), 'vehicleDamageRepairEstimateRepository' => new \App\Repositories\VehicleDamageRepairEstimateRepository($db), 'vehicleDamageRepairDocumentRepository' => new \App\Repositories\VehicleDamageRepairDocumentRepository($db), 'repairDocumentStorageService' => new \App\Services\Files\RepairDocumentStorageService($db), 'vehicleDamageReadService' => $read] as $name => $instance) {
     \Config\Services::injectMock($name, $instance);
 }
 \Config\Services::injectMock('operationalFactsRepository', new class ($db) extends \App\Repositories\OperationalFactsRepository {
@@ -121,6 +121,10 @@ try {
                 {
                     return ++$this->calls === 1 ? parent::recordCostEntry($c, $v, $j, $d, $a) : ['success' => false, 'errors' => ['work' => 'Synthetic recovery temporarily unavailable']];
                 }
+                public function recordRecovery(int $c, int $v, int $j, array $d, int $a): array
+                {
+                    return ++$this->calls === 1 ? parent::recordRecovery($c, $v, $j, $d, $a) : ['success' => false, 'errors' => ['work' => 'Synthetic recovery temporarily unavailable']];
+                }
             });
         }
     }
@@ -138,6 +142,14 @@ try {
             $result = $controller->{$method}(10, (int) $match[1], (int) $match[3]);
         } else {
             $result = $controller->createEstimate(10, (int) $match[1]);
+        }
+    } elseif (preg_match('~^/fleet/vehicles/10/damage-repairs/(\d+)/recoveries(?:/(new|review|finalize|invalidate)|/(\d+)/(replacement|replace|void))?$~', $path, $match)) {
+        if (! empty($match[3])) {
+            $method = ['replacement' => 'recoveryForm', 'replace' => 'replaceRecovery', 'void' => 'voidRecovery'][$match[4]];
+            $result = $controller->{$method}(10, (int) $match[1], (int) $match[3]);
+        } else {
+            $method = ['' => 'recordRecovery', 'new' => 'recoveryForm', 'review' => 'reviewRecovery', 'finalize' => 'finalizeRecovery', 'invalidate' => 'invalidateRecovery'][$match[2] ?? ''];
+            $result = $controller->{$method}(10, (int) $match[1]);
         }
     } elseif (preg_match('~^/fleet/vehicles/10/damage-repairs/(\d+)/costs(?:/(new|review|finalize|invalidate)|/(\d+)/(replacement|replace|void))?$~', $path, $match)) {
         if (! empty($match[3])) {

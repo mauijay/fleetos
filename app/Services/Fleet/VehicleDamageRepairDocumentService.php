@@ -95,6 +95,12 @@ class VehicleDamageRepairDocumentService
                 throw new InvalidArgumentException('Monetary source documents require verified binary evidence.');
             }
         }
+        if (in_array($kind, \Config\VehicleDamageRepairRecoveries::DOCUMENT_KINDS, true)) {
+            (new \App\Repositories\VehicleDamageRepairRecoveryRepository($this->db()))->requireReady();
+            if ($external !== null) {
+                throw new InvalidArgumentException('Recovery evidence requires verified private binary content.');
+            }
+        }
         $file = null;
         $image = null;
         $descriptor = null;

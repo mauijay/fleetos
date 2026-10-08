@@ -195,6 +195,7 @@ class VehicleDamageRepairEstimateService
         } elseif ($action === 'b22_archive') {
             $id = (int) ($data['document_id'] ?? 0);
             (new \App\Repositories\VehicleDamageRepairCostRepository($this->db))->archiveGuard($c, $j, $id);
+            (new \App\Repositories\VehicleDamageRepairRecoveryRepository($this->db))->archiveGuard($c, $j, $id);
             $doc = $this->documents->documents->document($c, $v, $j, $id);
             if ($doc === null || $doc['archived_at'] !== null) {
                 throw new InvalidArgumentException('Document is unavailable or already archived.');

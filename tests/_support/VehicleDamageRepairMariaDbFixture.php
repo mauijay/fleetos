@@ -143,7 +143,7 @@ final class VehicleDamageRepairMariaDbFixture
     }
 
     /** Observe a live InnoDB wait, then let the canonical winner commit without retrying the contender. */
-    public function contendUntilCommit(string $operation, array $arguments, \Closure $winner, string $waitingTable = 'fleet_vehicles'): array
+    public function contendUntilCommit(string $operation, array $arguments, \Closure $winner, string $waitingTable = 'fleet_vehicles', string $waitingStatement = 'FOR UPDATE'): array
     {
         $process = null;
         $pipes = [];
@@ -153,7 +153,7 @@ final class VehicleDamageRepairMariaDbFixture
             throw new RuntimeException('Live contention requires actual InnoDB rows.');
         }
         try {
-            $receipt = $winner(function () use ($operation, $arguments, $waitingTable, &$process, &$pipes, &$blocked): \DateTimeImmutable {
+            $receipt = $winner(function () use ($operation, $arguments, $waitingTable, $waitingStatement, &$process, &$pipes, &$blocked): \DateTimeImmutable {
                 $process = proc_open([PHP_BINARY, '-c', (string) php_ini_loaded_file(), __FILE__], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, dirname(__DIR__, 2));
                 if (! is_resource($process)) {
                     throw new RuntimeException('Could not start the live-wait contender.');
@@ -170,7 +170,7 @@ final class VehicleDamageRepairMariaDbFixture
                     // contender still executing its FOR UPDATE after one second
                     // proves a live wait without relying on cached InnoDB views.
                     $wait = $this->admin->query('SELECT INFO FROM information_schema.PROCESSLIST WHERE ID=? AND COMMAND=\'Query\' AND TIME>=1', [$thread])->getRowArray();
-                    if ($wait !== null && str_contains($wait['INFO'] ?? '', '`' . $this->db->prefixTable($waitingTable) . '`') && str_contains($wait['INFO'] ?? '', 'FOR UPDATE')) {
+                    if ($wait !== null && str_contains($wait['INFO'] ?? '', '`' . $this->db->prefixTable($waitingTable) . '`') && str_contains($wait['INFO'] ?? '', $waitingStatement)) {
                         $blocked = true;
                         break;
                     }
@@ -225,7 +225,7 @@ final class VehicleDamageRepairMariaDbFixture
             if ($request['operation'] === 'reopenCondition') {
                 return (new \App\Services\Fleet\VehicleDamageService($connection))->reopenRepairedCondition(...$request['arguments']);
             }
-            $methods = ['createJob', 'complete', 'recordMembershipResult', 'confirmConditionRepaired', 'addCondition', 'withdrawCondition', 'createEstimate', 'createRevision', 'acceptEstimate', 'rejectEstimate', 'withdrawEstimate', 'attachDocument', 'archiveDocument', 'recordCostEntry', 'voidCostEntry', 'replaceCostEntry', 'finalizeRepairCost', 'invalidateCostFinalization'];
+            $methods = ['createJob', 'complete', 'recordMembershipResult', 'confirmConditionRepaired', 'addCondition', 'withdrawCondition', 'createEstimate', 'createRevision', 'acceptEstimate', 'rejectEstimate', 'withdrawEstimate', 'attachDocument', 'archiveDocument', 'recordCostEntry', 'voidCostEntry', 'replaceCostEntry', 'finalizeRepairCost', 'invalidateCostFinalization', 'recordRecovery', 'voidRecovery', 'replaceRecovery', 'finalizeRecovery', 'invalidateRecoveryFinalization'];
             if (! in_array($request['operation'], $methods, true)) {
                 throw new RuntimeException('Unknown contention operation.');
             }
