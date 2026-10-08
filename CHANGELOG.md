@@ -1,5 +1,63 @@
 # Changelog
 
+## v0.32.0 — Repair Cost Expense Reconciliation
+
+Release date: 2026-10-07
+
+### Added
+
+- Add explicit one-to-one reconciliation between finalized Damage Ledger
+  repair invoice families and existing eligible operating expenses.
+- Add immutable reconciliation history with explicit create, invalidate, and
+  replacement workflows.
+- Add permanent active-source reservations so one repair-cost lineage and one
+  operating expense cannot be simultaneously reconciled elsewhere.
+- Add source fingerprints, frozen provenance snapshots, stale-state detection,
+  and candidate review for possible invoice/expense matches.
+- Add guarded operating-expense and repair-cost writer integration so material
+  source changes invalidate affected reconciliations atomically.
+- Add Financial Reconciliation presentation to Work & Repair job detail.
+
+### Safety and Data Integrity
+
+- Operating expenses remain the authoritative financial-report cost source.
+- Damage Ledger repair costs remain operational authorities and do not add a
+  second financial-report contribution.
+- Company and vehicle financial totals remain unchanged by reconciliation.
+- First-slice reconciliation requires exact current-net USD equality and
+  whole-fact one-to-one identity.
+- Partial allocation, multi-job allocation, and mixed-purpose reconciliation
+  are not supported.
+- Reconciliation never creates or alters an operating expense or repair-cost
+  amount.
+- Stale reconciliations lose valid-authority status but remain retained in
+  history.
+- Turo recovery recognition remains disabled.
+- Maintenance reconciliation and recovery financial publication remain
+  deferred.
+
+### Schema
+
+- Add `vehicle_damage_financial_reconciliations`.
+- Add required parent context keys for ownership-safe typed foreign keys.
+- Widen repair-job event-code storage from 40 to 64 characters while
+  preserving existing event history.
+- Migration 000035 is forward additive and refuses destructive rollback.
+
+### Changed
+
+- Update the FleetOS site credit client from
+  `808businesssolutions.com` to `808.biz`.
+
+### Deferred
+
+- Maintenance-cost reconciliation remains deferred.
+- B3.1 recovery publication into financial reporting remains deferred.
+- Turo recovery recognition remains disabled.
+- Partial and multi-source allocation remain deferred.
+- Automatic expense creation and historical reconciliation backfill remain
+  deferred.
+
 ## v0.31.0 — Damage Repair Recovery Tracking
 
 Release date: 2026-10-07
