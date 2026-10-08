@@ -1,5 +1,43 @@
 # Changelog
 
+## v0.31.0 — Damage Repair Recovery Tracking
+
+Release date: 2026-10-07
+
+### Added
+
+- Add immutable evidence-backed repair recovery entries for documented external receipts.
+- Add recovery reversals, explicit void/replacement correction history, and permanent source-identity protection.
+- Add private recovery evidence with retained source history and archive protection.
+- Add explicit recovery finalization, including an operator-confirmed no-recovery state.
+- Add read-only economic comparison with finalized repair cost and derived host-borne repair balance when both cost and recovery are independently finalized.
+- Add signed excess-recovery review without treating excess recovery as profit or income.
+- Add recovery-specific concurrency, idempotent replay, lost-acknowledgement recovery, and stale-state protections.
+
+### Safety and Data Integrity
+
+- B2.3 remains authoritative for invoiced repair cost and vendor settlement.
+- Claim estimates, approvals, paid fields, and statuses do not establish recovery authority.
+- Recovery entries require verified source identity and private binary evidence.
+- One recovery receipt lineage belongs wholly to one repair job.
+- Recovery finalization is separate from repair-cost finalization.
+- Host-borne repair balance remains unknown unless both cost and recovery finalization are valid.
+- B3.1 does not create or alter operating expenses, maintenance costs, financial activity, or vehicle financial reports.
+- Turo transaction recovery recognition remains intentionally disabled pending verified paid-receipt semantics and shared source-writer safety controls.
+
+### Schema
+
+- Add `vehicle_damage_repair_recovery_entries`.
+- Add nullable recovery-finalization metadata to repair jobs.
+- Add recovery evidence retention and immutable monetary-history protection.
+- Migration 000034 is forward additive and refuses destructive rollback.
+
+### Deferred
+
+- Turo transaction recognition remains disabled.
+- Operating-expense, maintenance, and financial-report reconciliation remain B3.2.
+- Multi-job payout allocation and mixed-purpose recovery allocation remain deferred.
+
 ## v0.30.2 — HNL Staging Workflow Fix
 
 Release date: 2026-10-07
