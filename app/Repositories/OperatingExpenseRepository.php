@@ -10,6 +10,7 @@ use RuntimeException;
 class OperatingExpenseRepository
 {
     private BaseConnection $db;
+    private bool $guarded = false;
 
     public function __construct(?BaseConnection $db = null)
     {
@@ -107,7 +108,12 @@ class OperatingExpenseRepository
     /** @param array<string, mixed> $data */
     public function updateExpense(int $companyId, int $id, array $data): bool
     {
-        $this->db->table('operating_expenses')->where(['company_id' => $companyId, 'id' => $id])->update($data);
+        if ($this->needsGuard()) {
+            return $this->transaction(fn (): bool => $this->updateExpense($companyId, $id, $data), ['company_id' => $companyId, 'expense_id' => $id, 'new_vehicle_id' => $data['fleet_vehicle_id'] ?? 0, 'actor' => $data['updated_by'] ?? 0]);
+        }
+        if ($this->db->table('operating_expenses')->where(['company_id' => $companyId, 'id' => $id])->update($data) === false) {
+            throw new RuntimeException('Expense could not be updated; retained reconciliation ownership cannot be reassigned.');
+        }
 
         return $this->db->affectedRows() === 1;
     }
@@ -123,7 +129,12 @@ class OperatingExpenseRepository
     /** @param array<string, mixed> $data */
     public function createReceipt(array $data): int
     {
-        $this->db->table('operating_expense_receipts')->insert($data);
+        if (! empty($data['operating_expense_id']) && $this->needsGuard()) {
+            return $this->transaction(fn (): int => $this->createReceipt($data), ['company_id' => $data['company_id'], 'expense_id' => $data['operating_expense_id'], 'actor' => $data['created_by'] ?? 0]);
+        }
+        if ($this->db->table('operating_expense_receipts')->insert($data) === false) {
+            throw new RuntimeException('Receipt could not be attached.');
+        }
 
         return (int) $this->db->insertID();
     }
@@ -131,7 +142,16 @@ class OperatingExpenseRepository
     /** @param array<string, mixed> $data */
     public function updateReceipt(int $companyId, int $id, array $data): bool
     {
-        $this->db->table('operating_expense_receipts')->where(['company_id' => $companyId, 'id' => $id])->update($data);
+        if ($this->needsGuard()) {
+            return $this->transaction(fn (): bool => $this->updateReceipt($companyId, $id, $data), ['company_id' => $companyId, 'receipt_id' => $id, 'expense_id' => $data['operating_expense_id'] ?? 0, 'actor' => $data['classified_by'] ?? $data['archived_by'] ?? 0]);
+        }
+        $old = $this->receipt($companyId, $id);
+        if ($old !== null && $old['operating_expense_id'] !== null && (array_key_exists('operating_expense_id', $data) && (int) $data['operating_expense_id'] !== (int) $old['operating_expense_id'] || array_key_exists('company_id', $data) && (int) $data['company_id'] !== $companyId)) {
+            throw new RuntimeException('Attached receipt ownership is retained; reassignment is unavailable.');
+        }
+        if ($this->db->table('operating_expense_receipts')->where(['company_id' => $companyId, 'id' => $id])->update($data) === false) {
+            throw new RuntimeException('Receipt could not be updated.');
+        }
 
         return $this->db->affectedRows() === 1;
     }
@@ -279,8 +299,18 @@ class OperatingExpenseRepository
         return $builder->orderBy('expense.id', 'DESC')->limit(5)->get()->getResultArray();
     }
 
-    public function transaction(callable $callback): mixed
+    public function transaction(callable $callback, array $context = []): mixed
     {
+        if ($context !== [] && $this->needsGuard()) {
+            return (new \App\Services\Fleet\OperatingExpenseReconciliationGuard($this->db))->run($context, function () use ($callback): mixed {
+                $this->guarded = true;
+                try {
+                    return $callback();
+                } finally {
+                    $this->guarded = false;
+                }
+            });
+        }
         $this->db->transBegin();
         try {
             $result = $callback();
@@ -308,6 +338,11 @@ class OperatingExpenseRepository
             ->join('fleet_vehicles vehicle', 'vehicle.id = expense.fleet_vehicle_id', 'left')
             ->join('turo_trips_normalized trip', 'trip.id = expense.turo_trip_normalized_id', 'left')
             ->where('expense.company_id', $companyId);
+    }
+
+    private function needsGuard(): bool
+    {
+        return ! $this->guarded && (new VehicleDamageFinancialReconciliationRepository($this->db))->present();
     }
 
     private function receiptBuilder(int $companyId): BaseBuilder

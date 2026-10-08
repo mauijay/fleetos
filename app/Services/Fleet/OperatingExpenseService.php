@@ -126,7 +126,7 @@ class OperatingExpenseService
                 }
 
                 return $id;
-            });
+            }, ['company_id' => $companyId, 'actor' => $actorUserId, 'new_vehicle_id' => $validated['data']['fleet_vehicle_id'] ?? 0]);
 
             return ['success' => true, 'errors' => [], 'id' => $id];
         } catch (InvalidArgumentException|RuntimeException $exception) {
@@ -229,6 +229,10 @@ class OperatingExpenseService
         }
 
         $id = $this->repo()->transaction(function () use ($companyId, $receipt, $receiptId, $validated, $actorUserId): int {
+            $receipt = $this->requireReceipt($companyId, $receiptId);
+            if ($receipt['classification_code'] !== 'needs_classification' || $receipt['archived_at'] !== null) {
+                throw new RuntimeException('Receipt classification changed. Reload and review.');
+            }
             $now = date('Y-m-d H:i:s');
             $expense = array_merge($validated['data'], [
                 'company_id' => $companyId,
@@ -253,7 +257,7 @@ class OperatingExpenseService
             $this->audit('operating_expense_receipts', $receiptId, 'attached', null, ['company_id' => $companyId, 'operating_expense_id' => $id], $actorUserId);
 
             return $id;
-        });
+        }, ['company_id' => $companyId, 'receipt_id' => $receiptId, 'actor' => $actorUserId, 'new_vehicle_id' => $validated['data']['fleet_vehicle_id'] ?? 0]);
 
         return ['success' => true, 'errors' => [], 'id' => $id];
     }
@@ -270,7 +274,7 @@ class OperatingExpenseService
         if ($validated['errors'] !== []) {
             return ['success' => false, 'errors' => $validated['errors']];
         }
-        $material = ['amount', 'expense_date', 'expense_category_lookup_value_id', 'fleet_vehicle_id', 'turo_trip_normalized_id'];
+        $material = ['amount', 'expense_date', 'expense_category_lookup_value_id', 'fleet_vehicle_id', 'turo_trip_normalized_id', 'vendor', 'payment_reference', 'payment_method_code', 'business_purpose'];
         $materialChanged = array_filter($material, static fn (string $field): bool => (string) ($old[$field] ?? '') !== (string) ($validated['data'][$field] ?? '')) !== [];
         $reason = $this->text($data['correction_reason'] ?? null);
         if ($materialChanged && $reason === null) {
@@ -283,9 +287,18 @@ class OperatingExpenseService
 
         $this->repo()->transaction(function () use ($companyId, $id, $old, $validated, $actorUserId, $reason, $materialChanged): void {
             $newValues = array_merge($validated['data'], ['updated_by' => $actorUserId, 'updated_at' => date('Y-m-d H:i:s')]);
+            $old = $this->requireExpense($companyId, $id);
+            if ($old['status_code'] !== 'recorded') {
+                throw new RuntimeException('Expense was archived. Restore it before correction.');
+            }
+            $currentMaterial = ['amount', 'expense_date', 'expense_category_lookup_value_id', 'fleet_vehicle_id', 'turo_trip_normalized_id', 'vendor', 'payment_reference', 'payment_method_code', 'business_purpose'];
+            $materialChanged = array_any($currentMaterial, static fn (string $field): bool => (string) ($old[$field] ?? '') !== (string) ($validated['data'][$field] ?? ''));
+            if ($materialChanged && $reason === null) {
+                throw new RuntimeException('Explain the current material source correction.');
+            }
             $this->repo()->updateExpense($companyId, $id, $newValues);
             $this->audit('operating_expenses', $id, $materialChanged ? 'corrected' : 'updated', $old, array_merge($old, $newValues, ['correction_reason' => $reason]), $actorUserId);
-        });
+        }, ['company_id' => $companyId, 'expense_id' => $id, 'actor' => $actorUserId, 'new_vehicle_id' => $validated['data']['fleet_vehicle_id'] ?? 0]);
 
         return ['success' => true, 'errors' => []];
     }
@@ -305,9 +318,13 @@ class OperatingExpenseService
         $now = date('Y-m-d H:i:s');
         $new = ['status_code' => 'archived', 'archived_at' => $now, 'archived_by' => $actorUserId, 'archive_reason' => $reason, 'updated_at' => $now, 'updated_by' => $actorUserId];
         $this->repo()->transaction(function () use ($companyId, $id, $old, $new, $actorUserId): void {
+            $old = $this->requireExpense($companyId, $id);
+            if ($old['status_code'] === 'archived') {
+                return;
+            }
             $this->repo()->updateExpense($companyId, $id, $new);
             $this->audit('operating_expenses', $id, 'archived', $old, array_merge($old, $new), $actorUserId);
-        });
+        }, ['company_id' => $companyId, 'expense_id' => $id, 'actor' => $actorUserId]);
 
         return ['success' => true, 'errors' => []];
     }
@@ -323,9 +340,13 @@ class OperatingExpenseService
         $now = date('Y-m-d H:i:s');
         $new = ['status_code' => 'recorded', 'archived_at' => null, 'archived_by' => null, 'archive_reason' => null, 'updated_at' => $now, 'updated_by' => $actorUserId];
         $this->repo()->transaction(function () use ($companyId, $id, $old, $new, $actorUserId): void {
+            $old = $this->requireExpense($companyId, $id);
+            if ($old['status_code'] !== 'archived') {
+                return;
+            }
             $this->repo()->updateExpense($companyId, $id, $new);
             $this->audit('operating_expenses', $id, 'restored', $old, array_merge($old, $new), $actorUserId);
-        });
+        }, ['company_id' => $companyId, 'expense_id' => $id, 'actor' => $actorUserId]);
 
         return ['success' => true, 'errors' => []];
     }
@@ -338,6 +359,7 @@ class OperatingExpenseService
         $stored = null;
         try {
             return $this->repo()->transaction(function () use ($companyId, $expenseId, $expense, $upload, $actorUserId, &$stored): array {
+                $expense = $this->requireExpense($companyId, $expenseId);
                 $stored = $this->store($upload, (string) $expense['expense_date'], $actorUserId);
                 if ($this->repo()->receiptForCompanyFile($companyId, (int) $stored['file_id']) !== null) {
                     throw new InvalidArgumentException('This receipt is already in the company expense inbox.');
@@ -363,7 +385,7 @@ class OperatingExpenseService
                 $this->audit('operating_expense_receipts', $receiptId, 'attached', null, ['company_id' => $companyId, 'operating_expense_id' => $expenseId], $actorUserId);
 
                 return ['success' => true, 'errors' => [], 'receipt_id' => $receiptId];
-            });
+            }, ['company_id' => $companyId, 'expense_id' => $expenseId, 'actor' => $actorUserId]);
         } catch (InvalidArgumentException|RuntimeException $exception) {
             if ($stored !== null) {
                 $this->storage()->discardNewFile($stored);
@@ -413,9 +435,13 @@ class OperatingExpenseService
         $now = date('Y-m-d H:i:s');
         $new = ['classification_code' => 'archived', 'archived_at' => $now, 'archived_by' => $actorUserId, 'archive_reason' => $reason, 'classified_by' => $actorUserId, 'classified_at' => $now, 'updated_at' => $now];
         $this->repo()->transaction(function () use ($companyId, $receiptId, $old, $new, $actorUserId): void {
+            $old = $this->requireReceipt($companyId, $receiptId);
+            if ($old['classification_code'] !== 'needs_classification' || $old['archived_at'] !== null) {
+                throw new RuntimeException('Receipt classification changed. Reload and review.');
+            }
             $this->repo()->updateReceipt($companyId, $receiptId, $new);
             $this->audit('operating_expense_receipts', $receiptId, 'archived', $old, array_merge($old, $new), $actorUserId);
-        });
+        }, ['company_id' => $companyId, 'receipt_id' => $receiptId, 'actor' => $actorUserId]);
 
         return ['success' => true, 'errors' => []];
     }
@@ -548,13 +574,17 @@ class OperatingExpenseService
         $new = array_merge($changes, ['classification_code' => $classification, 'classified_by' => $actorUserId, 'classified_at' => $now, 'updated_at' => $now]);
 
         return (bool) $this->repo()->transaction(function () use ($companyId, $receiptId, $old, $new, $action, $actorUserId): bool {
+            $old = $this->requireReceipt($companyId, $receiptId);
+            if ($old['classification_code'] !== 'needs_classification' || $old['archived_at'] !== null) {
+                return false;
+            }
             $updated = $this->repo()->updateReceipt($companyId, $receiptId, $new);
             if ($updated) {
                 $this->audit('operating_expense_receipts', $receiptId, $action, $old, array_merge($old, $new), $actorUserId);
             }
 
             return $updated;
-        });
+        }, ['company_id' => $companyId, 'receipt_id' => $receiptId, 'actor' => $actorUserId]);
     }
 
     /** @return array<string, mixed> */

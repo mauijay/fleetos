@@ -11,6 +11,11 @@ use Config\Database;
 use Config\Migrations;
 use RuntimeException;
 
+// Direct worker invocation needs the driver autoloader before the fault classes below.
+if (PHP_SAPI === 'cli' && realpath((string) ($_SERVER['SCRIPT_FILENAME'] ?? '')) === __FILE__) {
+    require dirname(__DIR__, 2) . '/vendor/codeigniter4/framework/system/Test/bootstrap.php';
+}
+
 /** Disposable local MariaDB only. Opt in with B21_MARIADB_CONFIG and B21_MARIADB_DATADIR. */
 final class VehicleDamageRepairMariaDbFixture
 {
@@ -22,6 +27,7 @@ final class VehicleDamageRepairMariaDbFixture
     {
         $charset = match ($collation) {
             'utf8mb4_general_ci' => 'utf8mb4',
+            'utf8_general_ci' => 'utf8',
             'latin1_swedish_ci' => 'latin1',
             default => throw new RuntimeException('Unsupported disposable database collation.'),
         };
@@ -71,7 +77,7 @@ final class VehicleDamageRepairMariaDbFixture
         }
     }
 
-    private static function connect(array $configuration): BaseConnection
+    private static function connect(array $configuration, bool $loseCommitAcknowledgement = false): BaseConnection
     {
         $expected = realpath((string) getenv('B21_MARIADB_DATADIR'));
         $build = realpath(dirname(__DIR__, 2) . '/build');
@@ -81,7 +87,7 @@ final class VehicleDamageRepairMariaDbFixture
             || ! preg_match('/^(b21_synthetic_[a-f0-9]{16})?$/D', $configuration['database'] ?? '')) {
             throw new RuntimeException('MariaDB contention fixtures require an explicit disposable local database.');
         }
-        $db = Database::connect($configuration, false);
+        $db = $loseCommitAcknowledgement ? new B32LostAckConnection($configuration) : Database::connect($configuration, false);
         $server = $db->query('SELECT @@datadir AS directory, VERSION() AS version')->getRowArray();
         if (strtolower((string) realpath($server['directory'])) !== strtolower($expected) || ! str_contains($server['version'], 'MariaDB')) {
             throw new RuntimeException('Refusing to touch a server outside the disposable MariaDB directory.');
@@ -219,13 +225,21 @@ final class VehicleDamageRepairMariaDbFixture
             }
         });
         $operation = static function (BaseConnection $connection) use ($request): array {
+            if ($request['operation'] === 'b32_expense_edit') {
+                try {
+                    (new \App\Repositories\OperatingExpenseRepository($connection))->updateExpense(...$request['arguments']);
+                    return ['success' => true];
+                } catch (\Throwable $exception) {
+                    return ['success' => false, 'errors' => ['source' => $exception->getMessage()]];
+                }
+            }
             if ($request['operation'] === 'link') {
                 return (new VehicleDamageIncidentService($connection))->linkHistorical(...$request['arguments']);
             }
             if ($request['operation'] === 'reopenCondition') {
                 return (new \App\Services\Fleet\VehicleDamageService($connection))->reopenRepairedCondition(...$request['arguments']);
             }
-            $methods = ['createJob', 'complete', 'recordMembershipResult', 'confirmConditionRepaired', 'addCondition', 'withdrawCondition', 'createEstimate', 'createRevision', 'acceptEstimate', 'rejectEstimate', 'withdrawEstimate', 'attachDocument', 'archiveDocument', 'recordCostEntry', 'voidCostEntry', 'replaceCostEntry', 'finalizeRepairCost', 'invalidateCostFinalization', 'recordRecovery', 'voidRecovery', 'replaceRecovery', 'finalizeRecovery', 'invalidateRecoveryFinalization'];
+            $methods = ['reconcileRepairCostToExpense', 'invalidateFinancialReconciliation', 'replaceFinancialReconciliation', 'createJob', 'complete', 'recordMembershipResult', 'confirmConditionRepaired', 'addCondition', 'withdrawCondition', 'createEstimate', 'createRevision', 'acceptEstimate', 'rejectEstimate', 'withdrawEstimate', 'attachDocument', 'archiveDocument', 'recordCostEntry', 'voidCostEntry', 'replaceCostEntry', 'finalizeRepairCost', 'invalidateCostFinalization', 'recordRecovery', 'voidRecovery', 'replaceRecovery', 'finalizeRecovery', 'invalidateRecoveryFinalization'];
             if (! in_array($request['operation'], $methods, true)) {
                 throw new RuntimeException('Unknown contention operation.');
             }
@@ -278,9 +292,37 @@ final class VehicleDamageRepairMariaDbFixture
         $this->admin->query('DROP DATABASE ' . $this->configuration['database']);
         $this->admin->close();
     }
+
+    public function independent(bool $loseCommitAcknowledgement = false): BaseConnection
+    {
+        return self::connect($this->configuration, $loseCommitAcknowledgement);
+    }
+}
+
+/** Driver-derived builder/result names require named classes. Local fault injection only. */
+class B32LostAckConnection extends \CodeIgniter\Database\MySQLi\Connection
+{
+    private bool $loseNextAcknowledgement = true;
+
+    protected function _transCommit(): bool
+    {
+        $committed = parent::_transCommit();
+        if ($committed && $this->loseNextAcknowledgement) {
+            $this->loseNextAcknowledgement = false;
+            throw new RuntimeException('Synthetic MariaDB acknowledgement lost after actual COMMIT');
+        }
+        return $committed;
+    }
+}
+
+class B32LostAckResult extends \CodeIgniter\Database\MySQLi\Result
+{
+}
+
+class B32LostAckBuilder extends \CodeIgniter\Database\MySQLi\Builder
+{
 }
 
 if (PHP_SAPI === 'cli' && realpath((string) ($_SERVER['SCRIPT_FILENAME'] ?? '')) === __FILE__) {
-    require dirname(__DIR__, 2) . '/vendor/codeigniter4/framework/system/Test/bootstrap.php';
     VehicleDamageRepairMariaDbFixture::worker();
 }

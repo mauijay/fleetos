@@ -50,11 +50,41 @@ if ($db->table('companies')->countAllResults() === 0) {
     (new \App\Services\Fleet\VehicleDamageService($db))->writeRepairStateInTransaction($conditionRepository->item(1, 10, $legacy), ['status_code' => 'repaired', 'resolved_at' => '2026-10-01 09:00:00', 'resolved_by' => 7, 'resolution_note' => 'Synthetic legacy repair', 'updated_at' => '2026-10-01 09:00:00', 'updated_by' => 7], 'repaired', 'Synthetic legacy repair', 7, '2026-10-01 09:00:00', null);
     $db->transCommit();
 }
+// Local synthetic setup/probes are separate from application GET previews.
+if ($path === '/synthetic-b32a') {
+    $action = $_GET['action'] ?? 'pair';
+    if ($action === 'pair') {
+        $paths = [];
+        $pair = \Tests\Support\VehicleDamageFinancialReconciliationFixture::pair($db, $paths);
+        header('Content-Type: application/json');
+        echo json_encode($pair);
+        exit;
+    }
+    $expense = (int) ($_GET['expense'] ?? 0);
+    if ($action === 'stale') {
+        $db->table('operating_expenses')->where('id', $expense)->update(['vendor' => 'Synthetic unexpected descriptor']);
+    } elseif ($action === 'review') {
+        (new \App\Repositories\OperatingExpenseRepository($db))->updateExpense(1, $expense, ['expense_date' => '2026-09-30', 'vendor' => 'Synthetic alternate shop', 'updated_by' => 7]);
+    } elseif ($action === 'archive') {
+        (new \App\Repositories\OperatingExpenseRepository($db))->updateExpense(1, $expense, ['status_code' => 'archived', 'archived_at' => '2026-10-07 10:00:00', 'updated_by' => 7]);
+    } elseif ($action === 'restore') {
+        (new \App\Repositories\OperatingExpenseRepository($db))->updateExpense(1, $expense, ['status_code' => 'recorded', 'archived_at' => null, 'amount' => '6200.00', 'updated_by' => 7]);
+    } elseif ($action === 'mismatch') {
+        (new \App\Repositories\OperatingExpenseRepository($db))->updateExpense(1, $expense, ['amount' => '6100.00', 'updated_by' => 7]);
+    } elseif ($action === 'shared-pair') {
+        $paths = [];
+        echo json_encode(\Tests\Support\VehicleDamageFinancialReconciliationFixture::pair($db, $paths, $expense));
+        exit;
+    }
+    header('Content-Type: application/json');
+    echo json_encode(['reconciliations' => $db->table('vehicle_damage_financial_reconciliations')->get()->getResultArray(), 'events' => $db->table('vehicle_damage_repair_job_events')->countAllResults(), 'audits' => $db->table('audit_logs')->countAllResults(), 'expenses' => $db->table('operating_expenses')->select('id,amount,expense_date')->get()->getResultArray()]);
+    exit;
+}
 $items = new \App\Repositories\VehicleDamageRepository($db);
 $conditions = new \App\Services\Fleet\VehicleDamageService($db);
 $repairs = new \App\Repositories\VehicleDamageRepairRepository($db);
 $read = new \App\Services\Fleet\VehicleDamageReadService($conditions, $items, $repairs);
-foreach (['vehicleDamageRepository' => $items, 'vehicleDamageService' => $conditions, 'vehicleDamageRepairRepository' => $repairs, 'vehicleDamageRepairRecoveryService' => new \App\Services\Fleet\VehicleDamageRepairRecoveryService($db), 'vehicleDamageRepairRecoveryReadService' => new \App\Services\Fleet\VehicleDamageRepairRecoveryReadService($db), 'vehicleDamageRepairCostService' => new \App\Services\Fleet\VehicleDamageRepairCostService($db), 'vehicleDamageRepairCostReadService' => new \App\Services\Fleet\VehicleDamageRepairCostReadService($db), 'vehicleDamageRepairService' => new \App\Services\Fleet\VehicleDamageRepairService($db), 'vehicleDamageRepairEstimateRepository' => new \App\Repositories\VehicleDamageRepairEstimateRepository($db), 'vehicleDamageRepairDocumentRepository' => new \App\Repositories\VehicleDamageRepairDocumentRepository($db), 'repairDocumentStorageService' => new \App\Services\Files\RepairDocumentStorageService($db), 'vehicleDamageReadService' => $read] as $name => $instance) {
+foreach (['vehicleDamageFinancialReconciliationService' => new \App\Services\Fleet\VehicleDamageFinancialReconciliationService($db), 'vehicleDamageRepository' => $items, 'vehicleDamageService' => $conditions, 'vehicleDamageRepairRepository' => $repairs, 'vehicleDamageRepairRecoveryService' => new \App\Services\Fleet\VehicleDamageRepairRecoveryService($db), 'vehicleDamageRepairRecoveryReadService' => new \App\Services\Fleet\VehicleDamageRepairRecoveryReadService($db), 'vehicleDamageRepairCostService' => new \App\Services\Fleet\VehicleDamageRepairCostService($db), 'vehicleDamageRepairCostReadService' => new \App\Services\Fleet\VehicleDamageRepairCostReadService($db), 'vehicleDamageRepairService' => new \App\Services\Fleet\VehicleDamageRepairService($db), 'vehicleDamageRepairEstimateRepository' => new \App\Repositories\VehicleDamageRepairEstimateRepository($db), 'vehicleDamageRepairDocumentRepository' => new \App\Repositories\VehicleDamageRepairDocumentRepository($db), 'repairDocumentStorageService' => new \App\Services\Files\RepairDocumentStorageService($db), 'vehicleDamageReadService' => $read] as $name => $instance) {
     \Config\Services::injectMock($name, $instance);
 }
 \Config\Services::injectMock('operationalFactsRepository', new class ($db) extends \App\Repositories\OperationalFactsRepository {
@@ -64,9 +94,19 @@ foreach (['vehicleDamageRepository' => $items, 'vehicleDamageService' => $condit
     }
 });
 \CodeIgniter\Shield\Config\Services::injectMock('auth', new class (new \Config\Auth()) extends \CodeIgniter\Shield\Auth {
+    public function loggedIn(): bool
+    {
+        return false;
+    }
+
     public function user(): \CodeIgniter\Shield\Entities\User
     {
-        return new \CodeIgniter\Shield\Entities\User(['id' => 7, 'username' => 'synthetic-work-operator']);
+        return new class (['id' => 7, 'username' => 'synthetic-work-operator']) extends \CodeIgniter\Shield\Entities\User {
+            public function getEmail(): ?string
+            {
+                return null;
+            }
+        };
     }
 });
 $sessionConfiguration = new \Config\Session();
@@ -143,6 +183,9 @@ try {
         } else {
             $result = $controller->createEstimate(10, (int) $match[1]);
         }
+    } elseif (preg_match('~^/fleet/vehicles/10/damage-repairs/(\d+)/financial-reconciliations(?:/(preview|invalidate|replace))?$~', $path, $match)) {
+        $method = ['' => 'reconcileRepairCostToExpense', 'preview' => 'financialReconciliationPreview', 'invalidate' => 'invalidateFinancialReconciliation', 'replace' => 'replaceFinancialReconciliation'][$match[2] ?? ''];
+        $result = $controller->{$method}(10, (int) $match[1]);
     } elseif (preg_match('~^/fleet/vehicles/10/damage-repairs/(\d+)/recoveries(?:/(new|review|finalize|invalidate)|/(\d+)/(replacement|replace|void))?$~', $path, $match)) {
         if (! empty($match[3])) {
             $method = ['replacement' => 'recoveryForm', 'replace' => 'replaceRecovery', 'void' => 'voidRecovery'][$match[4]];
@@ -175,6 +218,11 @@ try {
         $result = $controller->{$method}(10, (int) $match[1], (int) $match[2]);
     } elseif (preg_match('~^/fleet/vehicles/10/damage/(\d+)/reopen$~', $path, $match)) {
         $result = $request->is('post') ? $controller->reopenCondition(10, (int) $match[1]) : $controller->reopenConditionPreview(10, (int) $match[1]);
+    } elseif ($path === '/synthetic-b32a-report') {
+        $activity = new \App\Services\Fleet\FinancialActivityReadService(new \App\Repositories\TuroNormalizedTransactionRepository($db), new \App\Repositories\TripMonthAllocationRepository($db), new \App\Repositories\OperatingExpenseRepository($db), new \App\Repositories\MaintenanceCostRepository($db), new \App\Repositories\ChargingCostRepository($db), new \App\Repositories\TuroAccessReimbursementRepository($db));
+        $summary = new \App\Services\Fleet\FinancialSummaryService($activity);
+        $report = (new \App\Services\Fleet\VehicleFinancialSummaryService($summary, new \App\Repositories\FleetVehicleRepository($db)))->period(1, '2026-10-01', '2026-11-01');
+        $result = \CodeIgniter\Config\Services::renderer()->setData(['assets' => \Config\Services::assetManifestService()->appAssets(), 'navigation' => [], 'period' => ['preset' => 'custom', 'from' => '2026-10-01', 'to_inclusive' => '2026-10-31', 'label' => 'Synthetic October'], 'report' => $report])->render('vehicle_financial_results/index');
     } elseif ($path === '/fleet/vehicles/10' || $path === '/synthetic-checklist') {
         $assets = \Config\Services::assetManifestService()->appAssets();
         $data = ['vehicle' => $items->vehicle(1, 10), 'vehicleDamage' => $read->workspace(1, 10), 'damageIncidents' => [], 'notice' => null, 'errors' => [], 'form' => null, 'formData' => [], 'checklist' => ['id' => 321, 'company_id' => 1, 'fleet_vehicle_id' => 10, 'turo_trip_normalized_id' => 102]];

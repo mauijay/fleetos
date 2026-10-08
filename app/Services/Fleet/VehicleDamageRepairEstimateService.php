@@ -39,11 +39,14 @@ class VehicleDamageRepairEstimateService
     }
 
     /** Called only after aggregate rows, including any B2.3 costs, are locked. */
-    public function lockMetadata(array $jobs, int $company): void
+    public function lockMetadata(array $jobs, int $company, array $expenseFileIds = []): void
     {
         $docs = $this->lockedDocuments;
         foreach (['file_id', 'image_id'] as $key) {
             $ids = array_values(array_unique(array_filter(array_map('intval', array_column($docs, $key)))));
+            if ($key === 'file_id') {
+                $ids = array_values(array_unique([...$ids, ...array_map('intval', $expenseFileIds)]));
+            }
             if ($key === 'file_id' && $this->documents->uploadCandidateId > 0) {
                 $ids[] = $this->documents->uploadCandidateId;
                 $ids = array_values(array_unique($ids));

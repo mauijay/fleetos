@@ -51,6 +51,61 @@ class VehicleDamageRepairs extends BaseController
     {
         return $this->render('show', $this->jobContext($vehicle, $job));
     }
+
+    public function financialReconciliationPreview(int $v, int $j): string
+    {
+        $context = $this->jobContext($v, $j);
+        $workspace = $context['financialReconciliation'];
+        $root = (int) $this->request->getGet('cost_root_entry_id');
+        $expense = (int) $this->request->getGet('operating_expense_id');
+        $predecessor = (int) $this->request->getGet('reconciliation_id');
+        if (! $workspace['ready'] || ! isset($workspace['families'][$root], $workspace['expenses'][$expense])) {
+            throw PageNotFoundException::forPageNotFound();
+        }
+        $old = $predecessor === 0 ? null : (array_column($workspace['history'], null, 'id')[$predecessor] ?? null);
+        if ($predecessor !== 0 && ($old === null || $old['status_code'] !== 'active' || (int) $old['cost_root_entry_id'] !== $root)) {
+            throw PageNotFoundException::forPageNotFound();
+        }
+        return $this->render('financial_reconciliation_preview', $context + ['family' => $workspace['families'][$root], 'expenseSource' => $workspace['expenses'][$expense], 'predecessor' => $old]);
+    }
+
+    public function reconcileRepairCostToExpense(int $v, int $j): RedirectResponse
+    {
+        return $this->financialCommand('reconcileRepairCostToExpense', $v, $j);
+    }
+
+    public function invalidateFinancialReconciliation(int $v, int $j): RedirectResponse
+    {
+        return $this->financialCommand('invalidateFinancialReconciliation', $v, $j);
+    }
+
+    public function replaceFinancialReconciliation(int $v, int $j): RedirectResponse
+    {
+        return $this->financialCommand('replaceFinancialReconciliation', $v, $j);
+    }
+
+    private function financialCommand(string $method, int $v, int $j): RedirectResponse
+    {
+        $context = $this->jobContext($v, $j);
+        $key = $this->financialRetryKey($v, $j);
+        $pending = $context['financialRetry'];
+        $data = $pending['payload'] ?? $this->request->getPost();
+        $method = $pending['method'] ?? $method;
+        $result = Services::vehicleDamageRepairService()->{$method}($this->company(), $v, $j, $data, $this->actor());
+        if (($result['uncertain'] ?? false) || ($pending !== null && ! $result['success'])) {
+            CoreServices::session()->set($key, $pending ?? ['method' => $method, 'payload' => $result['retry_payload']]);
+            return CoreServices::redirectresponse()->to('/fleet/vehicles/' . $v . '/damage-repairs/' . $j)->with('damage_work_notice', 'Save outcome needs verification. Retry the retained original reconciliation command.');
+        }
+        if ($result['success']) {
+            CoreServices::session()->remove($key);
+        }
+        return $this->result($v, $result, '/fleet/vehicles/' . $v . '/damage-repairs/' . $j);
+    }
+
+    private function financialRetryKey(int $v, int $j): string
+    {
+        return 'damage_financial_retry_' . $this->company() . '_' . $v . '_' . $j . '_' . $this->actor();
+    }
     public function correctDetails(int $v, int $j): RedirectResponse
     {
         return $this->command('correctJobDetails', $v, $j);
@@ -541,7 +596,7 @@ class VehicleDamageRepairs extends BaseController
         foreach ($documents as $document) {
             $documentStates[$document['id']] = Services::vehicleDamageRepairDocumentRepository()->fingerprint($context['companyId'], $vehicle, $job, (int) $document['id']);
         }
-        return $context + ['recoveryRetry' => CoreServices::session()->get($this->recoveryRetryKey($vehicle, $job)), 'repairRecoveries' => Services::vehicleDamageRepairRecoveryReadService()->workspace($context['companyId'], $vehicle, $job), 'costRetry' => CoreServices::session()->get($this->costRetryKey($vehicle, $job)), 'repairCosts' => Services::vehicleDamageRepairCostReadService()->workspace($context['companyId'], $vehicle, $job), 'b22Ready' => $b22Ready, 'estimates' => $estimates, 'repairDocuments' => $documents, 'estimateStates' => $estimateStates, 'documentStates' => $documentStates, 'estimateScopes' => $b22Ready ? $estimateRepository->scope($context['companyId'], $job) : [], 'job' => $record, 'members' => Services::vehicleDamageRepairRepository()->members($context['companyId'], $vehicle, $job), 'events' => Services::vehicleDamageRepairRepository()->events($context['companyId'], $vehicle, $job)];
+        return $context + ['financialRetry' => CoreServices::session()->get($this->financialRetryKey($vehicle, $job)), 'financialReconciliation' => Services::vehicleDamageFinancialReconciliationService()->workspace($context['companyId'], $vehicle, $job), 'recoveryRetry' => CoreServices::session()->get($this->recoveryRetryKey($vehicle, $job)), 'repairRecoveries' => Services::vehicleDamageRepairRecoveryReadService()->workspace($context['companyId'], $vehicle, $job), 'costRetry' => CoreServices::session()->get($this->costRetryKey($vehicle, $job)), 'repairCosts' => Services::vehicleDamageRepairCostReadService()->workspace($context['companyId'], $vehicle, $job), 'b22Ready' => $b22Ready, 'estimates' => $estimates, 'repairDocuments' => $documents, 'estimateStates' => $estimateStates, 'documentStates' => $documentStates, 'estimateScopes' => $b22Ready ? $estimateRepository->scope($context['companyId'], $job) : [], 'job' => $record, 'members' => Services::vehicleDamageRepairRepository()->members($context['companyId'], $vehicle, $job), 'events' => Services::vehicleDamageRepairRepository()->events($context['companyId'], $vehicle, $job)];
     }
 
     private function ownedMember(array $context, int $id): array

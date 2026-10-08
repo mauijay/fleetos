@@ -94,7 +94,7 @@ final class VehicleDamageRepairPresentationTest extends CIUnitTestCase
                 $seen++;
             }
         }
-        $this->assertSame(47, $seen);
+        $this->assertSame(51, $seen);
         ShieldServices::auth()->logout();
         $this->get('/fleet/vehicles/10/damage-repairs')->assertRedirectTo('login');
     }
@@ -469,10 +469,69 @@ final class VehicleDamageRepairPresentationTest extends CIUnitTestCase
         $this->assertSame($before, $this->rows());
     }
 
+    public function testB32OwnedPreviewIsPureAndRejectsRawUnownedIds(): void
+    {
+        $paths = [];
+        try {
+            $pair = \Tests\Support\VehicleDamageFinancialReconciliationFixture::pair($this->connection, $paths);
+            $this->authenticate();
+            $base = '/fleet/vehicles/10/damage-repairs/' . $pair['job'];
+            $preview = $base . '/financial-reconciliations/preview?cost_root_entry_id=' . $pair['root'] . '&operating_expense_id=' . $pair['expense'];
+            $before = $this->rows();
+            foreach ([$base, $preview] as $url) {
+                $response = $this->get($url);
+                $response->assertOK();
+                $this->assertStringContainsString('reconciliation', strtolower($response->getBody()));
+            }
+            foreach ([$preview . '&reconciliation_id=999999', $base . '/financial-reconciliations/preview?cost_root_entry_id=999999&operating_expense_id=' . $pair['expense'], $base . '/financial-reconciliations/preview?cost_root_entry_id=' . $pair['root'] . '&operating_expense_id=999999'] as $url) {
+                try {
+                    $this->get($url);
+                    $this->fail('Unowned source preview must fail closed.');
+                } catch (\CodeIgniter\Exceptions\PageNotFoundException) {
+                    $this->addToAssertionCount(1);
+                }
+            }
+            $this->assertSame($before, $this->rows());
+        } finally {
+            foreach ($paths as $path) {
+                if (is_file($path)) {
+                    unlink($path);
+                }
+            }
+        }
+    }
+
+    public function testB32NonAdminAndMissingCsrfFailBeforeSourcesAreRead(): void
+    {
+        $this->authenticate(false);
+        $base = '/fleet/vehicles/10/damage-repairs/999/financial-reconciliations';
+        $before = $this->rows();
+        $this->get($base . '/preview')->assertRedirectTo((new \Config\Auth())->permissionDeniedRedirect());
+        $security = CoreServices::security();
+        foreach (['', '/invalidate', '/replace'] as $suffix) {
+            $this->post($base . $suffix, [$security->getTokenName() => $security->getHash()])->assertRedirectTo((new \Config\Auth())->permissionDeniedRedirect());
+        }
+        $this->assertSame($before, $this->rows());
+    }
+
+    public function testB32MissingCsrfRejectsEveryMaterialCommand(): void
+    {
+        $this->authenticate();
+        $before = $this->rows();
+        foreach (['', '/invalidate', '/replace'] as $suffix) {
+            try {
+                $this->post('/fleet/vehicles/10/damage-repairs/999/financial-reconciliations' . $suffix, ['confirmed' => '1']);
+                $this->fail('CSRF must reject financial reconciliation POST.');
+            } catch (\CodeIgniter\Security\Exceptions\SecurityException) {
+                $this->assertSame($before, $this->rows());
+            }
+        }
+    }
+
     private function rows(): array
     {
         $rows = [];
-        foreach (['vehicle_damage_items', 'vehicle_damage_item_events', 'vehicle_damage_repair_jobs', 'vehicle_damage_repair_job_items', 'vehicle_damage_repair_job_events', 'vehicle_damage_repair_cost_entries', 'vehicle_damage_repair_recovery_entries', 'vehicle_damage_repair_estimates', 'vehicle_damage_repair_estimate_items', 'vehicle_damage_repair_documents', 'files', 'audit_logs'] as $table) {
+        foreach (['vehicle_damage_financial_reconciliations', 'operating_expenses', 'operating_expense_receipts', 'vehicle_damage_items', 'vehicle_damage_item_events', 'vehicle_damage_repair_jobs', 'vehicle_damage_repair_job_items', 'vehicle_damage_repair_job_events', 'vehicle_damage_repair_cost_entries', 'vehicle_damage_repair_recovery_entries', 'vehicle_damage_repair_estimates', 'vehicle_damage_repair_estimate_items', 'vehicle_damage_repair_documents', 'files', 'audit_logs'] as $table) {
             $rows[$table] = $this->connection->table($table)->get()->getResultArray();
         } return $rows;
     }

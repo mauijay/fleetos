@@ -46,7 +46,7 @@ final class VehicleDamageRepairRecoveriesMigrationTest extends CIUnitTestCase
             $db = Database::connect($configuration, false);
             $runner = (new MigrationRunner(new Migrations(), $db))->setNamespace('App');
             foreach (glob(__DIR__ . '/../../app/Database/Migrations/*.php') as $path) {
-                if (! $upgrade || strcmp(basename($path), '2026-10-07-000034') < 0) {
+                if (strcmp(basename($path), '2026-10-07-000035') < 0 && (! $upgrade || strcmp(basename($path), '2026-10-07-000034') < 0)) {
                     $runner->force($path, 'App');
                 }
             }
@@ -71,7 +71,11 @@ final class VehicleDamageRepairRecoveriesMigrationTest extends CIUnitTestCase
             if ($upgrade) {
                 $this->assertSame(42, $db->table('migrations')->countAllResults());
             }
-            $this->assertTrue((new MigrationRunner(new Migrations(), $db))->setNamespace('App')->latest());
+            // Preserve this test's exact 000034 migration boundary as newer
+            // additive migrations are introduced by later slices.
+            if ($upgrade) {
+                $this->assertTrue((new MigrationRunner(new Migrations(), $db))->setNamespace('App')->force(__DIR__ . '/../../app/Database/Migrations/2026-10-07-000034_CreateVehicleDamageRepairRecoveries.php', 'App'));
+            }
             $this->assertSame(43, $db->table('migrations')->countAllResults());
             $db->resetDataCache();
             $repo = new Recoveries($db);
