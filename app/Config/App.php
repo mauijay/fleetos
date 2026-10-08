@@ -10,7 +10,7 @@ class App extends BaseConfig
 
     public string $siteCreditEmail = 'jaycadla@gmail.com';
 
-    public string $siteCreditClient = '808businesssolutions.com';
+    public string $siteCreditClient = '808.biz';
 
     /**
      * --------------------------------------------------------------------------
