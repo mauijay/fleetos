@@ -24,6 +24,7 @@ class MovementBoardIntelligenceService
         private readonly ?MovementReadinessReadService $movementReadinessReadService = null,
         private readonly ?MovementReadinessReadModelRepository $readinessRepository = null,
         private readonly ?FleetExtraService $extraVerificationService = null,
+        private readonly ?GuestCommitmentProjectionService $commitmentProjection = null,
     ) {
     }
 
@@ -59,6 +60,22 @@ class MovementBoardIntelligenceService
         $sourceVerification = $companyId !== null && $companyId > 0
             ? ($this->extraVerificationService ?? Services::fleetExtraService())->refreshVerificationForCompany($companyId, $asOf)
             : [];
+        $commitmentProjections = [];
+        if ($this->commitmentProjection !== null && $companyId !== null && $companyId > 0) {
+            $tripIds = array_map('intval', array_keys($sourceVerification));
+            foreach ($cards as &$card) {
+                $vehicleId = (int) $card['fleet_vehicle_id'];
+                $card['projection_next_trip'] = $this->nextTrips()->forVehicle($vehicleId, $asOf);
+                $tripIds[] = (int) ($card['projection_next_trip']['id'] ?? 0);
+                $tripIds[] = (int) ($custody[$vehicleId]['basis_event']['turo_trip_normalized_id'] ?? 0);
+                foreach ($card['checklists'] ?? [] as $checklist) {
+                    $tripIds[] = (int) ($checklist['turo_trip_normalized_id'] ?? 0);
+                }
+            }
+            unset($card);
+            $commitmentProjections = $this->commitmentProjection->forTrips($companyId, $tripIds, $asOf);
+            $sourceVerification = array_replace($sourceVerification, array_column($commitmentProjections, 'verification', 'trip_id'));
+        }
         $cards = array_map(fn (array $card): array => $this->attachSourceVerification($card, $sourceVerification, $companyId), $cards);
         return array_map(fn (array $card): array => $this->enrichCard(
             $card,
@@ -71,6 +88,7 @@ class MovementBoardIntelligenceService
             $exceptionsByVehicle[(int) ($card['fleet_vehicle_id'] ?? 0)] ?? [],
             $custody[(int) ($card['fleet_vehicle_id'] ?? 0)] ?? null,
             $sourceVerification,
+            $commitmentProjections,
         ), $cards);
     }
 
@@ -104,7 +122,7 @@ class MovementBoardIntelligenceService
     }
 
     /** @return array<string, mixed> */
-    private function enrichCard(array $card, \DateTimeImmutable $asOf, ?array $latestCleanliness, ?array $latestEnergy, ?array $cleaningNeed, ?array $energyNeed, ?int $companyId, array $recoveryExceptions = [], ?array $custodyState = null, array $sourceVerification = []): array
+    private function enrichCard(array $card, \DateTimeImmutable $asOf, ?array $latestCleanliness, ?array $latestEnergy, ?array $cleaningNeed, ?array $energyNeed, ?int $companyId, array $recoveryExceptions = [], ?array $custodyState = null, array $sourceVerification = [], array $commitmentProjections = []): array
     {
         $vehicleId = (int) ($card['fleet_vehicle_id'] ?? 0);
         $event = $this->repo()->latestActiveMovementEvent($vehicleId, $asOf->format('Y-m-d H:i:s'));
@@ -137,8 +155,9 @@ class MovementBoardIntelligenceService
             && (($assessment['cleanliness'] ?? null) !== 'clean'
                 || (string) ($assessment['captured_at'] ?? '') <= (string) $lifecycleEvent['occurred_at']));
         $profile = $this->repo()->profile($vehicleId) ?? $this->emptyProfile();
-        $nextTrip = $this->nextTrips()->forVehicle($vehicleId, $asOf);
-        $card = $this->attachNextTripPreparation($card, $nextTrip, $custodyState, $companyId, $asOf, $sourceVerification);
+        $nextTrip = array_key_exists('projection_next_trip', $card) ? $card['projection_next_trip'] : $this->nextTrips()->forVehicle($vehicleId, $asOf);
+        unset($card['projection_next_trip']);
+        $card = $this->attachNextTripPreparation($card, $nextTrip, $custodyState, $companyId, $asOf, $sourceVerification, $commitmentProjections);
         $freshness = $this->freshness()->assess($nextTrip['import_completed_at'] ?? $schedule['import_completed_at'] ?? null, $asOf);
         $location = $this->positionBasis($lifecycleEvent ?? $event, $schedule, $card['current_position'] ?? null);
         $blockers = $this->blockers($card);
@@ -202,9 +221,11 @@ class MovementBoardIntelligenceService
         $commitmentEnergyRule = $companyId !== null && $companyId > 0 && $commitmentTripId > 0
             ? $this->energyRules()->forTrip($companyId, $commitmentTripId, $profile)
             : null;
-        $guestCommitments = $companyId !== null && $companyId > 0 && $commitmentTripId > 0 && $this->tripCommitmentService !== null
+        $guestCommitments = $this->commitmentProjection !== null
+            ? $this->commitmentProjection->forPhases($commitmentProjections[$commitmentTripId] ?? [], $commitmentPhases, $commitmentEnergyRule)
+            : ($companyId !== null && $companyId > 0 && $commitmentTripId > 0 && $this->tripCommitmentService !== null
             ? $this->tripCommitmentService->activeForTrip($companyId, $commitmentTripId, $commitmentPhases, $commitmentEnergyRule)
-            : [];
+            : []);
         $guestCommitmentPreview = array_slice($guestCommitments, 0, 2);
         $hasCustodyFact = in_array($lifecycleCode, ['actual_handoff', 'guest_return_staged', 'actual_return', 'vehicle_recovered'], true);
         $usesResolvedState = $hasCustodyFact || in_array($state['code'], ['pickup_confirmation_overdue', 'return_confirmation_overdue', 'prep_required'], true);
@@ -301,7 +322,7 @@ class MovementBoardIntelligenceService
     }
 
     /** Keep future trip work visible on days without a movement workflow. */
-    private function attachNextTripPreparation(array $card, ?array $nextTrip, array $custody, ?int $companyId, \DateTimeImmutable $asOf, array $sourceVerification = []): array
+    private function attachNextTripPreparation(array $card, ?array $nextTrip, array $custody, ?int $companyId, \DateTimeImmutable $asOf, array $sourceVerification = [], array $commitmentProjections = []): array
     {
         $tripId = (int) ($nextTrip['id'] ?? 0);
         if ($tripId < 1 || $companyId === null || $companyId < 1) {
@@ -322,9 +343,10 @@ class MovementBoardIntelligenceService
             }
             $href = '/operations/checklists/' . $checklistId;
         } else {
-            $extras = ($this->extraFulfillmentService ?? Services::tripExtraFulfillmentService())->forTrips($companyId, [$tripId])[$tripId] ?? [];
-            $manual = ($this->tripCommitmentService ?? Services::tripCommitmentService())->activeForTrip($companyId, $tripId, ['preparation', 'pickup', 'entire_trip']);
-            $verification = $sourceVerification[$tripId] ?? ($this->extraVerificationService ?? Services::fleetExtraService())->verificationForTrips($companyId, [$tripId], $asOf)[$tripId] ?? null;
+            $tripProjection = $commitmentProjections[$tripId] ?? [];
+            $extras = $this->commitmentProjection !== null ? ($tripProjection['purchased'] ?? []) : (($this->extraFulfillmentService ?? Services::tripExtraFulfillmentService())->forTrips($companyId, [$tripId])[$tripId] ?? []);
+            $manual = $this->commitmentProjection !== null ? array_values(array_filter($tripProjection['manual'] ?? [], static fn (array $row): bool => in_array($row['phase'], ['preparation', 'pickup', 'entire_trip'], true))) : ($this->tripCommitmentService ?? Services::tripCommitmentService())->activeForTrip($companyId, $tripId, ['preparation', 'pickup', 'entire_trip']);
+            $verification = $tripProjection['verification'] ?? $sourceVerification[$tripId] ?? ($this->extraVerificationService ?? Services::fleetExtraService())->verificationForTrips($companyId, [$tripId], $asOf)[$tripId] ?? null;
             $event = $custody['basis_event'] ?? null;
             $projection = (new MovementReadinessProjectionService())->projectTripPreparation(array_merge($nextTrip, [
                 'company_id' => $companyId,

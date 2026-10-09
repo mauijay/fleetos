@@ -13,6 +13,7 @@ class MovementReadinessReadService
         private readonly ?TripEnergyRuleResolver $energyRuleResolver = null,
         private readonly ?TripExtraFulfillmentService $extraFulfillmentService = null,
         private readonly ?FleetExtraService $extraVerificationService = null,
+        private readonly ?GuestCommitmentProjectionService $commitmentProjection = null,
     ) {
     }
 
@@ -32,23 +33,24 @@ class MovementReadinessReadService
                 $tripIds[] = (int) $context['next_trip']['id'];
             }
         }
-        $extrasByTrip = $this->extraFulfillmentService?->forTrips($companyId, array_values(array_unique($tripIds))) ?? [];
+        $projections = $this->commitmentProjection?->forTrips($companyId, array_values(array_unique($tripIds)), $asOf);
+        $extrasByTrip = $projections === null ? ($this->extraFulfillmentService?->forTrips($companyId, array_values(array_unique($tripIds))) ?? []) : array_column($projections, 'purchased', 'trip_id');
 
-        $verificationByTrip = $this->extraVerificationService?->verificationForTrips($companyId, array_values(array_unique($tripIds)), $asOf) ?? [];
+        $verificationByTrip = $projections === null ? ($this->extraVerificationService?->verificationForTrips($companyId, array_values(array_unique($tripIds)), $asOf) ?? []) : array_column($projections, 'verification', 'trip_id');
         foreach ($contexts as &$context) {
             $context['as_of'] = $asOf->format('Y-m-d H:i:s');
             $tripId = (int) $context['turo_trip_normalized_id'];
             $movementType = (string) $context['movement_type'];
             $phases = $movementType === 'return' ? ['return', 'entire_trip'] : ['preparation', 'pickup', 'entire_trip'];
-            $context['active_commitments'] = $this->commitmentService?->activeForTrip($companyId, $tripId, $phases) ?? [];
+            $context['active_commitments'] = $projections === null ? ($this->commitmentService?->activeForTrip($companyId, $tripId, $phases) ?? []) : array_values(array_filter($projections[$tripId]['manual'] ?? [], static fn (array $row): bool => in_array($row['phase'], $phases, true)));
             $context['energy_rule'] = $this->energyRuleResolver?->forTrip($companyId, $tripId, $context['profile'] ?? null)
                 ?? (new TripEnergyRuleResolver())->forProfile($context['profile'] ?? null);
             $context['extra_fulfillments'] = $extrasByTrip[$tripId] ?? [];
             $context['extra_verification'] = $verificationByTrip[$tripId] ?? null;
             $nextTripId = (int) ($context['next_trip']['id'] ?? 0);
-            $context['next_trip_commitments'] = $nextTripId > 0 && $this->commitmentService !== null
+            $context['next_trip_commitments'] = $projections !== null ? array_values(array_filter($projections[$nextTripId]['manual'] ?? [], static fn (array $row): bool => in_array($row['phase'], ['preparation', 'pickup', 'entire_trip'], true))) : ($nextTripId > 0 && $this->commitmentService !== null
                 ? $this->commitmentService->activeForTrip($companyId, $nextTripId, ['preparation', 'pickup', 'entire_trip'])
-                : [];
+                : []);
             $context['next_trip_energy_rule'] = $nextTripId > 0 && $this->energyRuleResolver !== null
                 ? $this->energyRuleResolver->forTrip($companyId, $nextTripId, $context['profile'] ?? null)
                 : null;

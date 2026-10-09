@@ -127,6 +127,18 @@ use CodeIgniter\Config\BaseService;
  */
 class Services extends BaseService
 {
+    public static function guestCommitmentProjectionService(bool $getShared = true): \App\Services\Fleet\GuestCommitmentProjectionService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('guestCommitmentProjectionService');
+        }
+
+        return new \App\Services\Fleet\GuestCommitmentProjectionService(
+            fulfillments: static::tripExtraFulfillmentService(),
+            manuals: static::tripCommitmentService(),
+        );
+    }
+
     public static function tripCommitmentRepository(bool $getShared = true): TripCommitmentRepository
     {
         if ($getShared) {
@@ -663,6 +675,7 @@ class Services extends BaseService
             static::tripEnergyRuleResolver(),
             static::tripExtraFulfillmentService(),
             static::fleetExtraService(),
+            static::guestCommitmentProjectionService(),
         );
     }
 
@@ -872,6 +885,7 @@ class Services extends BaseService
             energyRuleResolver: static::tripEnergyRuleResolver(),
             custodyService: static::currentVehicleCustodyService(),
             extraVerificationService: static::fleetExtraService(),
+            commitmentProjection: static::guestCommitmentProjectionService(),
         );
     }
 

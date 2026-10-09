@@ -28,6 +28,9 @@ class TripPreparationViewModelService
                 }
                 $seen[$identity] = true;
                 $phases = $collection === 'target' ? $targetPhases : ['preparation', 'pickup', 'entire_trip'];
+                if (($row['fulfillment_phase'] ?? null) !== null && ! in_array((string) $row['fulfillment_phase'], $phases, true)) {
+                    continue;
+                }
                 if (! in_array((string) ($row['fulfillment_phase'] ?? ''), $phases, true) && ! ($row['is_informational'] ?? false)) {
                     if ($collection === 'future' && ($row['is_mapped'] ?? false)) {
                         continue;

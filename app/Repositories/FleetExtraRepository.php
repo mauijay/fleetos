@@ -36,7 +36,10 @@ class FleetExtraRepository
     {
         if ($this->db->DBDriver === 'MySQLi') {
             // Serialize imports within a tenant so equal-time checks cannot race.
-            $this->db->query('SELECT id FROM ' . $this->db->prefixTable('companies') . ' WHERE id = ? FOR UPDATE', [$companyId]);
+            $locked = $this->db->query('SELECT id FROM ' . $this->db->prefixTable('companies') . ' WHERE id = ? FOR UPDATE', [$companyId]);
+            if ($locked === false) {
+                throw new RuntimeException('Could not lock Extra company observations: ' . $this->db->error()['message']);
+            }
         }
     }
 
@@ -413,7 +416,7 @@ class FleetExtraRepository
     }
 
     /** @param list<string> $reservationIds @return list<array<string, mixed>> */
-    public function verificationFailures(int $companyId, array $reservationIds): array
+    public function verificationFailures(int $companyId, array $reservationIds, ?int $rowLimit = null): array
     {
         if ($reservationIds === [] || ! $this->db->tableExists('turo_import_errors')) {
             return [];
@@ -424,11 +427,15 @@ class FleetExtraRepository
         }
 
         // New Extras errors carry server-derived ownership and source observation time.
-        return $this->db->table('turo_import_errors errors')->select('errors.raw_payload, errors.error_code')
+        $query = $this->db->table('turo_import_errors errors')->select('errors.raw_payload, errors.error_code')
             ->where('errors.raw_table', 'turo_extra_reservation_snapshots')
             ->whereIn('errors.error_code', ['invalid_extras_reservation', 'extras_export_failure', 'extras_observation_conflict'])
             ->where("JSON_EXTRACT(errors.raw_payload, '$.company_id')", $companyId, false)
-            ->whereIn($reservationExpression, $reservationIds)->get()->getResultArray();
+            ->whereIn($reservationExpression, $reservationIds);
+        if ($rowLimit !== null) {
+            $query->limit($rowLimit);
+        }
+        return $query->get()->getResultArray();
     }
 
     /** @param list<string> $reservationIds @return list<array<string, mixed>> */

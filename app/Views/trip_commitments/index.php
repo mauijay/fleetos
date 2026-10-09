@@ -8,6 +8,16 @@
 /** @var string|null $success */
 /** @var string|null $error */
 $trip = $workspace['trip'];
+$projection ??= ['rows' => $workspace['active'], 'purchased' => [], 'purchased_history' => [], 'manual' => $workspace['active'], 'verification' => null, 'verification_warning' => true, 'can_show_empty' => false, 'count' => count($workspace['active'])];
+$operatorRows = $projection['rows'];
+$manualDetails = array_column($workspace['active'], null, 'id');
+foreach ($operatorRows as &$row) {
+    if (($row['source_kind'] ?? 'manual') === 'manual' && isset($manualDetails[$row['id']])) {
+        $row = array_merge($row, $manualDetails[$row['id']]);
+    }
+}
+unset($row);
+$plannedReturn = $trip['return_location_source_text'] ?? $trip['return_location_class'] ?? null;
 $workspace['fleet_extras'] ??= [];
 $tripIsOperational = (bool) $workspace['trip_is_operational'];
 $tripStateHeading = strtolower((string) ($trip['trip_status_code'] ?? '')) === 'invalid' ? 'Trip invalid' : 'Trip canceled';
@@ -58,17 +68,19 @@ $location = static fn (?string $class, ?string $source): string => trim((string)
             </dl>
         </section>
 
-        <?php if ($tripIsOperational): ?><?= view('trip_movement_checklists/_trip_preparation', ['checklist' => ['turo_trip_normalized_id' => (int) $trip['id']], 'extraPreparation' => $extraPreparation ?? []]) ?><?php endif; ?>
-
         <?php if ($tripIsOperational): ?>
         <section class="section" id="guest-commitments" aria-labelledby="commitments-heading">
-            <div class="section-heading split-heading"><div><p class="eyebrow">What we promised</p><h2 id="commitments-heading">Active commitments</h2></div><span class="count-pill"><?= count($workspace['active']) ?> active</span></div>
-            <?php if ($workspace['active'] === []): ?><div class="empty-state"><strong>No active guest commitments</strong><p>This trip follows its normal FleetOS preparation and movement rules.</p></div><?php endif; ?>
+            <div class="section-heading split-heading"><div><p class="eyebrow">What must be ready for this guest</p><h2 id="commitments-heading">Current commitments</h2></div><span class="count-pill"><?= count($operatorRows) ?> commitment rows</span></div>
+            <?= view('trip_movement_checklists/_extras_verification', ['verification' => $projection['verification']]) ?>
+            <?php if (($projection['missing_selection_count'] ?? 0) > 0): ?><p class="tone-warning" role="status">Purchased selection synchronization required. Complete source evidence contains selections unavailable in the operational list.</p><?php endif; ?>
+            <?php if ($projection['can_show_empty']): ?><div class="empty-state"><strong>No active guest commitments</strong><p>This trip follows its normal FleetOS preparation and movement rules.</p></div><?php endif; ?>
             <div class="guest-commitment-grid">
-                <?php foreach ($workspace['active'] as $commitment): ?>
+                <?php foreach ($operatorRows as $commitment): ?>
+                    <?php if (($commitment['source_kind'] ?? 'manual') === 'purchased_extra'): ?><?= view('trip_commitments/components/purchased_extra', ['extra' => $commitment, 'plannedReturn' => $plannedReturn]) ?><?php continue; endif; ?>
                     <article class="guest-commitment-card<?= $commitment['is_blocking'] ? ' is-blocking' : '' ?>" id="commitment-<?= (int) $commitment['id'] ?>">
-                        <div class="guest-commitment-card__heading"><div><p class="eyebrow"><?= esc((string) $commitment['category_label']) ?></p><h3><?= esc((string) $commitment['instruction']) ?></h3></div><span class="status-badge <?= $commitment['is_blocking'] ? 'tone-warning' : 'tone-info' ?>"><?= $commitment['is_blocking'] ? 'Required' : esc((string) $commitment['handling_label']) ?></span></div>
+                        <div class="guest-commitment-card__heading"><div><p class="eyebrow">Manual · <?= esc((string) $commitment['category_label']) ?></p><h3><?= esc((string) $commitment['instruction']) ?></h3></div><span class="status-badge <?= $commitment['is_blocking'] ? 'tone-warning' : 'tone-info' ?>"><?= $commitment['is_blocking'] ? 'Required' : esc((string) $commitment['handling_label']) ?></span></div>
                         <p class="muted">Manual · <?= esc((string) $commitment['phase_label']) ?><?= (int) $commitment['required_before_dispatch'] === 1 ? ' · Required before dispatch' : '' ?></p>
+                        <?php $overlapWarning = array_column($projection['manual'], 'overlap_warning', 'id')[$commitment['id']] ?? null; if ($overlapWarning !== null): ?><p class="tone-warning"><?= esc((string) $overlapWarning) ?></p><?php endif; ?>
                         <?php if (($commitment['fleet_extra_name'] ?? null) !== null): ?><p class="muted">Linked Extra: <strong><?= esc((string) $commitment['fleet_extra_name']) ?></strong></p><?php endif; ?>
                         <?php if ($commitment['category'] === 'energy_override'): ?><div class="commitment-special-instruction"><strong>Special instruction</strong><?= view('trip_commitments/components/energy_override_context', ['commitment' => $commitment]) ?></div><?php endif; ?>
                         <?php if ($commitment['arranged_at'] !== null): ?><div class="commitment-time-arrangement"><span>Guest arrangement</span><strong><?= esc(date('M j, Y · g:i A', strtotime((string) $commitment['arranged_at']))) ?></strong></div><?php endif; ?>
@@ -107,6 +119,7 @@ $location = static fn (?string $class, ?string $source): string => trim((string)
             </form>
         </section>
         <?php else: ?>
+        <?php if ($projection['purchased'] !== []): ?><section class="section" aria-labelledby="preserved-extras-heading"><h2 id="preserved-extras-heading">Preserved purchased Extras</h2><div class="guest-commitment-grid"><?php foreach ($projection['purchased'] as $extra): ?><?= view('trip_commitments/components/purchased_extra', ['extra' => $extra]) ?><?php endforeach; ?></div></section><?php endif; ?>
         <section class="section" id="guest-commitments" aria-labelledby="preserved-commitments-heading">
             <div class="section-heading split-heading"><div><p class="eyebrow">Historical trip record</p><h2 id="preserved-commitments-heading"><?= esc($preservedHeading) ?></h2></div><span class="count-pill"><?= count($workspace['preserved']) ?> preserved</span></div>
             <?php if ($workspace['preserved'] === []): ?><div class="empty-state"><strong>No preserved guest commitments</strong><p>No guest-specific instructions were recorded for this trip.</p></div><?php endif; ?>
@@ -123,6 +136,8 @@ $location = static fn (?string $class, ?string $source): string => trim((string)
             </div>
         </section>
         <?php endif; ?>
+
+        <?php if ($projection['purchased_history'] !== []): ?><section class="section" aria-labelledby="purchased-history-heading"><h2 id="purchased-history-heading">Removed purchased Extras</h2><div class="guest-commitment-grid"><?php foreach ($projection['purchased_history'] as $extra): ?><?= view('trip_commitments/components/purchased_extra', ['extra' => $extra, 'historical' => true]) ?><?php endforeach; ?></div></section><?php endif; ?>
 
         <section class="section" aria-labelledby="history-heading"><div class="section-heading split-heading"><div><p class="eyebrow">Preserved history</p><h2 id="history-heading">Completed and not applicable</h2></div><span class="count-pill"><?= count($workspace['history']) ?></span></div>
             <?php if ($workspace['history'] === []): ?><p class="muted">No historical commitments for this trip.</p><?php endif; ?>

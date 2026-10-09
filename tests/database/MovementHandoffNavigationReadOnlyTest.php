@@ -86,6 +86,9 @@ final class MovementHandoffNavigationReadOnlyTest extends CIUnitTestCase
             'active' => [],
         ]);
         Services::injectMock('tripCommitmentService', $commitments);
+        $projection = $this->createMock(\App\Services\Fleet\GuestCommitmentProjectionService::class);
+        $projection->method('forTrip')->willReturn(['rows' => [], 'purchased' => [], 'manual' => [], 'count' => 0]);
+        Services::injectMock('guestCommitmentProjectionService', $projection);
 
         $assets = $this->createMock(AssetManifestService::class);
         $assets->method('appAssets')->willReturn(['css' => null, 'js' => null]);

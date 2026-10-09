@@ -87,23 +87,16 @@ class TripMovementChecklists extends BaseController
         $commitmentPhases = ($checklist['movement_type'] ?? null) === 'return'
             ? ['return', 'entire_trip']
             : ['preparation', 'pickup', 'entire_trip'];
-        $guestCommitments = ($checklist['exists'] ?? false) && $companyId > 0
-            ? Services::tripCommitmentService()->activeForTrip(
-                $companyId,
-                (int) $checklist['turo_trip_normalized_id'],
-                $commitmentPhases,
-                $readiness['energy_rule'] ?? null,
-            )
-            : [];
         $currentTripId = (int) ($checklist['turo_trip_normalized_id'] ?? 0);
         $nextTripId = (int) ($readiness['next_trip']['id'] ?? 0);
         $extraTripIds = array_values(array_filter([$currentTripId, $nextTripId]));
-        $extraVerification = $companyId > 0
-            ? ($readiness['extra_verification'] ?? Services::fleetExtraService()->verificationForTrips($companyId, [$currentTripId], $asOf)[$currentTripId] ?? null)
-            : null;
-        $extraPreparationByTrip = ($checklist['exists'] ?? false) && $companyId > 0
-            ? Services::tripExtraFulfillmentService()->forTrips($companyId, $extraTripIds)
+        $commitmentProjections = ($checklist['exists'] ?? false) && $companyId > 0
+            ? Services::guestCommitmentProjectionService()->forTrips($companyId, $extraTripIds, $asOf)
             : [];
+        $movementCommitments = Services::guestCommitmentProjectionService()->forPhases($commitmentProjections[$currentTripId] ?? [], $commitmentPhases, $readiness['energy_rule'] ?? null);
+        $guestCommitments = array_values(array_filter($movementCommitments, static fn (array $row): bool => $row['source_kind'] === 'manual'));
+        $extraVerification = $commitmentProjections[$currentTripId]['verification'] ?? null;
+        $extraPreparationByTrip = array_column($commitmentProjections, 'purchased', 'trip_id');
         $preparation = (new TripPreparationViewModelService())->forChecklist($checklist, $extraPreparationByTrip, $readiness ?? []);
         $extraPreparation = $preparation['target'];
         $futureExtraPreparation = $preparation['future'];

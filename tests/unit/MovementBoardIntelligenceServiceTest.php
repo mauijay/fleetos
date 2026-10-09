@@ -18,6 +18,27 @@ use CodeIgniter\Test\CIUnitTestCase;
 /** @internal */
 final class MovementBoardIntelligenceServiceTest extends CIUnitTestCase
 {
+    public function testCommitmentSummaryCountsPurchasedAndManualRowsFromOneBulkProjection(): void
+    {
+        $db = \Tests\Support\GuestCommitmentProjectionFixture::sqlite();
+        try {
+            \Tests\Support\GuestCommitmentProjectionFixture::manual($db, ['fleet_extra_id' => 301, 'category' => 'energy_override', 'active_override_slot' => 'energy', 'handling_mode' => 'automatic_override', 'energy_comparison' => 'minimum', 'energy_percent' => 90]);
+            $projection = \Tests\Support\GuestCommitmentProjectionFixture::service($db)->forTrip(1, 100, \Tests\Support\GuestCommitmentProjectionFixture::clock());
+            $loader = $this->createMock(\App\Services\Fleet\GuestCommitmentProjectionService::class);
+            $loader->expects($this->once())->method('forTrips')->willReturn([100 => $projection]);
+            $loader->method('forPhases')->willReturnCallback(fn (array $value, array $phases, ?array $energyRule = null): array => \Tests\Support\GuestCommitmentProjectionFixture::service($db)->forPhases($value, $phases, $energyRule));
+            $next = ['id' => 100, 'fleet_vehicle_id' => 9, 'starts_at' => '2030-01-03 08:00:00', 'planning_horizon' => 'near_term', 'pickup_location_class' => 'home'];
+            $service = $this->service(null, null, null, ['energy_kind' => 'electric', 'ready_energy_min_percent' => 70, 'ready_energy_preferred_max_percent' => 80, 'capabilities' => []], $next, commitmentProjection: $loader, energyRuleResolver: new \App\Services\Fleet\TripEnergyRuleResolver(new \App\Repositories\TripCommitmentRepository($db)));
+            $card = $service->enrich([['fleet_vehicle_id' => 9, 'status' => 'available', 'checklists' => [['turo_trip_normalized_id' => 100, 'movement_type' => 'pickup']]]], \Tests\Support\GuestCommitmentProjectionFixture::clock(), 1)[0];
+            $this->assertSame(2, $card['guest_commitments']['count']);
+            $this->assertSame(['purchased_extra', 'manual'], array_column($card['guest_commitments']['preview'], 'source_kind'));
+            $this->assertSame('Normal vehicle range: 70–80%', $card['guest_commitments']['preview'][1]['normal_vehicle_policy_summary']);
+            $this->assertTrue($card['guest_commitments']['required']);
+        } finally {
+            $db->close();
+        }
+    }
+
     public function testNoMovementTodayPendingNextTripSeatInstallationPreventsReadyUntilFulfilled(): void
     {
         $nextTrip = ['id' => 502, 'fleet_vehicle_id' => 9, 'turo_reservation_id' => '80000502', 'starts_at' => '2030-01-03 09:00:00', 'pickup_location_class' => 'home'];
@@ -57,6 +78,29 @@ final class MovementBoardIntelligenceServiceTest extends CIUnitTestCase
         $this->assertSame(0, $completed['readiness_blocking_remaining']);
         $this->assertTrue($completed['checklist_ready']);
         $this->assertSame([], $completed['readiness_blockers']);
+    }
+
+    public function testBoardWarningsUseTheSameTrustedAliasEvidenceAsCommitmentRows(): void
+    {
+        $db = \Tests\Support\GuestCommitmentProjectionFixture::sqlite();
+        try {
+            $db->table('turo_trips_normalized')->where('id', 100)->update(['turo_reservation_id' => '80000999']);
+            $clock = \Tests\Support\GuestCommitmentProjectionFixture::clock();
+            $projection = \Tests\Support\GuestCommitmentProjectionFixture::service($db)->forTrip(1, 100, $clock);
+            $this->assertTrue($projection['verification']['qualifies_for_preparation']);
+            $oldVerification = (new FleetExtraService(new \App\Repositories\FleetExtraRepository($db)))->verificationForTrips(1, [100], $clock);
+            $this->assertTrue($oldVerification[100]['refresh_required']);
+            $loader = $this->createStub(\App\Services\Fleet\GuestCommitmentProjectionService::class);
+            $loader->method('forTrips')->willReturn([100 => $projection]);
+            $loader->method('forPhases')->willReturnCallback(fn (array $value, array $phases, ?array $energyRule = null): array => \Tests\Support\GuestCommitmentProjectionFixture::service($db)->forPhases($value, $phases, $energyRule));
+            $next = ['id' => 100, 'fleet_vehicle_id' => 10, 'starts_at' => '2030-01-03 08:00:00', 'planning_horizon' => 'near_term', 'pickup_location_class' => 'home'];
+            $service = $this->service(null, null, null, ['energy_kind' => 'unknown', 'capabilities' => []], $next, sourceVerification: $oldVerification, commitmentProjection: $loader, energyRuleResolver: new \App\Services\Fleet\TripEnergyRuleResolver(new \App\Repositories\TripCommitmentRepository($db)));
+            $card = $service->enrich([['fleet_vehicle_id' => 10, 'status' => 'available', 'checklists' => [['turo_trip_normalized_id' => 100, 'movement_type' => 'pickup']]]], $clock, 1)[0];
+            $this->assertSame(1, $card['guest_commitments']['count']);
+            $this->assertSame([], $card['extras_verification_actions']);
+        } finally {
+            $db->close();
+        }
     }
 
     public function testFuturePickupUsesAuthoritativeProjectionAndDoesNotDuplicateTodaysTarget(): void
@@ -575,7 +619,7 @@ final class MovementBoardIntelligenceServiceTest extends CIUnitTestCase
         }
     }
 
-    private function service(?array $event, ?array $schedule, ?array $assessment, array $profile, ?array $nextTrip, ?array $plan = null, ?array $latestCleanliness = null, array $extras = [], ?array $futureProjection = null, array $sourceVerification = []): MovementBoardIntelligenceService
+    private function service(?array $event, ?array $schedule, ?array $assessment, array $profile, ?array $nextTrip, ?array $plan = null, ?array $latestCleanliness = null, array $extras = [], ?array $futureProjection = null, array $sourceVerification = [], ?\App\Services\Fleet\GuestCommitmentProjectionService $commitmentProjection = null, ?\App\Services\Fleet\TripEnergyRuleResolver $energyRuleResolver = null): MovementBoardIntelligenceService
     {
         $repository = $this->createStub(OperationalFactsRepository::class);
         $repository->method('latestActiveMovementEvent')->willReturn($event);
@@ -622,6 +666,8 @@ final class MovementBoardIntelligenceServiceTest extends CIUnitTestCase
             readinessRepository: $readinessRepository,
             movementReadinessReadService: $readiness,
             extraVerificationService: $verification,
+            commitmentProjection: $commitmentProjection,
+            energyRuleResolver: $energyRuleResolver,
         );
     }
 }

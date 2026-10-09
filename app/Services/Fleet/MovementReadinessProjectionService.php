@@ -702,16 +702,17 @@ class MovementReadinessProjectionService
         $requirements = [];
         foreach ($fulfillments as $fulfillment) {
             if (($fulfillment['removed_at'] ?? null) !== null
+                || (array_key_exists('configured', $fulfillment) && ! $fulfillment['configured'])
                 || ! in_array((string) ($fulfillment['fulfillment_phase'] ?? ''), $applicablePhases, true)
-                || ! (bool) ($fulfillment['requires_operator_confirmation'] ?? false)
-                || (int) ($fulfillment['fulfillment_id'] ?? 0) < 1) {
+                || ! (bool) ($fulfillment['requires_operator_confirmation'] ?? false)) {
                 continue;
             }
             $complete = (bool) ($fulfillment['is_completed'] ?? false);
             $actionable = (bool) ($fulfillment['is_actionable'] ?? false);
-            $id = (int) $fulfillment['fulfillment_id'];
+            $id = (int) ($fulfillment['fulfillment_id'] ?? 0);
+            $missing = $id < 1;
             $requirement = $this->requirement(
-                'extra_fulfillment_' . $id,
+                $missing ? 'extra_selection_sync_' . (int) $fulfillment['selection_id'] : 'extra_fulfillment_' . $id,
                 (string) ($fulfillment['title'] ?? 'Purchased Extra'),
                 $phase,
                 self::KIND_HUMAN,
@@ -719,7 +720,7 @@ class MovementReadinessProjectionService
                 (bool) ($fulfillment['readiness_blocking'] ?? false),
                 $complete ? 'extra_fulfillment_confirmation' : null,
                 $complete ? ($fulfillment['completed_at'] ?? null) : null,
-                $complete || ! $actionable ? null : [
+                $complete || ! $actionable || $missing ? null : [
                     'type' => 'extra_fulfillment_complete',
                     'fulfillment_id' => $id,
                     'trip_id' => (int) ($fulfillment['turo_trip_normalized_id'] ?? 0),
@@ -731,6 +732,7 @@ class MovementReadinessProjectionService
             $requirement['source_type'] = 'extra_fulfillment';
             $requirement['fulfillment_id'] = $id;
             $requirement['selection_id'] = isset($fulfillment['selection_id']) ? (int) $fulfillment['selection_id'] : null;
+            $requirement['synchronization_required'] = $missing || ($fulfillment['synchronization_required'] ?? false);
             $requirement['trip_id'] = (int) $fulfillment['turo_trip_normalized_id'];
             $requirements[] = $requirement;
         }

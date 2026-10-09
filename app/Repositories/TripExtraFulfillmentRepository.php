@@ -20,6 +20,21 @@ class TripExtraFulfillmentRepository
         return $this->db->tableExists('trip_extra_fulfillments');
     }
 
+    /** Writer-only lock, shared with import/configuration and movement commands. */
+    public function lockOwnedTrip(int $companyId, int $tripId): void
+    {
+        if ($this->db->DBDriver === 'MySQLi') {
+            (new FleetExtraRepository($this->db))->lockCompanyObservations($companyId);
+        }
+        $suffix = $this->db->DBDriver === 'MySQLi' ? ' FOR UPDATE' : '';
+        $trip = $this->db->query('SELECT trips.id FROM ' . $this->db->prefixTable('turo_trips_normalized') . ' trips JOIN '
+            . $this->db->prefixTable('fleet_vehicles') . ' vehicles ON vehicles.id = trips.fleet_vehicle_id'
+            . ' WHERE trips.id = ? AND vehicles.company_id = ? AND trips.deleted_at IS NULL' . $suffix, [$tripId, $companyId])->getRowArray();
+        if ($trip === null) {
+            throw new RuntimeException('Extra fulfillment trip not found for this company.');
+        }
+    }
+
     public function attachUnmatchedForTrip(int $companyId, int $tripId): void
     {
         if (! $this->db->tableExists('turo_extra_reservation_snapshots')) {
@@ -83,30 +98,26 @@ class TripExtraFulfillmentRepository
     }
 
     /**
-     * Current selections plus removed selections that have fulfillment history.
+     * Current and removed selections, including those never reconciled.
      *
      * @param  list<int>                  $tripIds
      * @return list<array<string, mixed>>
      */
-    public function forTripsWithHistory(int $companyId, array $tripIds): array
+    public function forTripsWithHistory(int $companyId, array $tripIds, ?int $rowLimit = null): array
     {
         if (! $this->storageExists() || $tripIds === []) {
             return [];
         }
 
-        return $this->baseSelectionQuery($companyId)
+        $query = $this->baseSelectionQuery($companyId)
             ->whereIn('selections.turo_trip_normalized_id', array_values(array_unique(array_map('intval', $tripIds))))
-            ->groupStart()
-                ->where('selections.removed_at', null)
-                ->orGroupStart()
-                    ->where('selections.removed_at IS NOT NULL', null, false)
-                    ->where('fulfillments.id IS NOT NULL', null, false)
-                ->groupEnd()
-            ->groupEnd()
             ->orderBy('extras.sort_order', 'ASC')
             ->orderBy('extras.display_name', 'ASC')
-            ->orderBy('selections.id', 'ASC')
-            ->get()->getResultArray();
+            ->orderBy('selections.id', 'ASC');
+        if ($rowLimit !== null) {
+            $query->limit($rowLimit);
+        }
+        return $query->get()->getResultArray();
     }
 
     /** @return array<string, mixed>|null */
@@ -133,6 +144,17 @@ class TripExtraFulfillmentRepository
             ->get()->getRowArray();
 
         return $row === null ? null : $row;
+    }
+
+    /** Writer-only source history, read after owned parent validation/locking. @return list<array<string, mixed>> */
+    public function observationsForRow(array $row): array
+    {
+        if (! $this->db->tableExists('turo_extra_reservation_snapshots')) {
+            return [];
+        }
+        return $this->db->table('turo_extra_reservation_snapshots')
+            ->where('company_id', (int) $row['company_id'])->where('turo_reservation_id', (string) $row['turo_reservation_id'])
+            ->get()->getResultArray();
     }
 
     /** @param list<string> $reservationIds @return list<int> */
@@ -211,7 +233,8 @@ class TripExtraFulfillmentRepository
     public function hasActiveEvent(int $companyId, int $tripId, string $eventCode): bool
     {
         return $this->db->table('trip_movement_events events')
-            ->join('fleet_vehicles vehicles', 'vehicles.id = events.fleet_vehicle_id')
+            ->join('turo_trips_normalized trips', 'trips.id = events.turo_trip_normalized_id AND trips.fleet_vehicle_id = events.fleet_vehicle_id AND trips.deleted_at IS NULL')
+            ->join('fleet_vehicles vehicles', 'vehicles.id = trips.fleet_vehicle_id AND vehicles.company_id = events.company_id')
             ->where('vehicles.company_id', $companyId)
             ->where('events.turo_trip_normalized_id', $tripId)
             ->where('events.event_code', $eventCode)
@@ -227,7 +250,8 @@ class TripExtraFulfillmentRepository
         }
         $rows = $this->db->table('trip_movement_events events')
             ->select('events.turo_trip_normalized_id')
-            ->join('fleet_vehicles vehicles', 'vehicles.id = events.fleet_vehicle_id')
+            ->join('turo_trips_normalized trips', 'trips.id = events.turo_trip_normalized_id AND trips.fleet_vehicle_id = events.fleet_vehicle_id AND trips.deleted_at IS NULL')
+            ->join('fleet_vehicles vehicles', 'vehicles.id = trips.fleet_vehicle_id AND vehicles.company_id = events.company_id')
             ->where('vehicles.company_id', $companyId)
             ->whereIn('events.turo_trip_normalized_id', array_values(array_unique(array_map('intval', $tripIds))))
             ->where('events.event_code', 'actual_handoff')

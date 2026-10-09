@@ -325,7 +325,7 @@ class TripCommitmentService
     }
 
     /** @return array<string, mixed> */
-    private function present(array $row, ?array $energyRule = null): array
+    public function present(array $row, ?array $energyRule = null): array
     {
         $resolvedEnergyRule = ($row['category'] ?? null) === 'energy_override'
             && (int) ($energyRule['commitment_id'] ?? 0) === (int) ($row['id'] ?? 0)
@@ -355,6 +355,9 @@ class TripCommitmentService
     /** @param array<string, mixed> $row */
     private function linkedExtraName(array $row): ?string
     {
+        if (array_key_exists('fleet_extra_name', $row)) {
+            return $row['fleet_extra_name'] === null ? null : (string) $row['fleet_extra_name'];
+        }
         $extraId = (int) ($row['fleet_extra_id'] ?? 0);
         if ($extraId < 1 || $this->extraRepository === null) {
             return null;

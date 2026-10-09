@@ -10,6 +10,9 @@ $commitmentRequirements = array_column($readiness['requirements'] ?? [], null, '
     <div class="section-heading split-heading"><div><p class="eyebrow">What must be ready for this guest</p><h2 id="workflow-guest-commitments-heading">Guest Commitments</h2></div><a class="action-link" href="/operations/trips/<?= $tripId ?>/commitments">Review all guest commitments</a></div>
     <h3>Purchased Extras</h3>
     <?= view('trip_movement_checklists/_extras_verification', ['verification' => $extraVerification ?? null]) ?>
+    <?php if ($renderFulfillment ?? false): ?>
+        <?= view('trip_movement_checklists/_trip_preparation', ['checklist' => $checklist, 'extraPreparation' => $purchasedExtras]) ?>
+    <?php else: ?>
     <div class="workflow-commitment-list">
         <?php foreach ($purchasedExtras as $extra): ?><article class="workflow-commitment">
             <div><span class="eyebrow">Turo purchased selection</span><strong><?= esc((string) $extra['title']) ?></strong>
@@ -20,6 +23,7 @@ $commitmentRequirements = array_column($readiness['requirements'] ?? [], null, '
         </article><?php endforeach; ?>
     </div>
     <?php if ($purchasedExtras !== []): ?><a class="action-link" href="#trip-preparation">Review preparation and fulfillment</a><?php endif; ?>
+    <?php endif; ?>
     <h3>Special instructions<?= $guestCommitments === [] ? '' : ' · ' . count($guestCommitments) ?></h3>
     <?php if ($guestCommitments === []): ?><p class="muted">No manual special instructions apply to this movement.</p><?php endif; ?>
     <div class="workflow-commitment-list">
@@ -30,6 +34,7 @@ $commitmentRequirements = array_column($readiness['requirements'] ?? [], null, '
                     <small><?= esc((string) $commitment['phase_label']) ?><?= $commitment['is_blocking'] ? ' · Required before dispatch' : ' · Information' ?></small>
                     <?php if ($commitment['arranged_at'] !== null): ?><span class="commitment-arranged-time">Guest arrangement: <?= esc(date('M j, Y · g:i A', strtotime((string) $commitment['arranged_at']))) ?></span><?php endif; ?>
                     <?php if (($commitment['fleet_extra_name'] ?? null) !== null): ?><span class="commitment-arranged-time">Linked Extra: <?= esc((string) $commitment['fleet_extra_name']) ?></span><?php endif; ?>
+                    <?php if (($commitment['overlap_warning'] ?? null) !== null): ?><small class="tone-warning"><?= esc((string) $commitment['overlap_warning']) ?></small><?php endif; ?>
                     <?php if ($commitment['category'] === 'energy_override'): ?><?= view('trip_commitments/components/energy_override_context', ['commitment' => $commitment]) ?><?php endif; ?>
                     <?php if (($requirement['deferred_label'] ?? null) !== null): ?><small><?= esc((string) $requirement['deferred_label']) ?> Pending · Blocks readiness.</small><?php elseif (($requirement['retired_reason'] ?? null) === 'target_handoff'): ?><small>Preparation phase closed at this trip’s handoff.</small><?php endif; ?>
                 </div>

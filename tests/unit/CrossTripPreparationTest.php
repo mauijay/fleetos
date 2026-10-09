@@ -14,7 +14,7 @@ final class CrossTripPreparationTest extends CIUnitTestCase
         foreach (['pickup', 'return'] as $movement) {
             $checklist = ['company_id' => 1, 'turo_trip_normalized_id' => 501, 'movement_type' => $movement];
             $data = (new TripPreparationViewModelService())->forChecklist($checklist, [501 => [$this->extra(501, 601)], 502 => [$this->extra(502, 602)]], ['next_trip' => $this->futureTrip()]);
-            $this->assertSame([501], array_column($data['target'], 'turo_trip_normalized_id'));
+            $this->assertSame($movement === 'return' ? [] : [501], array_column($data['target'], 'turo_trip_normalized_id'));
             $this->assertSame([502], array_column($data['future'], 'turo_trip_normalized_id'));
             $html = $this->primary($checklist, $data['target']);
             $this->assertStringNotContainsString('Synthetic kit 602', $html);

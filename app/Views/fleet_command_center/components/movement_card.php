@@ -59,8 +59,8 @@ $statusLabel = ($state['code'] ?? null) === 'on_trip' ? 'Rented' : (string) $sta
     <?php $guestCommitments = $vehicle['guest_commitments'] ?? ['count' => 0, 'preview' => [], 'required' => false, 'href' => null]; ?>
     <?php if ((int) $guestCommitments['count'] > 0): ?>
         <section class="movement-card__guest-commitments<?= $guestCommitments['required'] ? ' is-required' : '' ?>" aria-label="Guest commitments">
-            <div class="movement-card__subheading"><h4>Special instructions · <?= (int) $guestCommitments['count'] ?></h4><?php if ($guestCommitments['required']): ?><span>Guest setup required</span><?php endif; ?></div>
-            <ul><?php foreach ($guestCommitments['preview'] as $commitment): ?><li><?= esc((string) $commitment['instruction']) ?><?php if ($commitment['category'] === 'energy_override'): ?><?= view('trip_commitments/components/energy_override_context', ['commitment' => $commitment, 'compact' => true]) ?><?php endif; ?></li><?php endforeach; ?></ul>
+            <div class="movement-card__subheading"><h4>Guest Commitments · <?= (int) $guestCommitments['count'] ?></h4><?php if ($guestCommitments['required']): ?><span>Guest setup required</span><?php endif; ?></div>
+            <ul><?php foreach ($guestCommitments['preview'] as $commitment): ?><li><?= esc((string) ($commitment['title'] ?? $commitment['instruction'])) ?> · <?= ($commitment['source_kind'] ?? 'manual') === 'purchased_extra' ? 'Purchased Extra' : 'Manual' ?><?php if (($commitment['category'] ?? null) === 'energy_override'): ?><?= view('trip_commitments/components/energy_override_context', ['commitment' => $commitment, 'compact' => true]) ?><?php endif; ?></li><?php endforeach; ?></ul>
             <?php if ($guestCommitments['href'] !== null): ?><a class="text-link" href="<?= esc((string) $guestCommitments['href'], 'attr') ?>">Review guest instructions</a><?php endif; ?>
         </section>
     <?php endif; ?>

@@ -28,7 +28,7 @@ final class TripCommitmentsArchitectureTest extends CIUnitTestCase
         $this->assertStringContainsString('esc((string) $commitment[\'instruction\'])', $canonical);
         $this->assertStringContainsString('/operations/trips/', $workflow);
         $this->assertStringContainsString('Review all guest commitments', $workflow);
-        $this->assertStringContainsString('Special instructions', $movementCard);
+        $this->assertStringContainsString('Guest Commitments', $movementCard);
         foreach ([$canonical, $workflow, $movementCard] as $surface) {
             $this->assertStringContainsString('trip_commitments/components/energy_override_context', $surface);
         }

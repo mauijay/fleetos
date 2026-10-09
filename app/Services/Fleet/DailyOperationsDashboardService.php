@@ -339,7 +339,7 @@ class DailyOperationsDashboardService
     }
     private function movementBoardIntelligence(): MovementBoardIntelligenceService
     {
-        return $this->movementBoardIntelligenceService ?? new MovementBoardIntelligenceService();
+        return $this->movementBoardIntelligenceService ?? \Config\Services::movementBoardIntelligenceService();
     }
 
     private function movementReadiness(): MovementReadinessReadService

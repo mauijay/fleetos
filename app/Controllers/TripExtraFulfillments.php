@@ -35,15 +35,20 @@ class TripExtraFulfillments extends BaseController
     {
         $href = Services::operationalFactsRepository()->movementChecklistHref($tripId)
             ?? '/operations/trips/' . $tripId . '/commitments';
+        $commitmentPage = $this->request->getPost('return_to') === 'commitments' || str_ends_with($href, '/commitments');
+        if ($commitmentPage) {
+            $href = '/operations/trips/' . $tripId . '/commitments';
+        }
+        $anchor = $commitmentPage ? '#guest-commitments' : '#trip-preparation';
         try {
             $action();
         } catch (Throwable $exception) {
-            return CoreServices::redirectresponse()->to($href . '#trip-preparation')
-                ->with('movement_checklist_error', $exception->getMessage());
+            return CoreServices::redirectresponse()->to($href . $anchor)
+                ->with($commitmentPage ? 'trip_commitment_error' : 'movement_checklist_error', $exception->getMessage());
         }
 
-        return CoreServices::redirectresponse()->to($href . '#trip-preparation')
-            ->with('movement_checklist_notice', $success);
+        return CoreServices::redirectresponse()->to($href . $anchor)
+            ->with($commitmentPage ? 'trip_commitment_success' : 'movement_checklist_notice', $success);
     }
 
     private function activeCompanyId(): int

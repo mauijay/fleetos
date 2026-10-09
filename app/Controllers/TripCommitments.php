@@ -16,7 +16,7 @@ class TripCommitments extends BaseController
         $workspace = Services::tripCommitmentService()->workspace($this->activeCompanyId(), $tripId);
         $movementHref = Services::operationalFactsRepository()->movementChecklistHref($tripId);
         $trip = $workspace['trip'];
-        $extraPreparation = Services::tripExtraFulfillmentService()->forTrips($this->activeCompanyId(), [$tripId])[$tripId] ?? [];
+        $projection = Services::guestCommitmentProjectionService()->forTrip($this->activeCompanyId(), $tripId);
         $backLink = $movementHref === null
             ? [
                 'label' => 'Back to vehicle trip history',
@@ -36,7 +36,7 @@ class TripCommitments extends BaseController
             'assets' => Services::assetManifestService()->appAssets(),
             'navigation' => $this->navigation(),
             'workspace' => $workspace,
-            'extraPreparation' => $extraPreparation,
+            'projection' => $projection,
             'backLink' => $backLink,
             'editing' => $editing,
             'formData' => CoreServices::session()->getFlashdata('trip_commitment_data') ?: [],

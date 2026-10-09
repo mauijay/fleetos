@@ -208,7 +208,7 @@ final class TripExtraFulfillmentTest extends CIUnitTestCase
         $this->connection->query('CREATE TABLE ' . $this->table('fleet_extra_source_mappings') . ' (id INTEGER PRIMARY KEY, company_id INTEGER, source_system VARCHAR(30), source_extra_id VARCHAR(120), fleet_extra_id INTEGER)');
         $this->connection->query('CREATE TABLE ' . $this->table('turo_extra_selections') . ' (id INTEGER PRIMARY KEY, company_id INTEGER, turo_trip_normalized_id INTEGER, turo_reservation_id VARCHAR(120), source_extra_id VARCHAR(120), reservation_state_extra_id VARCHAR(120), quantity DECIMAL(10,3) NULL, unit_price DECIMAL(12,2), gross_amount DECIMAL(12,2), removed_at DATETIME NULL)');
         $this->connection->query('CREATE TABLE ' . $this->table('fleet_trip_commitments') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, company_id INTEGER, turo_trip_normalized_id INTEGER, state VARCHAR(20), instruction TEXT)');
-        $this->connection->query('CREATE TABLE ' . $this->table('trip_movement_events') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, fleet_vehicle_id INTEGER, turo_trip_normalized_id INTEGER, event_code VARCHAR(80), voided_at DATETIME NULL)');
+        $this->connection->query('CREATE TABLE ' . $this->table('trip_movement_events') . ' (id INTEGER PRIMARY KEY AUTOINCREMENT, company_id INTEGER DEFAULT 1, fleet_vehicle_id INTEGER, turo_trip_normalized_id INTEGER, event_code VARCHAR(80), voided_at DATETIME NULL)');
     }
 
     private function seed(): void

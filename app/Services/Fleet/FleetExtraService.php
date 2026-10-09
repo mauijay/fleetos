@@ -162,6 +162,7 @@ class FleetExtraService
         $data['updated_by_user_id'] = $actorUserId;
         $data['updated_at'] = date('Y-m-d H:i:s');
         $this->extras->transaction(function () use ($companyId, $extraId, $actorUserId, $existing, $data): void {
+            $this->extras->lockCompanyObservations($companyId);
             $this->extras->updateExtra($companyId, $extraId, $data);
             $this->audit->record($actorUserId, $this->lookups->valueId('audit_action', 'updated'), 'fleet_extras', $extraId, $existing, array_merge($existing, $data));
         });
@@ -197,6 +198,7 @@ class FleetExtraService
         ];
 
         $mappingId = $this->extras->transaction(function () use ($companyId, $sourceExtraId, $actorUserId, $observation, $existing, $data, $now): int {
+            $this->extras->lockCompanyObservations($companyId);
             if ($existing === null) {
                 $id = $this->extras->createMapping(array_merge($data, [
                     'company_id' => $companyId,
