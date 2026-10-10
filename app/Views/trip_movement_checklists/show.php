@@ -58,8 +58,10 @@ $tripContext ??= null;
 $currentLocation ??= null;
 $isEarlyHandoffWarning ??= false;
 $readiness ??= null;
+$readinessPresentation ??= $readiness;
+$stagingPresentation ??= ['historical_explanation' => null, 'staging_blocked_reason' => null, 'handoff_help' => null];
 $needsHnlStaging = $tripIsOperational && ($checklist['movement_type'] ?? null) === 'pickup'
-    && count(array_filter($readiness['requirements'] ?? [], static fn (array $requirement): bool =>
+    && count(array_filter($readinessPresentation['requirements'] ?? [], static fn (array $requirement): bool =>
         ($requirement['code'] ?? null) === 'airport_staging'
         && ($requirement['status'] ?? null) === 'unsatisfied'
         && ($requirement['blocking'] ?? false)
@@ -137,7 +139,7 @@ $tripFacts ??= [
             <?php if (($checklist['movement_type'] ?? null) === 'return'): ?>
                 <?= view('trip_movement_checklists/_return_workflow', ['checklist' => $checklist, 'readiness' => $readiness, 'guestReturn' => $guestReturn, 'guestReturnActive' => $guestReturnActive, 'returnCompleted' => $returnCompleted, 'canRecover' => $canRecover, 'turnaroundWork' => $turnaroundWork, 'recoveryExceptions' => $recoveryExceptions]) ?>
             <?php else: ?>
-                <?= view('trip_movement_checklists/_readiness', ['checklist' => $checklist, 'readiness' => $readiness, 'tripFacts' => $tripFacts]) ?>
+                <?= view('trip_movement_checklists/_readiness', ['checklist' => $checklist, 'readiness' => $readinessPresentation, 'tripFacts' => $tripFacts, 'stagingPresentation' => $stagingPresentation]) ?>
             <?php endif; ?>
             <?= view('trip_movement_checklists/_guest_commitments', ['checklist' => $checklist, 'guestCommitments' => $guestCommitments ?? [], 'extraPreparation' => $extraPreparation ?? [], 'extraVerification' => $extraVerification ?? null, 'readiness' => $readiness]) ?>
             <?= view('trip_movement_checklists/_future_preparation', ['checklist' => $checklist, 'readiness' => $readiness, 'futureExtraPreparation' => $futureExtraPreparation ?? []]) ?>
@@ -280,6 +282,7 @@ $tripFacts ??= [
                         <div><p class="eyebrow">Reservation context</p><h2>Previous, current, next</h2></div>
                         <a class="action-link" href="/operations/vehicles/<?= (int) $checklist['fleet_vehicle_id'] ?>/trip-history?trip=<?= (int) $checklist['turo_trip_normalized_id'] ?>">Vehicle trip history</a>
                     </div>
+                    <p class="muted">Scheduled locations come from reservation data. Actual pickup and return facts are shown below.</p>
                     <div class="trip-context-grid">
                         <?php foreach (['previous' => 'Previous trip', 'current' => 'Selected trip', 'next' => 'Next trip'] as $position => $label): ?>
                             <?php $trip = $tripContext[$position] ?? null; ?>
@@ -297,8 +300,8 @@ $tripFacts ??= [
                                     <strong><?= esc((string) ($trip['guest_name'] ?? 'Guest not captured')) ?></strong>
                                     <span>Trip <?= esc((string) ($trip['turo_trip_id'] ?? $trip['id'])) ?></span>
                                     <span><?= esc((new DateTimeImmutable((string) $trip['starts_at']))->format('M j, g:i A')) ?> to <?= esc((new DateTimeImmutable((string) $trip['ends_at']))->format('M j, g:i A')) ?></span>
-                                    <?php if (($trip['pickup_location_class'] ?? null) !== null): ?><span>Pickup: <?= esc(ucwords(str_replace('_', ' ', (string) $trip['pickup_location_class']))) ?></span><?php endif; ?>
-                                    <?php if (($trip['return_location_class'] ?? null) !== null): ?><span>Return: <?= esc(ucwords(str_replace('_', ' ', (string) $trip['return_location_class']))) ?></span><?php endif; ?>
+                                    <?php if (($trip['pickup_location_class'] ?? null) !== null): ?><span>Scheduled pickup location: <?= esc(ucwords(str_replace('_', ' ', (string) $trip['pickup_location_class']))) ?></span><?php endif; ?>
+                                    <?php if (($trip['return_location_class'] ?? null) !== null): ?><span>Scheduled return location: <?= esc(ucwords(str_replace('_', ' ', (string) $trip['return_location_class']))) ?></span><?php endif; ?>
                                     <span><?= esc(ucwords(str_replace('_', ' ', (string) ($trip['trip_status_code'] ?? 'status unknown')))) ?></span>
                                     <?php if ($contextHref !== null): ?><a class="action-link trip-context-action" href="<?= esc((string) $contextHref, 'attr') ?>" aria-label="Open <?= esc(strtolower($label), 'attr') ?> movement">Open movement</a><?php endif; ?>
                                     <a class="action-link trip-context-action" href="<?= esc((string) $commitmentsHref, 'attr') ?>" aria-label="Guest commitments for <?= esc(strtolower($label), 'attr') ?>">Guest commitments</a>
@@ -325,13 +328,15 @@ $tripFacts ??= [
                                     </div>
                                 <?php endif; ?>
                             </div>
-                            <?php if ($tripIsOperational && $factType === 'pickup' && $canRecordRetroactiveHandoff && ($fact === null || $isHistoricalStagedPickup)): ?>
-                                <?php if ($isHistoricalStagedPickup): ?>
-                                    <div class="import-message tone-warning">
+                            <?php if ($factType === 'pickup' && $stagingPresentation['historical_explanation'] !== null): ?>
+                                    <div id="historical-staging-explanation" tabindex="-1" class="import-message tone-warning">
                                         <strong>Prior staging is historical</strong>
-                                        <span>Later vehicle activity superseded this staging as the current operational basis. Normal staged pickup confirmation is no longer available from this record.</span>
+                                        <span><?= esc((string) $stagingPresentation['historical_explanation']) ?></span>
+                                        <?php if ($stagingPresentation['staging_blocked_reason'] !== null): ?><span><?= esc((string) $stagingPresentation['staging_blocked_reason']) ?></span><?php endif; ?>
+                                        <span><?= esc((string) $stagingPresentation['handoff_help']) ?></span>
                                     </div>
-                                <?php endif; ?>
+                            <?php endif; ?>
+                            <?php if ($tripIsOperational && $factType === 'pickup' && $canRecordRetroactiveHandoff && ($fact === null || $isHistoricalStagedPickup)): ?>
                                 <?php if (! $showRetroactiveHandoffForm): ?>
                                     <a class="action-link" href="?action=record-handoff#pickup-fact-heading"><?= $isHistoricalStagedPickup ? 'Record missing handoff' : 'Record pickup / handoff' ?></a>
                                 <?php else: ?>
@@ -451,7 +456,8 @@ $movementType = (string) (($correctingFacts || $repairingFacts) ? ($latestFacts[
                 <?php elseif ($movementType === 'pickup' && $isHistoricalStagedPickup && ! $correctingFacts && ! $needsHnlStaging): ?>
                     <div class="import-message tone-warning">
                         <strong>Historical staging only</strong>
-                        <span>This stage no longer establishes the vehicle's current pickup state. Use Record missing handoff above only when the guest actually received the vehicle.</span>
+                        <span>This stage no longer establishes the vehicle's current pickup state.</span>
+                        <?php if ($canRecordRetroactiveHandoff): ?><span>Use Record missing handoff above only when the guest actually received the vehicle.</span><?php endif; ?>
                     </div>
                 <?php elseif (! $correctingFacts && ! $needsHnlStaging && ($tripFacts[$movementType] ?? null) !== null): ?>
                     <div class="import-message tone-success">

@@ -44,7 +44,7 @@ $locationLabel = static fn (?string $code): string => ucwords(str_replace('_', '
                         <article class="trip-history-row<?= $isSelected ? ' is-selected' : '' ?><?= $isCanceled ? ' is-canceled' : '' ?>">
                             <div><strong><?= esc((string) ($trip['guest_name'] ?? 'Guest not captured')) ?></strong><span>Trip <?= esc((string) ($trip['turo_trip_id'] ?? $trip['id'])) ?></span></div>
                             <div><span><?= esc((new DateTimeImmutable((string) $trip['starts_at']))->format('M j, Y g:i A')) ?></span><span><?= esc((new DateTimeImmutable((string) $trip['ends_at']))->format('M j, Y g:i A')) ?></span></div>
-                            <div><span>Pickup: <?= esc($locationLabel($trip['pickup_location_class'] ?? null)) ?></span><span>Return: <?= esc($locationLabel($trip['return_location_class'] ?? null)) ?></span></div>
+                            <div><span>Scheduled pickup location: <?= esc($locationLabel($trip['pickup_location_class'] ?? null)) ?></span><span>Scheduled return location: <?= esc($locationLabel($trip['return_location_class'] ?? null)) ?></span></div>
                             <div>
                                 <?php if ($isSelected): ?><strong>Selected trip</strong><?php endif; ?>
                                 <span class="trip-history-status"><?= esc(ucwords(str_replace('_', ' ', (string) ($trip['trip_status_code'] ?? 'Status unknown')))) ?></span>

@@ -6,6 +6,7 @@ use App\Exceptions\EarlyHandoffConfirmationRequired;
 use App\Repositories\VehicleRecoveryExceptionRepository;
 use App\Services\Fleet\ChecklistActionFocusService;
 use App\Services\Fleet\LocationClassificationService;
+use App\Services\Fleet\MovementStagingPresentationService;
 use App\Services\Fleet\OperationalMovementWorkService;
 use App\Services\Fleet\TripPreparationViewModelService;
 use CodeIgniter\Config\Services as CoreServices;
@@ -123,6 +124,16 @@ class TripMovementChecklists extends BaseController
             && in_array($tripSchedule['trip_status_code'] ?? null, ['booked', 'in_progress'], true)
             && ($tripFacts['pickup'] === null
                 || ($isHistoricalStagedPickup && $tripSchedule['trip_status_code'] === 'in_progress'));
+        $stagingPresenter = new MovementStagingPresentationService();
+        $stagingPresentation = $stagingPresenter->forChecklist(
+            $checklist,
+            $readiness ?? [],
+            $pickupFact,
+            $custodyState,
+            $isHistoricalStagedPickup ? Services::operationalFactsRepository()->activeCustodyTimelineEvents([(int) $checklist['fleet_vehicle_id']], $asOf->format('Y-m-d H:i:s'), $companyId) : [],
+            $isHistoricalStagedPickup && Services::currentVehicleCustodyService()->hasLaterTripLifecycle((int) $checklist['fleet_vehicle_id'], (int) $checklist['turo_trip_normalized_id'], $asOf),
+            $canRecordRetroactiveHandoff,
+        );
         $checklistNotice = session()->getFlashdata('movement_checklist_notice');
         $checklistError = session()->getFlashdata('movement_checklist_error');
         $vehicleDamage = ($checklist['exists'] ?? false) && $companyId > 0
@@ -133,6 +144,8 @@ class TripMovementChecklists extends BaseController
             'navigation' => $this->navigation(),
             'checklist' => $checklist,
             'readiness' => $readiness,
+            'readinessPresentation' => $stagingPresenter->readinessForDisplay($readiness ?? [], $stagingPresentation),
+            'stagingPresentation' => $stagingPresentation,
             'currentLocation' => ($checklist['exists'] ?? false) ? Services::currentVehicleLocationService()->resolve((int) $checklist['fleet_vehicle_id']) : null,
             'tripContext' => $tripContext,
             'latestFacts' => $selectedFacts,

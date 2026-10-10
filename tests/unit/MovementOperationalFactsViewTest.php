@@ -412,6 +412,11 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
             'isStagedPickup' => false,
             'isHistoricalStagedPickup' => true,
             'canRecordRetroactiveHandoff' => true,
+            'stagingPresentation' => [
+                'historical_explanation' => 'Earlier staging is historical and no longer satisfies this pickup.',
+                'staging_blocked_reason' => null,
+                'handoff_help' => 'Guest pickup confirmation is unavailable from this historical stage.',
+            ],
         ]);
 
         $this->assertStringContainsString('Prior staging is historical', $html);
@@ -498,8 +503,8 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
 
         $this->assertStringContainsString('Selected trip', $html);
         $this->assertStringContainsString('Trip 900100', $html);
-        $this->assertStringContainsString('Pickup: Airport Hnl', $html);
-        $this->assertStringContainsString('Return: Home', $html);
+        $this->assertStringContainsString('Scheduled pickup location: Airport Hnl', $html);
+        $this->assertStringContainsString('Scheduled return location: Home', $html);
         $this->assertStringContainsString('/operations/vehicles/10/trip-history?trip=100', $html);
         $this->assertStringContainsString('href="&#x2F;operations&#x2F;checklists&#x2F;490" aria-label="Open previous&#x20;trip movement"', $html);
         $this->assertStringContainsString('href="&#x2F;operations&#x2F;checklists&#x2F;500" aria-label="Open selected&#x20;trip movement"', $html);
@@ -629,8 +634,8 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
         $this->assertStringContainsString('href="&#x2F;operations&#x2F;trips&#x2F;90&#x2F;commitments" aria-label="Guest commitments for trip 900090"', $html);
         $this->assertStringContainsString('Future Guest', $html);
         $this->assertStringContainsString('<strong>Selected trip</strong>', $html);
-        $this->assertStringContainsString('Pickup: Airport Hnl', $html);
-        $this->assertStringContainsString('Return: Home', $html);
+        $this->assertStringContainsString('Scheduled pickup location: Airport Hnl', $html);
+        $this->assertStringContainsString('Scheduled return location: Home', $html);
         $this->assertStringContainsString('trip-history-row is-canceled', $html);
         $this->assertStringContainsString('Canceled Zero Payout', $html);
         $this->assertStringContainsString('No movement record', $html);
