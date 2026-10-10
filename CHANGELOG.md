@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.33.0 — Extras and Guest Commitments
+
+Release date: 2026-10-10
+
+### Deployment Safety
+
+- Normalize SQL allowlist CRLF and lone-CR line endings before strict comparison,
+  retaining statement-byte, BOM, whitespace, and terminal-newline validation,
+  complete ordered-plan verification, and partial-state diagnostics.
+- Preserve explicit recovery decisions without automatic retry or rollback.
+
+### Extras and Guest Commitments
+
+- Unify Purchased Extra and Manual rows in one derived operator projection with
+  truthful empty states and mapped/unmapped Extra visibility.
+- Show source freshness and fulfillment accurately, including blocking work with
+  missing fulfillment records and handoff-safe fulfillment/readiness behavior.
+- Use the shared projection for Guest Commitments, movement checklists, readiness,
+  Movement Board counts/previews, and Command Center summaries.
+- Retain removed purchased Extras in history with their original fulfillment
+  context.
+- Bulk-load the projection within eight data SELECTs for 1, 50, or 500 trips.
+
+### Safety and Data Integrity
+
+- No migration or schema change; latest App migration remains 000035.
+- Existing purchased Extras, fulfillment, and manual commitment authorities remain
+  unchanged; the projection creates no duplicate purchased-commitment persistence.
+- GET surfaces remain read-only; movement, custody, and financial authorities are
+  preserved.
+
 ## v0.32.1 — Movement Checklist Presentation
 
 Release date: 2026-10-09
