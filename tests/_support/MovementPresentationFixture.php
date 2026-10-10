@@ -16,7 +16,7 @@ final class MovementPresentationFixture
         HnlStagingChecklistFixture::seed($db);
         $db->table('movement_assessments')->where('fleet_vehicle_id', 10)->delete();
         $db->table('trip_movement_events')->where('fleet_vehicle_id', 10)->delete();
-        $day = new \DateTimeImmutable('yesterday');
+        $day = new \DateTimeImmutable('-2 days');
         $repository = new OperationalFactsRepository($db);
         $events = new MovementEventService($repository);
         $assessments = new MovementAssessmentService($repository);
@@ -26,14 +26,23 @@ final class MovementPresentationFixture
         $stage = $events->record(10, 102, 'vehicle_staged', 'pickup', $at('14:47'), 'airport_hnl', null, 'checklist_operator', 7, 'Synthetic historical staging', $parking);
         $assessments->record(10, 102, $stage, 'pickup', 'clean', 79, $at('14:47'), 'checklist_operator', 7);
         if ($scenario !== 'guest') {
-            $events->record(10, 100, 'vehicle_recovered', 'return', $at(in_array($scenario, ['valid', 'position'], true) ? '14:42' : '16:42'), 'airport_hnl', null, 'checklist_operator', 7, null, $parking);
+            $events->record(10, 100, 'vehicle_recovered', 'return', $at(in_array($scenario, ['valid', 'position', 'later', 'handoff'], true) ? '11:52' : '16:42'), 'airport_hnl', null, 'checklist_operator', 7, null, $parking);
             $observation = $events->record(10, null, 'vehicle_readiness_observed', null, $at('16:43'), null, null, 'vehicle_operator', 7);
             $assessments->record(10, null, $observation, 'current', 'clean', 79, $at('16:43'), 'vehicle_operator', 7);
         }
-        if ($scenario === 'historical') {
+        if (in_array($scenario, ['historical', 'later'], true)) {
             $events->record(10, 103, 'vehicle_staged', 'pickup', $at('16:58'), 'airport_hnl', null, 'checklist_operator', 7, 'Synthetic future reservation stage', $parking);
         } elseif ($scenario === 'position') {
             $events->record(10, 100, 'vehicle_positioned', null, $at('16:58'), 'airport_hnl', null, 'checklist_operator', 7, 'Synthetic position only', $parking);
+        }
+        if (in_array($scenario, ['valid', 'handoff'], true)) {
+            $start = $day->modify('+1 day')->setTime(21, 0)->format('Y-m-d H:i:s');
+            $db->table('turo_trips_normalized')->where('id', 102)->update(['starts_at' => $start, 'ends_at' => $day->modify('+3 days')->format('Y-m-d H:i:s'), 'trip_status_lookup_value_id' => (new LookupRepository($db))->valueId('trip_status', 'in_progress')]);
+            $db->table('trip_movement_checklists')->where('id', 102)->update(['scheduled_at' => $start]);
+            $db->table('airport_movement_workflows')->where('id', 102)->update(['scheduled_at' => $start]);
+            if ($scenario === 'handoff') {
+                $events->record(10, 102, 'actual_handoff', 'pickup', $day->modify('+1 day')->setTime(21, 33)->format('Y-m-d H:i:s'), 'airport_hnl', null, 'checklist_operator', 7, null, $parking);
+            }
         }
         foreach (['exterior_photos_completed', 'interior_photos_completed', 'key_card_confirmed', 'charging_adapter_confirmed'] as $code) {
             $db->table('trip_movement_checklist_items')->insert(['trip_movement_checklist_id' => 102, 'item_code' => $code, 'label' => 'Synthetic check', 'completion_state' => 'complete', 'applicability' => 'applicable', 'completed_at' => $at('14:40')]);

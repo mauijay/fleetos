@@ -45,10 +45,10 @@ class MovementStagingPresentationService
         $recovery = $afterStage[0] ?? null;
         if ($recovery !== null) {
             $eventLabel = $recovery['event_code'] === 'vehicle_recovered' ? 'vehicle recovery' : 'vehicle return';
-            $explanation .= ' A later ' . $eventLabel . ' occurred on ' . $this->timeLabel($recovery['occurred_at'])
-                . ', after staging on ' . $this->timeLabel($pickupFact['occurred_at']) . '.';
+            $explanation .= ' A later ' . $eventLabel . ' occurred at ' . $this->timeLabel($recovery['occurred_at'])
+                . ', after staging occurred at ' . $this->timeLabel($pickupFact['occurred_at']) . '.';
         } elseif (($custody['occurred_at'] ?? null) !== null) {
-            $explanation .= ' Vehicle lifecycle activity recorded on ' . $this->timeLabel($custody['occurred_at']) . ' establishes the current pickup state.';
+            $explanation .= ' Vehicle lifecycle activity that occurred at ' . $this->timeLabel($custody['occurred_at']) . ' establishes the current pickup state.';
         }
         $presentation['historical_explanation'] = $explanation;
         $presentation['handoff_help'] = 'Guest pickup confirmation is unavailable from this historical stage because it is no longer the current staging for this reservation.';
@@ -63,7 +63,7 @@ class MovementStagingPresentationService
                 $reason .= ' scheduled for ' . $this->timeLabel($basis['custody_trip_starts_at']);
             }
             if (($custody['occurred_at'] ?? null) !== null) {
-                $reason .= ', with vehicle activity recorded on ' . $this->timeLabel($custody['occurred_at']);
+                $reason .= ', with vehicle activity that occurred at ' . $this->timeLabel($custody['occurred_at']);
             }
             $presentation['staging_blocked_reason'] = $reason . '. Review movement chronology and reservation assignment.';
         }

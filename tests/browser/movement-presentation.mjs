@@ -11,7 +11,7 @@ if (!process.env.MOVEMENT_BROWSER_WIDTH) {
     const code = await new Promise((resolve, reject) => { child.on('error', reject); child.on('exit', resolve); });
     assert.equal(code, 0, 'Synthetic movement viewport ' + width);
   }
-  console.log(JSON.stringify({browserChecks:18,widths:[390,1280,1920],keyboard:true,zeroBusinessWrites:true,synthetic:true}));
+  console.log(JSON.stringify({browserChecks:30,widths:[390,1280,1920],keyboard:true,zeroBusinessWrites:true,synthetic:true}));
   process.exit(0);
 }
 assert(['390','1280','1920'].includes(process.env.MOVEMENT_BROWSER_WIDTH));
@@ -132,6 +132,7 @@ try {
   assert(text.includes('current vehicle lifecycle belongs to a later reservation'));
   assert(text.includes('Historical staging and current vehicle position alone do not satisfy it'));
   assert(text.includes('Guest pickup confirmation is unavailable'));
+  assert(!text.includes('activity recorded on'));
   assert.equal(await evaluate(`!!document.querySelector('form[action$="/stage-at-hnl"],form[action$="/confirm-guest-pickup"]')`), false);
   assert.equal(await evaluate(`document.querySelectorAll('#checklist-action-airport_staging a,#checklist-action-airport_staging button').length`), 0);
   // Keyboard navigation to a readiness anchor reaches the explanatory status.
@@ -145,6 +146,19 @@ try {
   assert.equal(await evaluate('location.hash'), anchor);
   await inspect('historical-stage-explanation');
   assert.deepEqual(await state('historical'),before);
+  for (const scenario of ['recovery','later']) {
+    const controlBefore = await state(scenario);
+    await navigate(`/operations/checklists/102?scenario=${scenario}`);
+    const explanation = await evaluate(`document.querySelector('#historical-staging-explanation').innerText`);
+    assert(explanation.includes('Earlier staging is historical'));
+    assert(!/recorded on|recorded at|entered on|entered at/.test(explanation));
+    assert(explanation.includes(scenario==='recovery'?'vehicle recovery occurred at':'activity that occurred at'));
+    assert.equal(explanation.includes('belongs to a later reservation'),scenario==='later');
+    assert.equal(await evaluate(`!!document.querySelector('form[action$="/stage-at-hnl"]')`),scenario==='recovery');
+    assert.equal(await evaluate(`!!document.querySelector('form[action$="/confirm-guest-pickup"]')`),false);
+    await inspect(scenario+'-historical-stage');
+    assert.deepEqual(await state(scenario),controlBefore);
+  }
   for (const id of [200,201]) {
     await navigate(`/operations/checklists/${id}?scenario=historical`);
     const context = await evaluate(`document.querySelector('.trip-context').innerText`);
@@ -166,13 +180,24 @@ try {
     await navigate(`/operations/checklists/102?scenario=${scenario}`);
     assert.equal(await evaluate(`new URL(document.querySelector('#handoff-entry').action).pathname`), '/operations/checklists/102/confirm-guest-pickup');
     assert.equal(await evaluate(`!!document.querySelector('#historical-staging-explanation')`), false);
+    assert.equal(await evaluate(`!!document.querySelector('form[action$="/stage-at-hnl"]')`), false);
     await inspect(scenario+'-current-stage-control');
     assert.deepEqual(await state(scenario),controlBefore);
   }
   const guestBefore = await state('guest');
   await navigate('/operations/checklists/102?scenario=guest');
   assert.equal(await evaluate(`!!document.querySelector('form[action$="/stage-at-hnl"],form[action$="/confirm-guest-pickup"]')`), false);
+  assert((await evaluate('document.body.innerText')).includes('Guest pickup confirmation is unavailable'));
+  await inspect('guest-custody-unavailable');
   assert.deepEqual(await state('guest'),guestBefore);
+  const handoffBefore = await state('handoff');
+  await navigate('/operations/checklists/102?scenario=handoff');
+  assert((await evaluate('document.body.innerText')).includes('Rented'));
+  assert((await evaluate(`document.querySelector('.trip-facts-grid').innerText`)).includes('Guest handoff recorded'));
+  assert.equal(await evaluate(`!!document.querySelector('#historical-staging-explanation')`),false);
+  assert.equal(await evaluate(`!!document.querySelector('form[action$="/stage-at-hnl"],form[action$="/confirm-guest-pickup"]')`),false);
+  await inspect('next-day-handoff-rented');
+  assert.deepEqual(await state('handoff'),handoffBefore);
   await writeFile(resolve(directory,'results.json'),JSON.stringify({checks:results,widths:[width],keyboard:true,zeroBusinessWrites:true,synthetic:true},null,2));
   console.log(JSON.stringify({artifactDirectory:directory,browserChecks:results.length,widths:[width],keyboard:true,zeroBusinessWrites:true}));
   await call('Browser.close');

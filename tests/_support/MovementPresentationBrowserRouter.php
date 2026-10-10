@@ -18,7 +18,7 @@ if ($directory === false || $build === false || ! str_starts_with(strtolower($di
 }
 $scenario = $_GET['scenario'] ?? 'historical';
 error_log('Synthetic movement start: ' . $_SERVER['REQUEST_METHOD'] . ' ' . $_SERVER['REQUEST_URI'] . ' / fixture ' . $scenario);
-if (! in_array($scenario, ['historical', 'valid', 'position', 'guest'], true)) {
+if (! in_array($scenario, ['historical', 'recovery', 'later', 'valid', 'handoff', 'position', 'guest'], true)) {
     http_response_code(400);
     exit;
 }

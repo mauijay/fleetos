@@ -18,10 +18,12 @@ use Tests\Support\VehicleDamageDatabaseFixture;
 final class MovementStagingPresentationHotfixTest extends CIUnitTestCase
 {
     private \CodeIgniter\Database\BaseConnection $connection;
+    private DateTimeImmutable $asOf;
 
     protected function setUp(): void
     {
         parent::setUp();
+        $this->asOf = new DateTimeImmutable();
         $this->connection = Database::connect('tests');
         $this->connection->setPrefix('');
         VehicleDamageDatabaseFixture::migrate($this->connection);
@@ -103,10 +105,91 @@ final class MovementStagingPresentationHotfixTest extends CIUnitTestCase
     {
         Fixture::seed($this->connection, 'valid');
         $before = Fixture::businessRows($this->connection);
+        $authority = $this->authority();
+        $requirements = array_column($authority['readiness']['requirements'], null, 'code');
+        foreach (['location_confirmed', 'airport_staging', 'parking_location_recorded'] as $code) {
+            $this->assertSame('satisfied', $requirements[$code]['status']);
+        }
+        $this->assertSame(102, $authority['custody']['basis_trip_id']);
+        $this->assertSame($authority['facts']['pickup']['event_id'], $authority['custody']['basis_event_id']);
         $html = $this->controller()->show(102);
         $this->assertStringContainsString('action="/operations/checklists/102/confirm-guest-pickup"', $html);
         $this->assertStringNotContainsString('Prior staging is historical', $html);
         $this->assertStringNotContainsString('current vehicle lifecycle belongs to a later reservation', $html);
+        $this->assertStringNotContainsString('action="/operations/checklists/102/stage-at-hnl"', $html);
+        $this->assertSame($before, Fixture::businessRows($this->connection));
+        $this->assertSame($authority, $this->authority());
+
+        $handoffAt = (new DateTimeImmutable('-1 day'))->setTime(21, 33)->format('Y-m-d H:i:s');
+        $this->assertTrue(Services::movementOperationalFactService()->confirmGuestPickup(
+            Services::tripMovementChecklistService()->checklist(102),
+            ['occurred_at' => $handoffAt, 'note' => 'Synthetic next-day handoff'],
+            7,
+        ));
+        $afterHandoff = $this->authority();
+        $this->assertSame('guest', $afterHandoff['custody']['custody']);
+        $this->assertSame('rented', $afterHandoff['position']['operational_state']);
+        $this->assertSame('actual_handoff', $afterHandoff['facts']['pickup']['event_code']);
+        $this->assertSame($handoffAt, $afterHandoff['facts']['pickup']['occurred_at']);
+        $this->assertSame('satisfied', array_column($afterHandoff['readiness']['requirements'], null, 'code')['guest_handoff']['status']);
+        $rows = Fixture::businessRows($this->connection);
+        $html = $this->controller()->show(102);
+        $this->assertStringNotContainsString('Prior staging is historical', $html);
+        $this->assertStringNotContainsString('Guest pickup confirmation is unavailable', $html);
+        $this->assertSame($afterHandoff, $this->authority());
+        $this->assertSame($rows, Fixture::businessRows($this->connection));
+    }
+
+    public function testRecoveryAloneMakesStagingHistoricalWithoutInventingLaterReservation(): void
+    {
+        Fixture::seed($this->connection, 'recovery');
+        $before = Fixture::businessRows($this->connection);
+        $authority = $this->authority();
+        $this->assertSame('vehicle_recovered', $authority['custody']['basis_event_code']);
+        $this->assertFalse(Services::currentVehicleCustodyService()->hasLaterTripLifecycle(10, 102));
+        foreach (['location_confirmed', 'airport_staging'] as $code) {
+            $this->assertSame('unsatisfied', array_column($authority['readiness']['requirements'], null, 'code')[$code]['status']);
+        }
+        $html = $this->controller()->show(102);
+        $this->assertStringContainsString('vehicle recovery occurred at', $html);
+        $this->assertStringContainsString('staging occurred at', $html);
+        $this->assertStringNotContainsString('activity recorded on', $html);
+        $this->assertStringNotContainsString('belongs to a later reservation', $html);
+        $this->assertStringNotContainsString('action="/operations/checklists/102/confirm-guest-pickup"', $html);
+        // Restaging is genuinely executable after recovery; the UI must retain it.
+        $this->assertStringContainsString('action="/operations/checklists/102/stage-at-hnl"', $html);
+        $this->assertSame($authority, $this->authority());
+        $this->assertSame($before, Fixture::businessRows($this->connection));
+        $this->assertTrue(Services::movementOperationalFactService()->stageForChecklist(Services::tripMovementChecklistService()->checklist(102), \Tests\Support\HnlStagingChecklistFixture::stagingData(), 7));
+        $this->assertSame(102, Services::currentVehicleCustodyService()->resolve(10)['basis_trip_id']);
+    }
+
+    public function testLaterReservationStageUsesOccurrenceTimeAndPreservesBothTrips(): void
+    {
+        Fixture::seed($this->connection, 'later');
+        $before = Fixture::businessRows($this->connection);
+        $authority = $this->authority();
+        $this->assertSame(103, $authority['custody']['basis_trip_id']);
+        $this->assertSame('vehicle_staged', $authority['custody']['basis_event_code']);
+        $tripC = Services::movementReadinessReadService()->forCompany(1, [103])[103];
+        $this->assertSame('satisfied', array_column($tripC['requirements'], null, 'code')['airport_staging']['status']);
+        $html = $this->controller()->show(102);
+        $this->assertStringContainsString('activity that occurred at', $html);
+        $this->assertStringContainsString('4:58 PM Honolulu', $html);
+        $this->assertStringNotContainsString('vehicle recovery occurred', $html);
+        $this->assertStringNotContainsString('activity recorded on', $html);
+        $this->assertStringNotContainsString('action="/operations/checklists/102/stage-at-hnl"', $html);
+        $stage = $authority['custody']['basis_event'];
+        $this->assertNotSame($stage['created_at'], $stage['occurred_at']);
+        $this->assertSame($authority, $this->authority());
+        $this->assertSame($tripC, Services::movementReadinessReadService()->forCompany(1, [103])[103]);
+        $this->assertSame($before, Fixture::businessRows($this->connection));
+        try {
+            Services::movementOperationalFactService()->stageForChecklist(Services::tripMovementChecklistService()->checklist(102), \Tests\Support\HnlStagingChecklistFixture::stagingData(), 7);
+            $this->fail('A later reservation must still block restaging.');
+        } catch (InvalidArgumentException $e) {
+            $this->assertStringContainsString('current pickup reservation', $e->getMessage());
+        }
         $this->assertSame($before, Fixture::businessRows($this->connection));
     }
 
@@ -183,5 +266,18 @@ final class MovementStagingPresentationHotfixTest extends CIUnitTestCase
         $controller = new TripMovementChecklists();
         $controller->initController($request, CoreServices::response(), CoreServices::logger());
         return $controller;
+    }
+
+    /** @return array<string, mixed> */
+    private function authority(): array
+    {
+        return [
+            'readiness' => Services::movementReadinessReadService()->forCompany(1, [102], $this->asOf)[102],
+            'custody' => Services::currentVehicleCustodyService()->resolve(10, $this->asOf),
+            'position' => Services::currentVehicleLocationService()->resolve(10, $this->asOf),
+            'facts' => Services::movementOperationalFactPresentationService()->tripFacts(102),
+            'history' => Services::operationalFactsRepository()->vehicleTripHistory(10),
+            'checklist' => Services::tripMovementChecklistService()->checklist(102),
+        ];
     }
 }
