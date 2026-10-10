@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.32.1 — Movement Checklist Presentation
+
+Release date: 2026-10-09
+
+### Fixed
+
+- Explain when historical staging no longer satisfies current pickup readiness
+  and why movement actions are unavailable.
+- Align displayed HNL staging actions with existing backend eligibility guards.
+- Clarify guidance when guest handoff is unavailable.
+- Label reservation-context pickup and return locations explicitly as scheduled,
+  keeping them distinct from observed movement facts.
+- Describe movement occurrence timestamps as occurrence time rather than
+  record-entry time.
+
+### Safety
+
+- No migration or schema change.
+- Movement, readiness, custody, and current-position authorities remain unchanged.
+
 ## v0.32.0 — Repair Cost Expense Reconciliation
 
 Release date: 2026-10-07
