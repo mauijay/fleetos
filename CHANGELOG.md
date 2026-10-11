@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.34.0 — Paired Historical Movement Repair
+
+Release date: 2026-10-11
+
+### Added
+
+- Add privileged audited repair of closed historical guest handoff and operator
+  recovery intervals on completed trips.
+- Provide read-only previews and preservation gates for later custody,
+  current-position authority, and cross-trip readiness.
+- Apply repairs atomically with audited invalid-fact handling, rollback, and
+  idempotent replay protection.
+
+### Safety
+
+- No migration or schema change; latest App migration remains 000035.
+- Normal movement workflows remain unchanged; historical corrections require
+  separate authorization.
+
 ## v0.33.1 — Current Trip Schedule Authority
 
 Release date: 2026-10-10
