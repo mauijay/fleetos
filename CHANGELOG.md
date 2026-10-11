@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.33.1 — Current Trip Schedule Authority
+
+Release date: 2026-10-10
+
+### Fixed
+
+- Use the current owned normalized trip schedule for pickup checklist headers,
+  workspace routing, and the pickup handoff early-time guard.
+- Preserve historical checklist schedule snapshots and label them when they
+  differ from the current schedule.
+- Retain genuine early-pickup protections.
+
+### Safety
+
+- No migration or schema change; latest App migration remains 000035.
+- Movement, staging, custody, handoff, and current-position authorities remain
+  unchanged; GET rendering remains read-only.
+
 ## v0.33.0 — Extras and Guest Commitments
 
 Release date: 2026-10-10
