@@ -13,6 +13,7 @@ class TripMovementChecklistService
         private readonly ?MovementChecklistRepository $repository = null,
         private readonly MovementChecklistDefinitionService $definitions = new MovementChecklistDefinitionService(),
         private readonly MovementReadinessService $readiness = new MovementReadinessService(),
+        private readonly MovementScheduleAuthorityService $scheduleAuthority = new MovementScheduleAuthorityService(),
     ) {
     }
 
@@ -90,7 +91,7 @@ class TripMovementChecklistService
         $progress = $this->readiness->progress($items, (string) $checklist['movement_type']);
         $status = $this->readiness->status((string) $checklist['movement_type'], $items, $checklist['vehicle_disposition'] ?? null, $checklist['completed_at'] !== null);
 
-        return array_merge($checklist, ['exists' => true, 'items' => $items, 'audits' => $this->repo()->audits($id), 'progress' => $progress, 'readiness_status' => $status]);
+        return array_merge($checklist, ['exists' => true, 'current_scheduled_at' => $this->scheduleAuthority->scheduledAt($checklist), 'items' => $items, 'audits' => $this->repo()->audits($id), 'progress' => $progress, 'readiness_status' => $status]);
     }
 
     /** @return array<string, mixed>|null */
@@ -105,7 +106,7 @@ class TripMovementChecklistService
         $progress = $this->readiness->progress($items, (string) $checklist['movement_type']);
         $status = $this->readiness->status((string) $checklist['movement_type'], $items, $checklist['vehicle_disposition'] ?? null, $checklist['completed_at'] !== null);
 
-        return array_merge($checklist, ['exists' => true, 'items' => $items, 'audits' => $this->repo()->audits($id), 'progress' => $progress, 'readiness_status' => $status]);
+        return array_merge($checklist, ['exists' => true, 'current_scheduled_at' => $this->scheduleAuthority->scheduledAt($checklist), 'items' => $items, 'audits' => $this->repo()->audits($id), 'progress' => $progress, 'readiness_status' => $status]);
     }
 
     public function completeItem(int $itemId, ?string $note = null, ?int $actorUserId = null): bool

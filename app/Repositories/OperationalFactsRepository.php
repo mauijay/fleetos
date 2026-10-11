@@ -572,6 +572,17 @@ class OperationalFactsRepository
         return $row === null ? null : $row;
     }
 
+    /** @return array<string, mixed>|null */
+    public function movementSchedule(int $companyId, int $vehicleId, int $tripId): ?array
+    {
+        return $this->db->table('turo_trips_normalized trips')
+            ->select('trips.starts_at, trips.ends_at')
+            ->join('fleet_vehicles vehicles', 'vehicles.id = trips.fleet_vehicle_id')
+            ->where('vehicles.company_id', $companyId)->where('vehicles.deleted_at', null)
+            ->where('trips.id', $tripId)->where('trips.fleet_vehicle_id', $vehicleId)
+            ->where('trips.deleted_at', null)->get(1)->getRowArray();
+    }
+
     /** @return array{previous:?array<string,mixed>,current:?array<string,mixed>,next:?array<string,mixed>} */
     public function tripContext(int $tripId): array
     {
@@ -666,12 +677,16 @@ class OperationalFactsRepository
         if (! $this->db->tableExists('trip_movement_checklists')) {
             return null;
         }
+        $builder = $this->db->table('trip_movement_checklists checklists')
+            ->select('checklists.id')
+            ->join('turo_trips_normalized trips', 'trips.id = checklists.turo_trip_normalized_id AND trips.fleet_vehicle_id = checklists.fleet_vehicle_id')
+            ->where('checklists.turo_trip_normalized_id', $tripId)
+            ->orderBy("CASE WHEN checklists.scheduled_at = CASE WHEN checklists.movement_type = 'pickup' THEN trips.starts_at ELSE trips.ends_at END THEN 0 ELSE 1 END", 'ASC', false)
+            ->orderBy('checklists.scheduled_at', 'DESC')
+            ->orderBy('checklists.id', 'DESC');
         if ($preferredMovementType !== null) {
-            $preferred = $this->db->table('trip_movement_checklists')
-                ->select('id')
-                ->where('turo_trip_normalized_id', $tripId)
-                ->where('movement_type', $preferredMovementType)
-                ->orderBy('scheduled_at', 'DESC')
+            $preferred = (clone $builder)
+                ->where('checklists.movement_type', $preferredMovementType)
                 ->get(1)
                 ->getRowArray();
             if ($preferred !== null) {
@@ -679,12 +694,7 @@ class OperationalFactsRepository
             }
         }
 
-        $fallback = $this->db->table('trip_movement_checklists')
-            ->select('id')
-            ->where('turo_trip_normalized_id', $tripId)
-            ->orderBy('scheduled_at', 'DESC')
-            ->get(1)
-            ->getRowArray();
+        $fallback = $builder->get(1)->getRowArray();
 
         return $fallback === null ? null : '/operations/checklists/' . (int) $fallback['id'];
     }

@@ -1,7 +1,14 @@
 <?php
 
 /** Loopback-only synthetic movement browser harness; never an application entry point. */
-if (PHP_SAPI !== 'cli-server' || ! in_array($_SERVER['REMOTE_ADDR'] ?? '', ['127.0.0.1', '::1'], true)) {
+$seedOnly = PHP_SAPI === 'cli' && ($argv[1] ?? '') === '--seed';
+$renderOnly = PHP_SAPI === 'cli' && ($argv[1] ?? '') === '--render';
+if ($renderOnly) {
+    $_SERVER['REQUEST_METHOD'] = 'GET';
+    $_SERVER['REQUEST_URI'] = $argv[3] ?? '';
+    $_SERVER['REMOTE_ADDR'] = '127.0.0.1';
+}
+if (! $seedOnly && ! $renderOnly && (PHP_SAPI !== 'cli-server' || ! in_array($_SERVER['REMOTE_ADDR'] ?? '', ['127.0.0.1', '::1'], true))) {
     http_response_code(403);
     exit;
 }
@@ -16,9 +23,9 @@ $build = realpath($root . '/build');
 if ($directory === false || $build === false || ! str_starts_with(strtolower($directory), strtolower($build . DIRECTORY_SEPARATOR))) {
     throw new RuntimeException('Synthetic browser files must remain in build.');
 }
-$scenario = $_GET['scenario'] ?? 'historical';
-error_log('Synthetic movement start: ' . $_SERVER['REQUEST_METHOD'] . ' ' . $_SERVER['REQUEST_URI'] . ' / fixture ' . $scenario);
-if (! in_array($scenario, ['historical', 'recovery', 'later', 'valid', 'handoff', 'position', 'guest'], true)) {
+$scenario = $seedOnly || $renderOnly ? ($argv[2] ?? '') : ($_GET['scenario'] ?? 'historical');
+error_log('Synthetic movement start: ' . ($_SERVER['REQUEST_METHOD'] ?? 'CLI seed') . ' ' . ($_SERVER['REQUEST_URI'] ?? '') . ' / fixture ' . $scenario);
+if (! in_array($scenario, ['historical', 'recovery', 'later', 'valid', 'handoff', 'position', 'guest', 'schedule', 'schedule-early', 'schedule-equal'], true)) {
     http_response_code(400);
     exit;
 }
@@ -35,9 +42,23 @@ if (! $db->tableExists('trip_movement_checklists')) {
     error_log('Synthetic movement migrating fixture ' . $scenario);
     (new \CodeIgniter\Database\MigrationRunner(new \Config\Migrations(), $db))->setNamespace('App')->latest();
     error_log('Synthetic movement seeding fixture ' . $scenario);
-    \Tests\Support\MovementPresentationFixture::seed($db, $scenario);
+    if (str_starts_with($scenario, 'schedule')) {
+        \Tests\Support\MovementScheduleAuthorityFixture::seed($db);
+        if ($scenario === 'schedule-early') {
+            $db->table('turo_trips_normalized')->where('id', 102)->update(['starts_at' => '2026-10-07 10:30:00']);
+        } elseif ($scenario === 'schedule-equal') {
+            $db->table('trip_movement_checklists')->where('id', 302)->delete();
+            $db->table('trip_movement_checklists')->where('id', 102)->update(['scheduled_at' => '2026-10-07 08:30:00']);
+        }
+    } else {
+        \Tests\Support\MovementPresentationFixture::seed($db, $scenario);
+    }
 }
 error_log('Synthetic movement database ready ' . $scenario);
+if ($seedOnly) {
+    $db->close();
+    exit(0);
+}
 \Config\Services::injectMock('auth', new class (new \Config\Auth()) extends \CodeIgniter\Shield\Auth {
     public function setAuthenticator(?string $alias = null): self
     {
@@ -101,7 +122,18 @@ try {
         http_response_code(405);
         exit('Synthetic presentation routes support GET only.');
     }
-    if ($path === '/synthetic-state') {
+    if ($path === '/synthetic-schedule-warning' && str_starts_with($scenario, 'schedule')) {
+        $warning = null;
+        $service = \Config\Services::movementOperationalFactService();
+        $checklist = \Config\Services::tripMovementChecklistService()->checklistForCompany(1, 102);
+        try {
+            (new ReflectionMethod($service, 'requireEarlyHandoffConfirmation'))->invoke($service, $checklist, ['occurred_at' => '2026-10-07T08:25', 'location_class' => 'other_delivery']);
+        } catch (\App\Exceptions\EarlyHandoffConfirmationRequired $exception) {
+            $warning = $exception->getMessage();
+        }
+        header('Content-Type: application/json');
+        $result = json_encode(['warning' => $warning], JSON_THROW_ON_ERROR);
+    } elseif ($path === '/synthetic-state') {
         header('Content-Type: application/json');
         $result = json_encode(\Tests\Support\MovementPresentationFixture::businessRows($db), JSON_THROW_ON_ERROR);
     } elseif (preg_match('~^/operations/checklists/(102|200|201)$~D', $path, $matches)) {

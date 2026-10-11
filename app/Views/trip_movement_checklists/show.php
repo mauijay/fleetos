@@ -105,7 +105,10 @@ $tripFacts ??= [
             <div>
                 <p class="eyebrow"><?= ($checklist['movement_type'] ?? null) === 'return' ? 'Return Workflow' : 'Movement Checklist' ?></p>
                 <h1><?= esc((string) ($checklist['fleet_code'] ?? 'Movement')) ?></h1>
-                <p class="status-copy"><?= esc(ucfirst((string) ($checklist['movement_type'] ?? 'movement'))) ?> · <?= esc((string) ($checklist['scheduled_at'] ?? 'Time pending')) ?> · <?= esc((string) ($checklist['guest_name'] ?? 'Guest not captured')) ?></p>
+                <p class="status-copy"><?= esc(ucfirst((string) ($checklist['movement_type'] ?? 'movement'))) ?> · <?= esc((string) ($checklist['current_scheduled_at'] ?? $checklist['scheduled_at'] ?? 'Time pending')) ?> · <?= esc((string) ($checklist['guest_name'] ?? 'Guest not captured')) ?></p>
+                <?php if (isset($checklist['current_scheduled_at'], $checklist['scheduled_at']) && $checklist['current_scheduled_at'] !== $checklist['scheduled_at']): ?>
+                    <p class="muted">Historical checklist schedule: <?= esc((string) $checklist['scheduled_at']) ?>. The header uses the current reservation schedule.</p>
+                <?php endif; ?>
             </div>
             <a class="action-link" href="/">Command Center</a>
         </header>

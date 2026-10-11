@@ -60,8 +60,8 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
             ['id' => 20, 'company_id' => 2, 'deleted_at' => null],
         ]);
         $this->connection->table('turo_trips_normalized')->insertBatch([
-            ['id' => 100, 'fleet_vehicle_id' => 10, 'deleted_at' => null],
-            ['id' => 200, 'fleet_vehicle_id' => 20, 'deleted_at' => null],
+            ['id' => 100, 'fleet_vehicle_id' => 10, 'starts_at' => '2026-09-03 08:00:00', 'deleted_at' => null],
+            ['id' => 200, 'fleet_vehicle_id' => 20, 'starts_at' => null, 'deleted_at' => null],
         ]);
         $this->connection->table('users')->insertBatch([['id' => 7, 'username' => 'operator'], ['id' => 8, 'username' => 'reviewer']]);
         $this->repository = new OperationalFactsRepository($this->connection);
@@ -1554,7 +1554,7 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
             ['id' => 120, 'fleet_vehicle_id' => 10, 'guest_name' => 'Next Guest', 'starts_at' => '2026-09-07 10:00:00', 'ends_at' => '2026-09-08 10:00:00', 'trip_status_lookup_value_id' => 1, 'deleted_at' => null],
             ['id' => 105, 'fleet_vehicle_id' => 20, 'guest_name' => 'Other Vehicle', 'starts_at' => '2026-09-04 12:00:00', 'ends_at' => '2026-09-05 12:00:00', 'trip_status_lookup_value_id' => 1, 'deleted_at' => null],
         ]);
-        $this->connection->query('CREATE TABLE ' . $this->table('trip_movement_checklists') . ' (id INTEGER PRIMARY KEY, turo_trip_normalized_id INTEGER, movement_type VARCHAR(20), scheduled_at DATETIME)');
+        $this->connection->query('CREATE TABLE ' . $this->table('trip_movement_checklists') . ' (id INTEGER PRIMARY KEY, turo_trip_normalized_id INTEGER, fleet_vehicle_id INTEGER DEFAULT 10, movement_type VARCHAR(20), scheduled_at DATETIME)');
         $this->connection->table('trip_movement_checklists')->insertBatch([
             ['id' => 501, 'turo_trip_normalized_id' => 80, 'movement_type' => 'pickup', 'scheduled_at' => '2026-08-29 10:00:00'],
             ['id' => 502, 'turo_trip_normalized_id' => 90, 'movement_type' => 'pickup', 'scheduled_at' => '2026-09-01 10:00:00'],
@@ -1768,6 +1768,7 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
 
     public function testEarlyDirectHandoffRequiresExplicitConfirmation(): void
     {
+        $this->connection->table('turo_trips_normalized')->where('id', 100)->update(['starts_at' => '2026-09-03 12:00:00']);
         $service = new MovementOperationalFactService($this->connection, $this->events, $this->assessments);
         $checklist = ['exists' => true, 'fleet_vehicle_id' => 10, 'turo_trip_normalized_id' => 100, 'movement_type' => 'pickup', 'scheduled_at' => '2026-09-03 12:00:00'];
 

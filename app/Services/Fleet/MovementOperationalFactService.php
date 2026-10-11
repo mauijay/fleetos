@@ -24,6 +24,7 @@ class MovementOperationalFactService
         private readonly MovementIntelligence $movementConfig = new MovementIntelligence(),
         private readonly ?VehicleRecoveryExceptionRepository $recoveryExceptions = null,
         private readonly ?CurrentVehicleCustodyService $custodyService = null,
+        private readonly MovementScheduleAuthorityService $scheduleAuthority = new MovementScheduleAuthorityService(),
     ) {
         $this->db = $db ?? Database::connect();
     }
@@ -40,7 +41,6 @@ class MovementOperationalFactService
         }
         if ($eventCode === 'actual_handoff') {
             $this->rejectDuplicateHandoff($checklist);
-            $this->requireEarlyHandoffConfirmation($checklist, $data);
             $occurredAt = trim((string) ($data['occurred_at'] ?? ''));
             if ($occurredAt !== '') {
                 $this->rejectHandoffPossessionConflict(
@@ -49,6 +49,7 @@ class MovementOperationalFactService
                     $occurredAt,
                 );
             }
+            $this->requireEarlyHandoffConfirmation($checklist, $data);
         } else {
             if ($this->events->activeForTrip((int) $checklist['turo_trip_normalized_id'], ['actual_return', 'vehicle_recovered']) !== null) {
                 throw new \InvalidArgumentException('This return is already complete. Correct or void the existing fact instead.');
@@ -1239,14 +1240,33 @@ class MovementOperationalFactService
     private function requireEarlyHandoffConfirmation(array $checklist, array $data): void
     {
         $occurredAt = trim((string) ($data['occurred_at'] ?? ''));
-        $scheduledAt = trim((string) ($checklist['scheduled_at'] ?? $checklist['starts_at'] ?? ''));
-        if ($occurredAt === '' || $scheduledAt === '') {
+        if ($occurredAt === '') {
             return;
         }
+        $tripId = (int) ($checklist['turo_trip_normalized_id'] ?? 0);
+        $trip = $this->repo()->trip($tripId);
+        if ($trip === null
+            || (int) $trip['fleet_vehicle_id'] !== (int) ($checklist['fleet_vehicle_id'] ?? 0)
+            || (isset($checklist['company_id']) && (int) $trip['company_id'] !== (int) $checklist['company_id'])) {
+            throw new \InvalidArgumentException('The reservation schedule does not belong to this movement.');
+        }
+        if (isset($checklist['id'])) {
+            $ownedChecklist = (new \App\Repositories\MovementChecklistRepository($this->db))->checklistForCompany((int) $trip['company_id'], (int) $checklist['id']);
+            if ($ownedChecklist === null || (int) $ownedChecklist['turo_trip_normalized_id'] !== $tripId
+                || ($ownedChecklist['movement_type'] ?? null) !== 'pickup') {
+                throw new \InvalidArgumentException('The reservation schedule does not belong to this movement.');
+            }
+        }
+        $schedule = $this->repo()->movementSchedule((int) $trip['company_id'], (int) $trip['fleet_vehicle_id'], $tripId);
+        $scheduledAt = $this->scheduleAuthority->scheduledAt(array_merge($schedule ?? [], ['movement_type' => 'pickup']));
+        if ($scheduledAt === null) {
+            throw new \InvalidArgumentException('The current reservation pickup schedule is unavailable.');
+        }
+        $timezone = new DateTimeZone((new \Config\App())->appTimezone);
         $threshold = $this->movementConfig->earlyHandoffWarningHours;
-        $warningBoundary = (new \DateTimeImmutable($scheduledAt))->modify('-' . $threshold . ' hours');
-        if (new \DateTimeImmutable($occurredAt) < $warningBoundary && ($data['confirm_early_handoff'] ?? null) !== '1') {
-            $scheduledLabel = (new \DateTimeImmutable($scheduledAt))->format('M j, Y \a\t g:i A');
+        $warningBoundary = (new \DateTimeImmutable($scheduledAt, $timezone))->modify('-' . $threshold . ' hours');
+        if (new \DateTimeImmutable($occurredAt, $timezone) < $warningBoundary && ($data['confirm_early_handoff'] ?? null) !== '1') {
+            $scheduledLabel = (new \DateTimeImmutable($scheduledAt, $timezone))->format('M j, Y \a\t g:i A');
             $message = 'This reservation does not begin until ' . $scheduledLabel . '. The handoff time entered is more than ' . $threshold . ' hours early. Are you sure this is the correct reservation?';
             if (($data['location_class'] ?? null) === 'airport_hnl') {
                 $message .= ' If the guest does not yet have possession, use Stage at HNL instead.';
