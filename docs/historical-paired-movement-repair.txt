@@ -1,0 +1,137 @@
+Historical custody repair (version 1)
+
+This privileged server CLI repairs one completed trip's CLOSED historical
+guest-custody interval. It is separate from pickup, staging and recovery UI.
+No routes, controllers, schema, release metadata or normal business rules change.
+Deployment and use against a live database require separate authorization.
+
+Interface
+
+  php spark fleet:repair:historical-custody --request PRIVATE.json --actor ID
+
+The default is a SELECT-only preview. Review its before/projected-after authority,
+proposed events, exact invalid-fact targets, later trip IDs, movement gaps and
+confirmation hash. Preview performs no INSERT, UPDATE or DELETE, even temporarily.
+
+  php spark fleet:repair:historical-custody --request PRIVATE.json --actor ID \
+    --apply --confirm PREVIEW_SHA256
+
+Keep the request and preview output private. The CLI accepts at most 64 KiB of
+JSON and requires a fresh hash for this exact request, actor and database state.
+The service independently checks all inputs and authorizes an active, undeleted,
+unbanned Shield superadmin with admin.access from current stored permissions and
+the existing Settings matrix on the same database connection. A trusted server
+shell is the authentication boundary; an actor ID alone is not a web API.
+Custom Settings handlers or a separate Settings database fail closed.
+
+Input contract
+
+Required positive integer identifiers: company_id, vehicle_id, trip_id,
+pickup_checklist_id, return_checklist_id. Ownership is derived through the
+vehicle and validated for both movement checklists. The trip must be completed,
+not canceled or deleted; the vehicle must be owned and undeleted.
+
+Required handoff and recovery objects, each containing:
+  occurred_at: exact local Y-m-d H:i:s in the application's timezone
+  location_class: home, airport_hnl, waikiki_hotel or other_delivery
+  location_detail: nonempty attested location, up to 500 characters
+
+Named places are sufficient. A street address is never inferred. Existing
+movement-location/HNL parsing remains authoritative. No new staging is required.
+Both times must be strictly past, handoff < recovery, within the existing
+repairCandidateWindowHours of the canonical trip start/end, and strictly before
+each current custody, position and latest movement basis. Equal boundaries fail.
+
+Also required:
+  reason: explicit attestation/repair reason, up to 2000 characters
+  context: stable repair intent identifier, up to 200 characters
+  assessment_mode: exactly not_captured
+  expected_authority: custody_event_id, position_event_id,
+                      latest_movement_event_id (positive integers)
+
+Optional invalid_fact, otherwise null:
+  event_id, assessment_id (explicit integer or null), reason
+
+This version only coordinates invalid active pickup staging on the same trip.
+The assessment must exactly match the single active linked assessment. Any
+uninvalidated positioning plan rejects the void bundle because the accepted
+void mechanism would invalidate it. No replacement staging or observations are
+invented. Unsupported fields, including supplied measurements, are rejected.
+The repair creates no handoff assessment and one recovery assessment with null
+cleanliness/energy and explicit not-captured notes. It records no odometer,
+damage exceptions or other unobserved values.
+
+Transaction and authority
+
+The command owns a root REPEATABLE READ transaction; nesting is rejected.
+MySQL/MariaDB affected tables must already use InnoDB. SQLite supports synthetic
+validation. Apply locks the actor/membership/settings authority, company,
+vehicle, complete vehicle trip/checklist/event/assessment/plan/profile ranges,
+checklist items, and trip-scoped planned locations, airport workflows and manual
+commitments. Range/gap locks block ordinary movement inserts and corrections
+that do not take a shared vehicle lock. Existing Extra writers share the company
+and trip lock authorities. Requests over bounded inspection limits fail closed.
+
+The pure preview removes only the identified invalid stage from its in-memory
+timeline and adds hypothetical handoff/recovery facts to the unchanged custody
+projection. Existing guest custody or genuine movement overlapping the interval
+rejects. A different trip's later actual handoff/return/recovery must dominate.
+A later trip without movement facts stays a visible, audited gap; schedules do
+not imply actual custody. Its existence alone does not block a safe closed pair.
+
+Apply validates and locks again, checks the preview hash, uses the existing
+MovementOperationalFactService::voidInvalidFact for the stage/assessment, then
+creates the paired events through the existing event and assessment services.
+Their creation is separately audited. Original event/assessment values remain
+unchanged; only accepted void lifecycle metadata changes.
+
+Apply compares actual custody, position and latest movement, the complete later
+readiness projection (including energy rules and Guest Commitments), protected
+vehicle/trip/checklist/planning rows and commercial inputs. It reprojects saved
+before inputs at the same after clock, preventing time drift or created_at
+visibility from hiding a regression. It verifies actual historical closure and
+the final audit receipt before commit. Any failed gate or audit rolls back voids,
+both events, the null assessment and all repair audit rows together.
+
+Idempotency and audits
+
+The existing operational_fact_audits table stores historical_pair_applied on the
+historical normalized-trip record with operation identifier
+historical_paired_movement_repair.v1. Its fingerprint covers the normalized
+company, vehicle, trip, checklist IDs, both times/locations, expected later
+authority, reason, assessment mode, invalid targets and repair intent/context.
+The locked company/vehicle scope serializes matching repairs without new schema.
+An identical intact receipt/pair returns already_applied and writes nothing.
+A conflicting request, missing/voided/changed pair or inconsistent invalid-fact
+treatment rejects for review. Replays still validate actor and ownership.
+
+Audits contain actor/company/vehicle/trip, reasons/context, attested occurrences
+and locations, created fact IDs/hashes, prior/post custody and position bases,
+readiness preservation hashes, protected-state hash and historical gap IDs.
+No guest names, reservation payloads or private supporting evidence are needed.
+
+Abort on ownership/permission failure, stale preview/basis, changed authority,
+open/reversed/overlapping interval, existing historical custody facts, no later
+genuine authority, incompatible void targets, positioning-plan invalidation,
+readiness/cross-trip/commercial drift, damaged replay, inspection-limit overflow,
+unsupported storage, lock timeout, deadlock, audit or transaction failure.
+Do not force or automatically retry a rejected/stale request. Read a new preview
+and review the cause. A lost commit acknowledgement requires a read-only preview
+and intact-receipt check before any subsequent apply attempt.
+
+Validation
+
+Synthetic fixtures use Archive Lodge and independent synthetic trips. They cover
+an invalid stage after handoff, completed historical closure, an intervening
+movement gap, a later rented handoff, unknown observations, immutable voids,
+preview SQL purity, authorization, replay/conflict/corruption, no later authority,
+open/equal/reversed/overlapping intervals, stale confirmation and full rollback.
+Real disposable local MariaDB tests use independent processes for ordinary
+handoff insertion, correction, repair replay and winning authority changes.
+Configure B21_MARIADB_CONFIG and B21_MARIADB_DATADIR only for a guarded loopback
+MariaDB data directory under build; existing fixtures reject remote servers.
+Run the repair tests with --filter HistoricalPairedMovementRepair.
+
+There is no UI or new GET endpoint, so CSRF/PRG and browser-size checks do not
+apply. Ordinary rendering, movement, readiness, HNL, cross-trip, commercial,
+financial and damage regressions remain required alongside the full suite.
