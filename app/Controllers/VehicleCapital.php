@@ -43,6 +43,7 @@ class VehicleCapital extends BaseController
             'vehicleHealthForm' => CoreServices::session()->getFlashdata('vehicle_health_form'),
             'vehicleHealthData' => CoreServices::session()->getFlashdata('vehicle_health_data') ?? [],
             'vehicleDamage' => Services::vehicleDamageReadService()->workspace($companyId, $vehicleId),
+            'wheelProjection' => Services::vehicleWheelConditionReadService()->forVehicles($companyId, [$vehicleId])[$vehicleId] ?? null,
             'damageIncidents' => Services::vehicleDamageIncidentRepository()->forVehicle($companyId, $vehicleId),
             'vehicleDamageNotice' => CoreServices::session()->getFlashdata('vehicle_damage_notice'),
             'vehicleDamageErrors' => CoreServices::session()->getFlashdata('vehicle_damage_errors') ?? [],

@@ -42,6 +42,8 @@ $eventLabel = static fn (string $code): string => match ($code) {
     <?php endif; ?>
 
     <div class="damage-summary"><strong><?= count($current) ?> current known</strong><span><?= count($history) ?> historical</span></div>
+    <?php if (($wheelProjection ?? null) !== null): ?><?= view('vehicle_wheel_history/_strip', ['projection' => $wheelProjection]) ?><?php endif; ?>
+    <p><a href="/fleet/vehicles/<?= (int) $vehicle['id'] ?>/damage-ledger">Damage Ledger — filters and wheel history</a></p>
     <p><a class="primary-action" href="/fleet/vehicles/<?= (int) $vehicle['id'] ?>/damage-incidents/new">Record damage incident</a> <a href="/fleet/vehicles/<?= (int) $vehicle['id'] ?>/wheel-damage/new">Record wheel curb rash</a></p>
     <?php if (($damageIncidents ?? []) !== []): ?><details class="capital-disclosure"><summary>Damage incidents · <?= count($damageIncidents) ?></summary><ul><?php foreach ($damageIncidents as $incident): ?><li><a href="/fleet/vehicles/<?= (int) $vehicle['id'] ?>/damage-incidents/<?= (int) $incident['id'] ?>">Incident #<?= (int) $incident['id'] ?> · <?= esc((string) $incident['discovered_at']) ?> · <?= esc((string) ($incident['turo_reservation_id'] ?? 'Trip unknown')) ?></a> · <?= esc(\Config\VehicleDamage::ATTRIBUTIONS[$incident['attribution_type']]) ?></li><?php endforeach; ?></ul></details><?php endif; ?>
     <?php if ($current === []): ?>

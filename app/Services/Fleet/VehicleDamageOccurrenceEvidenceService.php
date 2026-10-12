@@ -177,6 +177,27 @@ class VehicleDamageOccurrenceEvidenceService
         }
     }
 
+    /** Legacy episode evidence has no occurrence; preserve and authorize its original parent. */
+    public function resolveEpisodeEvidence(int $company, int $vehicle, int $condition, int $evidence): ?array
+    {
+        try {
+            $items = new VehicleDamageRepository($this->db);
+            $original = $items->item($company, $vehicle, $condition);
+            $canonical = $items->canonicalItem($company, $vehicle, $condition);
+            if ($original === null || $canonical === null || $original['panel_code'] !== $canonical['panel_code'] || $original['damage_type_code'] !== $canonical['damage_type_code'] || $original['zone_code'] !== $canonical['zone_code']) {
+                return null;
+            }
+            $rows = (new \App\Repositories\VehicleWheelReadRepository($this->db))->gallery($company, $vehicle, $condition, null, 0, [$evidence]);
+            $row = $rows[0] ?? null;
+            if ($row === null || (int) $row['id'] !== $evidence || (int) $row['vehicle_damage_item_id'] !== $condition) {
+                return null;
+            }
+            return $this->storage->resolve($row, $this->directory($company, $vehicle), self::MIME_TYPES);
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
     public function discardAfterRollback(): void
     {
         foreach ($this->created as $stored) {

@@ -262,6 +262,12 @@ class VehicleDamageRepository
         foreach ($events as $event) {
             $latest[(int) $event['vehicle_damage_item_id']] ??= (int) $event['id'];
         }
+        return self::wheelStateFromRows($company, $vehicle, $panel, $rows, $latest);
+    }
+
+    /** Shared pure resolver projection; reads cannot mutate episode authority. */
+    public static function wheelStateFromRows(int $company, int $vehicle, string $panel, array $rows, array $latest): array
+    {
         $candidates = [];
         $fingerprints = [];
         $integrity = 'valid';

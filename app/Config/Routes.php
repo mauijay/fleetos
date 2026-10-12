@@ -52,6 +52,10 @@ $routes->group('', ['filter' => 'session'], static function (RouteCollection $ro
         $routes->post('(:num)/health/observations/(:num)/correct', 'VehicleHealth::correctObservation/$1/$2');
         $routes->post('(:num)/health/observations/(:num)/void', 'VehicleHealth::voidObservation/$1/$2');
         $routes->get('(:num)/wheel-damage/new', 'VehicleWheelDamage::entry/$1');
+        $routes->get('(:num)/damage-ledger', 'VehicleWheelHistory::ledger/$1');
+        $routes->get('(:num)/wheel-history/(LF|RF|RR|LR|UNKNOWN)', 'VehicleWheelHistory::history/$1/$2');
+        $routes->get('(:num)/wheel-history/(:num)/occurrences/(:num)', 'VehicleWheelHistory::occurrence/$1/$2/$3');
+        $routes->get('(:num)/wheel-history/evidence/(:num)/(:num)', 'VehicleWheelHistory::episodeEvidence/$1/$2/$3');
         $routes->post('(:num)/wheel-damage/(new|worsening|unchanged)', 'VehicleWheelDamage::command/$1/$2');
         $routes->get('(:num)/wheel-damage/(:num)/occurrences/(:num)', 'VehicleWheelDamage::occurrence/$1/$2/$3');
         $routes->post('(:num)/wheel-damage/(:num)/occurrences/(:num)/photos', 'VehicleWheelDamage::attachPhotos/$1/$2/$3');
