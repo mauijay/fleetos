@@ -1,6 +1,7 @@
 <?php
 
 use App\Controllers\TripMovementChecklists;
+use App\Services\Fleet\GuestCommitmentProjectionService;
 use App\Services\Fleet\MovementStagingPresentationService;
 use CodeIgniter\Config\Services as CoreServices;
 use CodeIgniter\HTTP\IncomingRequest;
@@ -23,10 +24,18 @@ final class MovementStagingPresentationHotfixTest extends CIUnitTestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->asOf = new DateTimeImmutable();
         $this->connection = Database::connect('tests');
         $this->connection->setPrefix('');
         VehicleDamageDatabaseFixture::migrate($this->connection);
+        $this->asOf = new DateTimeImmutable();
+        // Pin the projection clock; equality checks must compare the same observation time.
+        $projection = Services::guestCommitmentProjectionService();
+        $fixedProjection = $this->getMockBuilder(GuestCommitmentProjectionService::class)
+            ->onlyMethods(['forTrips'])->getMock();
+        $fixedProjection->expects($this->atLeastOnce())->method('forTrips')->willReturnCallback(
+            fn (int $company, array $trips, ?DateTimeImmutable $asOf = null): array => $projection->forTrips($company, $trips, $asOf ?? $this->asOf),
+        );
+        Services::injectMock('guestCommitmentProjectionService', $fixedProjection);
         Services::injectMock('auth', new class (new \Config\Auth()) extends \CodeIgniter\Shield\Auth {
             public function setAuthenticator(?string $alias = null): self
             {
@@ -58,6 +67,7 @@ final class MovementStagingPresentationHotfixTest extends CIUnitTestCase
     public function testHistoricalStageExplainsRecoveryAndLaterReservationWithoutChangingAuthorityOrRows(): void
     {
         Fixture::seed($this->connection);
+        $this->asOf = new DateTimeImmutable(); // Include all just-recorded fixture rows.
         $before = Fixture::businessRows($this->connection);
         $asOf = new DateTimeImmutable();
         $readiness = Services::movementReadinessReadService()->forCompany(1, [102], $asOf)[102];
@@ -104,6 +114,7 @@ final class MovementStagingPresentationHotfixTest extends CIUnitTestCase
     public function testCurrentStageRetainsGuestPickupConfirmation(): void
     {
         Fixture::seed($this->connection, 'valid');
+        $this->asOf = new DateTimeImmutable(); // Include all just-recorded fixture rows.
         $before = Fixture::businessRows($this->connection);
         $authority = $this->authority();
         $requirements = array_column($authority['readiness']['requirements'], null, 'code');
@@ -126,6 +137,7 @@ final class MovementStagingPresentationHotfixTest extends CIUnitTestCase
             ['occurred_at' => $handoffAt, 'note' => 'Synthetic next-day handoff'],
             7,
         ));
+        $this->asOf = new DateTimeImmutable(); // The explicit POST establishes a new observation point.
         $afterHandoff = $this->authority();
         $this->assertSame('guest', $afterHandoff['custody']['custody']);
         $this->assertSame('rented', $afterHandoff['position']['operational_state']);
@@ -143,6 +155,7 @@ final class MovementStagingPresentationHotfixTest extends CIUnitTestCase
     public function testRecoveryAloneMakesStagingHistoricalWithoutInventingLaterReservation(): void
     {
         Fixture::seed($this->connection, 'recovery');
+        $this->asOf = new DateTimeImmutable(); // Include all just-recorded fixture rows.
         $before = Fixture::businessRows($this->connection);
         $authority = $this->authority();
         $this->assertSame('vehicle_recovered', $authority['custody']['basis_event_code']);
@@ -167,11 +180,12 @@ final class MovementStagingPresentationHotfixTest extends CIUnitTestCase
     public function testLaterReservationStageUsesOccurrenceTimeAndPreservesBothTrips(): void
     {
         Fixture::seed($this->connection, 'later');
+        $this->asOf = new DateTimeImmutable(); // Include all just-recorded fixture rows.
         $before = Fixture::businessRows($this->connection);
         $authority = $this->authority();
         $this->assertSame(103, $authority['custody']['basis_trip_id']);
         $this->assertSame('vehicle_staged', $authority['custody']['basis_event_code']);
-        $tripC = Services::movementReadinessReadService()->forCompany(1, [103])[103];
+        $tripC = Services::movementReadinessReadService()->forCompany(1, [103], $this->asOf)[103];
         $this->assertSame('satisfied', array_column($tripC['requirements'], null, 'code')['airport_staging']['status']);
         $html = $this->controller()->show(102);
         $this->assertStringContainsString('activity that occurred at', $html);
@@ -182,7 +196,7 @@ final class MovementStagingPresentationHotfixTest extends CIUnitTestCase
         $stage = $authority['custody']['basis_event'];
         $this->assertNotSame($stage['created_at'], $stage['occurred_at']);
         $this->assertSame($authority, $this->authority());
-        $this->assertSame($tripC, Services::movementReadinessReadService()->forCompany(1, [103])[103]);
+        $this->assertSame($tripC, Services::movementReadinessReadService()->forCompany(1, [103], $this->asOf)[103]);
         $this->assertSame($before, Fixture::businessRows($this->connection));
         try {
             Services::movementOperationalFactService()->stageForChecklist(Services::tripMovementChecklistService()->checklist(102), \Tests\Support\HnlStagingChecklistFixture::stagingData(), 7);
@@ -196,6 +210,7 @@ final class MovementStagingPresentationHotfixTest extends CIUnitTestCase
     public function testGenericPositionDoesNotRetireCurrentStage(): void
     {
         Fixture::seed($this->connection, 'position');
+        $this->asOf = new DateTimeImmutable(); // Include all just-recorded fixture rows.
         $custody = Services::currentVehicleCustodyService()->resolve(10);
         $this->assertSame(102, $custody['basis_trip_id']);
         $this->assertSame('vehicle_positioned', Services::currentVehicleLocationService()->resolve(10)['event_code']);
@@ -209,6 +224,7 @@ final class MovementStagingPresentationHotfixTest extends CIUnitTestCase
     public function testActiveGuestCustodyStillDefersStaging(): void
     {
         Fixture::seed($this->connection, 'guest');
+        $this->asOf = new DateTimeImmutable(); // Include all just-recorded fixture rows.
         $before = Fixture::businessRows($this->connection);
         $this->assertSame('guest', Services::currentVehicleCustodyService()->resolve(10)['custody']);
         $projection = Services::movementReadinessReadService()->forCompany(1, [102])[102];
@@ -222,6 +238,7 @@ final class MovementStagingPresentationHotfixTest extends CIUnitTestCase
     public function testScheduledUnknownRemainsSeparateFromCanonicalHotelFactsAndHistory(): void
     {
         Fixture::seed($this->connection);
+        $this->asOf = new DateTimeImmutable(); // Include all just-recorded fixture rows.
         $before = Fixture::businessRows($this->connection);
         foreach ([200, 201] as $id) {
             $html = $this->controller()->show($id);
@@ -241,6 +258,7 @@ final class MovementStagingPresentationHotfixTest extends CIUnitTestCase
     public function testPresentationPreservesAllAuthorityFieldsAndDoesNotInventRecovery(): void
     {
         Fixture::seed($this->connection);
+        $this->asOf = new DateTimeImmutable(); // Include all just-recorded fixture rows.
         $asOf = new DateTimeImmutable();
         $readiness = Services::movementReadinessReadService()->forCompany(1, [102], $asOf)[102];
         $custody = Services::currentVehicleCustodyService()->resolve(10, $asOf);

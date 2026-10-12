@@ -92,7 +92,7 @@ class VehicleDamageService
 
     /**
      * @param array{trip_id?:int|null,movement_event_id?:int|null,recovery_exception_id?:int|null} $trustedContext
-     * @return array{success:bool,id?:int,errors:array<string,string>}
+     * @return array{success:bool,id?:int,condition_event_id?:int,errors:array<string,string>}
      */
     public function create(int $companyId, int $vehicleId, array $data, int $actorUserId, array $trustedContext = []): array
     {
@@ -143,7 +143,7 @@ class VehicleDamageService
         try {
             $this->repo()->lockVehicle($companyId, $vehicleId);
             $id = $this->repo()->insertItem($values);
-            $this->repo()->insertEvent($this->eventValues(
+            $eventId = $this->repo()->insertEvent($this->eventValues(
                 $companyId,
                 $id,
                 'created',
@@ -162,7 +162,7 @@ class VehicleDamageService
             }
             $this->db->transCommit();
 
-            return ['success' => true, 'id' => $id, 'errors' => []];
+            return ['success' => true, 'id' => $id, 'condition_event_id' => $eventId, 'errors' => []];
         } catch (Throwable $exception) {
             $this->db->transRollback();
 
@@ -170,7 +170,7 @@ class VehicleDamageService
         }
     }
 
-    /** @return array{success:bool,id?:int,errors:array<string,string>} */
+    /** @return array{success:bool,id?:int,condition_event_id?:int,errors:array<string,string>} */
     public function correctDetails(int $companyId, int $vehicleId, int $itemId, array $data, int $actorUserId): array
     {
         $item = $this->repo()->canonicalItem($companyId, $vehicleId, $itemId);
@@ -203,7 +203,7 @@ class VehicleDamageService
         return $this->updateWithEvent($item, $values, 'detail_corrected', $note, $actorUserId);
     }
 
-    /** @return array{success:bool,id?:int,errors:array<string,string>} */
+    /** @return array{success:bool,id?:int,condition_event_id?:int,errors:array<string,string>} */
     public function changeSeverity(int $companyId, int $vehicleId, int $itemId, string $severity, string $note, int $actorUserId): array
     {
         $item = $this->repo()->canonicalItem($companyId, $vehicleId, $itemId);
@@ -230,7 +230,7 @@ class VehicleDamageService
 
     /**
      * @param array{trip_id?:int|null,movement_event_id?:int|null} $trustedContext
-     * @return array{success:bool,id?:int,errors:array<string,string>}
+     * @return array{success:bool,id?:int,condition_event_id?:int,errors:array<string,string>}
      */
     public function worsen(int $companyId, int $vehicleId, int $itemId, array $data, int $actorUserId, array $trustedContext = []): array
     {
@@ -265,7 +265,7 @@ class VehicleDamageService
         return $this->updateWithEvent($item, $values, 'worsened', $note, $actorUserId, $context, $occurredAt);
     }
 
-    /** @return array{success:bool,id?:int,errors:array<string,string>} */
+    /** @return array{success:bool,id?:int,condition_event_id?:int,errors:array<string,string>} */
     public function transitionStatus(int $companyId, int $vehicleId, int $itemId, string $status, string $note, int $actorUserId): array
     {
         $item = $this->repo()->canonicalItem($companyId, $vehicleId, $itemId);
@@ -332,7 +332,7 @@ class VehicleDamageService
     }
 
     /** Evidence stays attached to its authorized original parent, including historical provenance. */
-    public function attachEvidence(int $companyId, int $vehicleId, int $itemId, array $data, int $actorUserId): array
+    public function attachEvidence(int $companyId, int $vehicleId, int $itemId, array $data, int $actorUserId, ?int $occurrenceMembershipId = null): array
     {
         $this->db->transBegin();
         try {
@@ -342,20 +342,20 @@ class VehicleDamageService
             $this->repo()->lockVehicle($companyId, $vehicleId);
             $this->repo()->lockItem($companyId, $vehicleId, $itemId);
             $before = $this->repo()->evidence($companyId, $itemId);
-            $this->addEvidence($companyId, $vehicleId, $itemId, $data, $actorUserId, date('Y-m-d H:i:s'));
+            $this->addEvidence($companyId, $vehicleId, $itemId, $data, $actorUserId, date('Y-m-d H:i:s'), $occurrenceMembershipId);
             $after = $this->repo()->evidence($companyId, $itemId);
             if (count($after) !== count($before) + 1) {
                 throw new \InvalidArgumentException('Supply one evidence reference.');
             }
             $item = $this->repo()->item($companyId, $vehicleId, $itemId);
-            $this->repo()->insertEvent($this->eventValues($companyId, $itemId, 'evidence_attached', date('Y-m-d H:i:s'), $actorUserId, null, null, $item, $item, 'Evidence attached to original parent.'));
+            $eventId = $this->repo()->insertEvent($this->eventValues($companyId, $itemId, 'evidence_attached', date('Y-m-d H:i:s'), $actorUserId, null, null, $item, $item, 'Evidence attached to original parent.'));
             $this->audit('updated', $itemId, ['evidence' => $before], ['evidence' => $after], $actorUserId);
             if (! $this->db->transStatus()) {
                 throw new \RuntimeException('Evidence transaction failed.');
             }
             $this->db->transCommit();
 
-            return ['success' => true, 'id' => $itemId, 'errors' => []];
+            return ['success' => true, 'id' => $itemId, 'condition_event_id' => $eventId, 'errors' => []];
         } catch (Throwable $exception) {
             $this->db->transRollback();
 
@@ -461,13 +461,13 @@ class VehicleDamageService
             if ($locked !== $item || ! empty($locked['current_condition_item_id'])) {
                 throw new \RuntimeException('Condition changed concurrently. Reload before updating.');
             }
-            $this->writeStateInTransaction($item, $values, $eventCode, $note, $actorUserId, $occurredAt ?? date('Y-m-d H:i:s'), $context);
+            $eventId = $this->writeStateInTransaction($item, $values, $eventCode, $note, $actorUserId, $occurredAt ?? date('Y-m-d H:i:s'), $context);
             if ($this->db->transStatus() === false) {
                 throw new \RuntimeException('Damage item update transaction failed.');
             }
             $this->db->transCommit();
 
-            return ['success' => true, 'id' => (int) $item['id'], 'errors' => []];
+            return ['success' => true, 'id' => (int) $item['id'], 'condition_event_id' => $eventId, 'errors' => []];
         } catch (Throwable $exception) {
             $this->db->transRollback();
 
@@ -482,7 +482,7 @@ class VehicleDamageService
     }
 
     /** Transaction-internal writer: the repair orchestrator owns locks, validation and commit. */
-    public function writeRepairStateInTransaction(array $item, array $values, string $eventCode, string $note, int $actor, string $occurredAt, ?int $repairEvent, array $auditContext = []): void
+    public function writeRepairStateInTransaction(array $item, array $values, string $eventCode, string $note, int $actor, string $occurredAt, ?int $repairEvent, array $auditContext = []): int
     {
         if (! in_array($eventCode, ['repaired', 'repair_reopened'], true) || $actor < 1 || ($item['current_condition_item_id'] ?? null) !== null) {
             throw new \InvalidArgumentException('Invalid physical repair event.');
@@ -493,10 +493,10 @@ class VehicleDamageService
                 throw new \InvalidArgumentException('Repair event must belong to this condition and company.');
             }
         }
-        $this->writeStateInTransaction($item, $values, $eventCode, $note, $actor, $occurredAt, ['trip_id' => null, 'movement_event_id' => null], $repairEvent, $auditContext);
+        return $this->writeStateInTransaction($item, $values, $eventCode, $note, $actor, $occurredAt, ['trip_id' => null, 'movement_event_id' => null], $repairEvent, $auditContext);
     }
 
-    private function writeStateInTransaction(array $item, array $values, string $eventCode, string $note, int $actor, string $occurredAt, array $context, ?int $repairEvent = null, array $auditContext = []): void
+    private function writeStateInTransaction(array $item, array $values, string $eventCode, string $note, int $actor, string $occurredAt, array $context, ?int $repairEvent = null, array $auditContext = []): int
     {
         if (! $this->repo()->updateItem((int) $item['company_id'], (int) $item['fleet_vehicle_id'], (int) $item['id'], $values)) {
             throw new \RuntimeException('Damage item changed before it could be updated.');
@@ -506,8 +506,9 @@ class VehicleDamageService
         if ($repairEvent !== null) {
             $event['repair_job_event_id'] = $repairEvent;
         }
-        $this->repo()->insertEvent($event);
+        $eventId = $this->repo()->insertEvent($event);
         $this->audit('updated', (int) $item['id'], $item, $new + ['reason' => $note] + $auditContext, $actor);
+        return $eventId;
     }
 
     /** @param array<string,mixed>|null $old @param array<string,mixed> $new @return array<string,mixed> */
@@ -532,7 +533,7 @@ class VehicleDamageService
         ];
     }
 
-    private function addEvidence(int $companyId, int $vehicleId, int $itemId, array $data, int $actorUserId, string $now): void
+    private function addEvidence(int $companyId, int $vehicleId, int $itemId, array $data, int $actorUserId, string $now, ?int $occurrenceMembershipId = null): void
     {
         $fileId = $this->nullableId($data['file_id'] ?? null);
         $imageId = $this->nullableId($data['image_id'] ?? null);
@@ -553,7 +554,7 @@ class VehicleDamageService
         if ($imageId !== null && ! $this->repo()->imageBelongsToVehicle($companyId, $vehicleId, $imageId)) {
             throw new \InvalidArgumentException('The evidence image does not belong to this vehicle and company.');
         }
-        $this->repo()->insertEvidence([
+        $values = [
             'company_id' => $companyId,
             'vehicle_damage_item_id' => $itemId,
             'file_id' => $fileId,
@@ -562,7 +563,12 @@ class VehicleDamageService
             'label' => $this->nullableText($data['evidence_label'] ?? null, 190),
             'created_by' => $actorUserId,
             'created_at' => $now,
-        ]);
+        ];
+        if ($occurrenceMembershipId !== null) {
+            (new \App\Repositories\VehicleDamageOccurrenceRepository($this->db))->validateEvidenceLink($companyId, $vehicleId, $itemId, $occurrenceMembershipId);
+            $values['vehicle_damage_incident_item_id'] = $occurrenceMembershipId;
+        }
+        $this->repo()->insertEvidence($values);
     }
 
     private function dateTime(string $value): string

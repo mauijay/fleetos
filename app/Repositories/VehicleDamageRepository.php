@@ -315,7 +315,20 @@ class VehicleDamageRepository
 
     public function insertEvidence(array $values): int
     {
-        $this->db->table('vehicle_damage_item_evidence')->insert($values);
+        if (($values['vehicle_damage_incident_item_id'] ?? null) !== null) {
+            $parent = $this->db->table('vehicle_damage_items')->where('company_id', $values['company_id'])->where('id', $values['vehicle_damage_item_id'])->get()->getRowArray();
+            if ($parent === null) {
+                throw new \InvalidArgumentException('Occurrence evidence requires an owned condition parent.');
+            }
+            (new VehicleDamageOccurrenceRepository($this->db))->validateEvidenceLink((int) $values['company_id'], (int) $parent['fleet_vehicle_id'], (int) $parent['id'], (int) $values['vehicle_damage_incident_item_id']);
+            if ((($values['file_id'] ?? null) !== null && ! $this->fileBelongsToVehicle((int) $values['company_id'], (int) $parent['fleet_vehicle_id'], (int) $values['file_id']))
+                || (($values['image_id'] ?? null) !== null && ! $this->imageBelongsToVehicle((int) $values['company_id'], (int) $parent['fleet_vehicle_id'], (int) $values['image_id']))) {
+                throw new \InvalidArgumentException('Occurrence attachment metadata must belong to its original vehicle.');
+            }
+        }
+        if (! $this->db->table('vehicle_damage_item_evidence')->insert($values)) {
+            throw new \RuntimeException('Damage evidence could not be recorded.');
+        }
 
         return (int) $this->db->insertID();
     }

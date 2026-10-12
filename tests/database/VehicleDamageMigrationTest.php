@@ -25,7 +25,7 @@ final class VehicleDamageMigrationTest extends CIUnitTestCase
         $this->assertTrue($db->fieldExists('panel_code', 'vehicle_damage_items'));
         $this->assertTrue($db->fieldExists('current_condition_item_id', 'vehicle_damage_items'));
         $this->assertCount(5, $db->getForeignKeyData('vehicle_damage_incidents'));
-        $this->assertCount(3, $db->getForeignKeyData('vehicle_damage_incident_items'));
+        $this->assertCount(4, $db->getForeignKeyData('vehicle_damage_incident_items')); // 000036 adds the restrictive condition-event reference.
         $this->assertArrayHasKey('damage_canonical_idx', $db->getIndexData('vehicle_damage_items'));
         foreach (['damage_claims', 'charging_sessions', 'airport_deliveries'] as $table) {
             $this->assertNotEmpty(array_filter($db->getForeignKeyData($table), static fn ($key): bool => $key->foreign_table_name === $db->prefixTable('turo_trips_normalized')));

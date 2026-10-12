@@ -32,7 +32,8 @@ final class VehicleDamageFinancialReconciliationMigrationTest extends CIUnitTest
         try {
             if ($maria === null) {
                 foreach (glob(dirname(__DIR__, 2) . '/app/Database/Migrations/*.php') as $path) {
-                    if ($upgrade && str_contains($path, '000035')) {
+                    // This permanent regression owns the exact 000035 boundary.
+                    if (strcmp(basename($path), '2026-10-11-000036') >= 0 || ($upgrade && str_contains($path, '000035'))) {
                         continue;
                     }
                     $runner->force($path, 'App');

@@ -222,6 +222,7 @@ class VehicleDamageIncidentService
 
     private function area(int $companyId, int $vehicleId, int $incidentId, array $area, int $actor): void
     {
+        $provenance = $this->incidents->provenanceAvailable();
         $panel = (string) ($area['panel_code'] ?? '');
         $type = (string) ($area['damage_type_code'] ?? '');
         $severity = (string) ($area['severity_code'] ?? '');
@@ -236,13 +237,13 @@ class VehicleDamageIncidentService
             if (! empty($area['vehicle_damage_item_id'])) {
                 throw new InvalidArgumentException('New damage cannot select an existing condition.');
             }
-            $evidence = array_intersect_key($area, array_flip(['file_id', 'image_id', 'external_reference', 'evidence_label']));
-            $result = $this->conditions->create($companyId, $vehicleId, array_merge($evidence, [
+            $result = $this->conditions->create($companyId, $vehicleId, [
                 'panel_code' => $panel, 'damage_type_code' => $type, 'severity_code' => $severity,
                 'zone_code' => VehicleDamage::zone($panel), 'description' => $note, 'discovered_at' => $incident['discovered_at'],
-            ]), $actor, $context + ['recovery_exception_id' => null]);
+            ], $actor, $context + ['recovery_exception_id' => null]);
             $this->requireSuccess($result);
             $itemId = (int) $result['id'];
+            $evidenceItemId = $itemId;
         } else {
             $itemId = $this->positiveId($area['vehicle_damage_item_id'] ?? null) ?? 0;
             $evidenceItemId = $itemId;
@@ -268,14 +269,16 @@ class VehicleDamageIncidentService
                 $result = $this->conditions->worsen($companyId, $vehicleId, $itemId, ['severity_code' => $severity, 'note' => $note, 'occurred_at' => $incident['occurred_at']], $actor, $context);
             }
             $this->requireSuccess($result);
-            if (! empty($area['file_id']) || ! empty($area['image_id']) || ! empty($area['external_reference'])) {
-                $this->requireSuccess($this->conditions->attachEvidence($companyId, $vehicleId, $evidenceItemId, $area, $actor));
-            }
         }
-        $this->membership($companyId, $incidentId, $itemId, $effect, $area, $note, $actor);
+        $condition = $this->items->item($companyId, $vehicleId, $itemId);
+        $exactIdentity = ($condition['panel_code'] ?? null) === $panel && ($condition['damage_type_code'] ?? null) === $type;
+        $membershipId = $this->membership($companyId, $incidentId, $itemId, $effect, $area, $note, $actor, $provenance && $exactIdentity ? (int) $result['condition_event_id'] : null);
+        if (! empty($area['file_id']) || ! empty($area['image_id']) || ! empty($area['external_reference'])) {
+            $this->requireSuccess($this->conditions->attachEvidence($companyId, $vehicleId, $evidenceItemId, $area, $actor, $provenance ? $membershipId : null));
+        }
     }
 
-    private function membership(int $companyId, int $incidentId, int $itemId, string $effect, array $snapshot, ?string $note, int $actor): void
+    private function membership(int $companyId, int $incidentId, int $itemId, string $effect, array $snapshot, ?string $note, int $actor, ?int $conditionEventId = null): int
     {
         $values = [
             'company_id' => $companyId, 'vehicle_damage_incident_id' => $incidentId, 'vehicle_damage_item_id' => $itemId,
@@ -283,8 +286,12 @@ class VehicleDamageIncidentService
             'damage_type_code' => $snapshot['damage_type_code'], 'severity_code' => $snapshot['severity_code'],
             'note' => $note, 'created_by' => $actor, 'created_at' => date('Y-m-d H:i:s'),
         ];
+        if ($conditionEventId !== null) {
+            $values['condition_event_id'] = $conditionEventId;
+        }
         $id = $this->incidents->insertMembership($values);
         $this->audit('vehicle_damage_incident_items', $id, null, $values, $actor);
+        return $id;
     }
 
     private function incidentValues(int $companyId, int $vehicleId, array $data, int $actor): array

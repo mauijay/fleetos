@@ -28,9 +28,19 @@ class VehicleDamageIncidentRepository
 
     public function insertMembership(array $values): int
     {
-        $this->db->table('vehicle_damage_incident_items')->insert($values);
+        if (($values['condition_event_id'] ?? null) !== null || ($values['basis_snapshot'] ?? null) !== null) {
+            (new VehicleDamageOccurrenceRepository($this->db))->validateMembership($values);
+        }
+        if (! $this->db->table('vehicle_damage_incident_items')->insert($values)) {
+            throw new \RuntimeException('Damage occurrence membership could not be recorded.');
+        }
 
         return (int) $this->db->insertID();
+    }
+
+    public function provenanceAvailable(): bool
+    {
+        return (new VehicleDamageOccurrenceRepository($this->db))->available();
     }
 
     /** One original incident per condition; callers serialize creation with the vehicle lock. */
