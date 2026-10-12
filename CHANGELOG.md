@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.34.1 — Handoff Condition Presentation
+
+Release date: 2026-10-11
+
+### Fixed
+
+- Show applicable pre-handoff staging/preparation condition evidence when a guest
+  handoff has no recorded charge/fuel or cleanliness value.
+- Keep genuine handoff-specific values authoritative and identify prior evidence
+  by its staging source and occurrence time.
+- Preserve truthful partial and missing-observation states.
+
+### Safety
+
+- No migration or schema change; latest App migration remains 000035.
+- Persistence, movement, custody, readiness, and schedule authorities remain
+  unchanged; GET rendering remains read-only.
+
 ## v0.34.0 — Paired Historical Movement Repair
 
 Release date: 2026-10-11
