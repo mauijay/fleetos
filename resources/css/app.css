@@ -3378,6 +3378,22 @@ h3 {
   font-weight: 500;
 }
 
+.movement-main .readiness-panel,
+.movement-main .position-panel,
+.trip-fact .movement-fact-summary {
+  overflow-wrap: anywhere;
+}
+
+.handoff-condition {
+  margin-top: 16px;
+  overflow-wrap: anywhere;
+}
+
+.handoff-condition .movement-fact-summary {
+  margin-top: 8px;
+  margin-bottom: 16px;
+}
+
 .operational-facts .briefing-card + .issue-filters {
   margin-top: 18px;
 }

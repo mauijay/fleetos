@@ -713,6 +713,30 @@ final class MovementOperationalFactsViewTest extends CIUnitTestCase
         $this->assertStringContainsString('Ready', $html);
     }
 
+    public function testHandoffConditionCardLabelsPriorEvidenceAndEscapesProvenance(): void
+    {
+        $observation = ['origin' => 'staging', 'value_label' => '80%', 'provenance_label' => 'From staging at Sep 3, 2026 7:15 AM Honolulu', 'source_label' => 'Manual', 'actor_label' => '<synthetic-operator>'];
+        $facts = $this->facts(['condition_evidence' => ['energy_percent' => $observation]]);
+        $html = $this->render('pickup', $facts, false, [], ['tripFacts' => ['pickup' => $facts, 'return' => null]]);
+        $condition = substr($html, strpos($html, '<div class="handoff-condition">'));
+        $condition = strstr($condition, '</article>', true);
+        $this->assertStringContainsString('Last confirmed before handoff', $condition);
+        $this->assertStringContainsString('80%', $condition);
+        $this->assertStringContainsString('From staging at Sep 3, 2026 7:15 AM Honolulu', $condition);
+        $this->assertStringContainsString('&lt;synthetic-operator&gt;', $condition);
+        $this->assertStringNotContainsString('<dt>Cleanliness</dt>', $condition);
+        $this->assertStringNotContainsString('Not captured', $condition);
+        $observation['origin'] = 'handoff';
+        $facts['condition_evidence'] = ['energy_percent' => $observation];
+        $direct = $this->render('pickup', $facts, false, [], ['tripFacts' => ['pickup' => $facts, 'return' => null]]);
+        $this->assertStringContainsString('Confirmed at handoff', $direct);
+        $this->assertStringNotContainsString('Last confirmed before handoff', $direct);
+        $facts['condition_evidence'] = [];
+        $none = $this->render('pickup', $facts, false, [], ['tripFacts' => ['pickup' => $facts, 'return' => null]]);
+        $this->assertStringContainsString('No prior observation', $none);
+        $this->assertStringNotContainsString('Not captured', $none);
+    }
+
     public function testCorrectionModePrefillsActiveFactsAndMissingEnergyIsExplicit(): void
     {
         $facts = $this->facts(['energy_value' => 'Not captured']);

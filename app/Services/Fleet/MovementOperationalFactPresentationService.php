@@ -39,6 +39,7 @@ class MovementOperationalFactPresentationService
 
         $eventCode = (string) $facts['event_code'];
         $isHandoff = $eventCode === 'actual_handoff';
+        $conditionEvidence = $isHandoff ? $this->handoffConditionEvidence($facts) : null;
         $energyKind = (string) ($facts['energy_kind'] ?? 'unknown');
         $energyLabel = in_array($energyKind, ['gasoline', 'diesel'], true) ? 'Fuel' : (in_array($energyKind, ['electric'], true) ? 'Charge' : 'Energy');
         $locationClass = (string) ($facts['location_class'] ?? 'unknown');
@@ -64,9 +65,10 @@ class MovementOperationalFactPresentationService
             'airport_position_line' => $parkingPresentation['position_line'] ?? null,
             'airport_location_label' => $parkingPresentation['location_label'] ?? null,
             'approved_turo_garage' => $parkingPresentation['approved_turo_garage'] ?? null,
-            'cleanliness_label' => $facts['cleanliness'] === null ? 'Not captured' : ucfirst((string) $facts['cleanliness']),
+            'condition_evidence' => $conditionEvidence,
+            'cleanliness_label' => $isHandoff ? ($conditionEvidence['cleanliness']['value_label'] ?? 'No prior observation') : ($facts['cleanliness'] === null ? 'Not captured' : ucfirst((string) $facts['cleanliness'])),
             'energy_label' => $energyLabel,
-            'energy_value' => $facts['energy_percent'] === null ? 'Not captured' : (string) $facts['energy_percent'] . '%',
+            'energy_value' => $isHandoff ? ($conditionEvidence['energy_percent']['value_label'] ?? 'No prior observation') : ($facts['energy_percent'] === null ? 'Not captured' : (string) $facts['energy_percent'] . '%'),
             'source_label' => $facts['source'] === 'checklist_operator' ? 'Manual' : ucwords(str_replace('_', ' ', (string) $facts['source'])),
             'actor_label' => trim((string) ($facts['actor_username'] ?? '')) ?: 'User #' . (int) $facts['actor_user_id'],
             'form_data' => [
@@ -83,6 +85,33 @@ class MovementOperationalFactPresentationService
                 'note' => $facts['note'],
             ],
         ]);
+    }
+
+    /** @return array<string, array<string, mixed>> */
+    private function handoffConditionEvidence(array $facts): array
+    {
+        $prior = $facts['cleanliness'] === null || $facts['energy_percent'] === null
+            ? $this->repo()->preHandoffConditionEvidence((int) $facts['event_id']) : [];
+        $evidence = [];
+        foreach (['cleanliness', 'energy_percent'] as $field) {
+            $atHandoff = $facts[$field] !== null;
+            $source = $atHandoff ? $facts : ($prior[$field] ?? null);
+            if ($source === null) {
+                continue;
+            }
+            $evidence[$field] = [
+                'value_label' => $field === 'cleanliness' ? ucfirst((string) $source[$field]) : (string) $source[$field] . '%',
+                'origin' => $atHandoff ? 'handoff' : 'staging',
+                'event_id' => $source['event_id'],
+                'assessment_id' => $source['assessment_id'],
+                'occurred_at' => $source['occurred_at'],
+                'provenance_label' => ($atHandoff ? 'At handoff at ' : 'From staging at ') . date('M j, Y g:i A', strtotime((string) $source['occurred_at'])) . ' Honolulu',
+                'source_label' => $source['source'] === 'checklist_operator' ? 'Manual' : ucwords(str_replace('_', ' ', (string) $source['source'])),
+                'actor_label' => trim((string) ($source['actor_username'] ?? '')) ?: 'User #' . (int) $source['actor_user_id'],
+            ];
+        }
+
+        return $evidence;
     }
 
     /** @return array<string, mixed> */

@@ -2206,6 +2206,145 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
         $this->assertSame(25, (int) $activeAssessment['energy_percent']);
     }
 
+    public function testHandoffConditionUsesStagingEvidenceWithoutWritingOrPrefillingHandoff(): void
+    {
+        $this->connection->table('vehicle_operational_profiles')->insert(['fleet_vehicle_id' => 10, 'energy_kind' => 'electric', 'created_by' => 7, 'updated_by' => 7]);
+        $stage = $this->events->record(10, 100, 'vehicle_staged', 'pickup', '2026-09-03 07:15:00', 'airport_hnl', 'Level 7 / Row F', 'checklist_operator', 7);
+        $assessment = $this->assessments->record(10, 100, $stage, 'pickup', 'clean', 80, '2026-09-03 07:15:00', 'checklist_operator', 7);
+        $handoff = $this->events->record(10, 100, 'actual_handoff', 'pickup', '2026-09-03 08:05:00', 'airport_hnl', 'Level 7 / Row F', 'checklist_operator', 7);
+        // Late record entry must not become the occurrence time shown to the operator.
+        $this->connection->table('trip_movement_events')->where('id', $stage)->update(['created_at' => '2026-09-04 12:00:00']);
+        $before = $this->conditionBusinessRows();
+        $presenter = new MovementOperationalFactPresentationService($this->repository);
+        foreach ([$presenter->tripFacts(100)['pickup'], $presenter->latestForTrip(100)] as $facts) {
+            $this->assertSame($handoff, (int) $facts['event_id']);
+            $this->assertNull($facts['assessment_id']);
+            $this->assertNull($facts['cleanliness']);
+            $this->assertNull($facts['energy_percent']);
+            $this->assertNull($facts['form_data']['cleanliness']);
+            $this->assertNull($facts['form_data']['energy_percent']);
+            $this->assertNull($facts['form_data']['assessment_id']);
+            $this->assertSame('Clean', $facts['cleanliness_label']);
+            $this->assertSame('80%', $facts['energy_value']);
+            $evidence = $facts['condition_evidence']['energy_percent'];
+            $this->assertSame($assessment, (int) $evidence['assessment_id']);
+            $this->assertSame($stage, (int) $evidence['event_id']);
+            $this->assertSame('staging', $evidence['origin']);
+            $this->assertSame('From staging at Sep 3, 2026 7:15 AM Honolulu', $evidence['provenance_label']);
+            $this->assertSame('Manual', $evidence['source_label']);
+            $this->assertSame('operator', $evidence['actor_label']);
+        }
+        $this->assertSame($before, $this->conditionBusinessRows());
+    }
+
+    #[DataProvider('handoffConditionControls')]
+    public function testHandoffConditionScopeAndPartialControls(string $control, ?string $cleanliness, ?int $energy): void
+    {
+        $this->connection->table('turo_trips_normalized')->insertBatch([
+            ['id' => 101, 'fleet_vehicle_id' => 10, 'deleted_at' => null],
+            ['id' => 102, 'fleet_vehicle_id' => 10, 'deleted_at' => null],
+        ]);
+        $trip = $control === 'previous-trip' ? 101 : ($control === 'future-trip' ? 102 : 100);
+        $stageAt = $control === 'post-handoff-event' ? '2026-09-03 09:00:00' : '2026-09-03 07:15:00';
+        $capturedAt = $control === 'post-handoff-assessment' ? '2026-09-03 09:00:00' : $stageAt;
+        $stage = $this->events->record(10, $trip, 'vehicle_staged', 'pickup', $stageAt, 'home', null, 'checklist_operator', 7);
+        $assessment = $this->assessments->record(10, $trip, $stage, 'pickup', $control === 'charge-only' || $control === 'zero-charge' ? null : 'clean', $control === 'cleanliness-only' ? null : ($control === 'zero-charge' ? 0 : 80), $capturedAt, 'checklist_operator', 7);
+        $handoff = $this->events->record(10, 100, 'actual_handoff', 'pickup', '2026-09-03 08:05:00', 'home', null, 'checklist_operator', 7);
+        if ($control === 'void-assessment') {
+            $this->assessments->void($assessment, 8, 'Synthetic invalid assessment');
+        } elseif ($control === 'void-event') {
+            $this->events->void($stage, 8, 'Synthetic invalid stage');
+        } elseif ($control === 'superseded-assessment') {
+            $replacement = $this->assessments->record(10, $trip, $stage, 'pickup', null, null, $stageAt, 'operator_correction', 8);
+            $this->connection->table('movement_assessments')->where('id', $replacement)->update(['supersedes_assessment_id' => $assessment]);
+        } elseif ($control === 'superseded-event') {
+            $replacement = $this->events->record(10, $trip, 'vehicle_staged', 'pickup', $stageAt, 'home', null, 'operator_correction', 8);
+            $this->connection->table('trip_movement_events')->where('id', $replacement)->update(['supersedes_event_id' => $stage]);
+        } elseif (in_array($control, ['wrong-vehicle', 'wrong-company', 'wrong-assessment-trip', 'wrong-movement'], true)) {
+            $change = match ($control) {
+                'wrong-vehicle' => ['fleet_vehicle_id' => 20],
+                'wrong-company' => ['company_id' => 2],
+                'wrong-assessment-trip' => ['turo_trip_normalized_id' => 101],
+                default => ['movement_type' => 'return'],
+            };
+            $this->connection->table('movement_assessments')->where('id', $assessment)->update($change);
+        } elseif ($control === 'vehicle-wide') {
+            $this->connection->table('trip_movement_events')->where('id', $stage)->update(['event_code' => 'vehicle_readiness_observed', 'turo_trip_normalized_id' => null, 'movement_type' => null]);
+            $this->connection->table('movement_assessments')->where('id', $assessment)->update(['turo_trip_normalized_id' => null, 'movement_type' => 'current']);
+        } elseif (in_array($control, ['intervening-recovery', 'intervening-other-trip', 'voided-boundary'], true)) {
+            $boundary = $this->events->record(10, 101, $control === 'intervening-other-trip' ? 'vehicle_staged' : 'vehicle_recovered', $control === 'intervening-other-trip' ? 'pickup' : 'return', '2026-09-03 07:30:00', 'home', null, 'checklist_operator', 7);
+            if ($control === 'voided-boundary') {
+                $this->events->void($boundary, 8, 'Synthetic invalid boundary');
+            }
+        }
+        $before = $this->conditionBusinessRows();
+        $evidence = $this->repository->preHandoffConditionEvidence($handoff);
+        $this->assertSame($cleanliness, $evidence['cleanliness']['cleanliness'] ?? null);
+        $this->assertSame($energy, isset($evidence['energy_percent']) ? (int) $evidence['energy_percent']['energy_percent'] : null);
+        if ($control !== 'post-handoff-event') {
+            $facts = (new MovementOperationalFactPresentationService($this->repository))->tripFacts(100)['pickup'];
+            $this->assertSame($cleanliness === null ? 'No prior observation' : ucfirst($cleanliness), $facts['cleanliness_label']);
+            $this->assertSame($energy === null ? 'No prior observation' : $energy . '%', $facts['energy_value']);
+        }
+        $this->assertSame($before, $this->conditionBusinessRows());
+    }
+
+    public static function handoffConditionControls(): iterable
+    {
+        foreach (['previous-trip', 'future-trip', 'post-handoff-event', 'post-handoff-assessment', 'void-assessment', 'void-event', 'superseded-assessment', 'superseded-event', 'wrong-vehicle', 'wrong-company', 'wrong-assessment-trip', 'wrong-movement', 'vehicle-wide', 'intervening-recovery', 'intervening-other-trip'] as $control) {
+            yield $control => [$control, null, null];
+        }
+        yield 'charge-only' => ['charge-only', null, 80];
+        yield 'cleanliness-only' => ['cleanliness-only', 'clean', null];
+        yield 'zero-charge' => ['zero-charge', null, 0];
+        yield 'voided-boundary' => ['voided-boundary', 'clean', 80];
+    }
+
+    public function testHandoffConditionPrioritizesGenuineHandoffValuesIndependently(): void
+    {
+        $stage = $this->events->record(10, 100, 'vehicle_staged', 'pickup', '2026-09-03 07:15:00', 'home', null, 'checklist_operator', 7);
+        $this->assessments->record(10, 100, $stage, 'pickup', 'clean', 80, '2026-09-03 07:15:00', 'checklist_operator', 7);
+        $handoff = $this->events->record(10, 100, 'actual_handoff', 'pickup', '2026-09-03 08:05:00', 'home', null, 'checklist_operator', 7);
+        $assessment = $this->assessments->record(10, 100, $handoff, 'pickup', 'dirty', null, '2026-09-03 08:05:00', 'checklist_operator', 8);
+        $presenter = new MovementOperationalFactPresentationService($this->repository);
+        $facts = $presenter->tripFacts(100)['pickup'];
+        $this->assertSame('Dirty', $facts['cleanliness_label']);
+        $this->assertSame('handoff', $facts['condition_evidence']['cleanliness']['origin']);
+        $this->assertSame('staging', $facts['condition_evidence']['energy_percent']['origin']);
+        $this->assertSame('80%', $facts['energy_value']);
+        $this->assertNull($facts['form_data']['energy_percent']);
+        $this->connection->table('movement_assessments')->where('id', $assessment)->update(['energy_percent' => 61]);
+        $facts = $presenter->tripFacts(100)['pickup'];
+        $this->assertSame('61%', $facts['energy_value']);
+        $this->assertSame('handoff', $facts['condition_evidence']['energy_percent']['origin']);
+    }
+
+    public function testHandoffConditionSelectsNearestSupportedObservationForEachField(): void
+    {
+        $first = $this->events->record(10, 100, 'vehicle_staged', 'pickup', '2026-09-03 07:00:00', 'home', null, 'checklist_operator', 7);
+        $this->assessments->record(10, 100, $first, 'pickup', 'dirty', 40, '2026-09-03 07:00:00', 'checklist_operator', 7);
+        $second = $this->events->record(10, 100, 'vehicle_staged', 'pickup', '2026-09-03 07:45:00', 'home', null, 'checklist_operator', 7);
+        $this->assessments->record(10, 100, $second, 'pickup', 'clean', null, '2026-09-03 07:45:00', 'checklist_operator', 7);
+        $handoff = $this->events->record(10, 100, 'actual_handoff', 'pickup', '2026-09-03 08:05:00', 'home', null, 'checklist_operator', 7);
+        $evidence = $this->repository->preHandoffConditionEvidence($handoff);
+        $this->assertSame($second, (int) $evidence['cleanliness']['event_id']);
+        $this->assertSame($first, (int) $evidence['energy_percent']['event_id']);
+        // Equal occurrence times qualify; late record-entry time is irrelevant.
+        $this->connection->table('trip_movement_events')->where('id', $second)->update(['occurred_at' => '2026-09-03 08:05:00']);
+        $this->assertSame($second, (int) $this->repository->preHandoffConditionEvidence($handoff)['cleanliness']['event_id']);
+    }
+
+    /** @return array<string, list<array<string, mixed>>> */
+    private function conditionBusinessRows(): array
+    {
+        $rows = [];
+        foreach (['trip_movement_events', 'movement_assessments', 'operational_fact_audits'] as $table) {
+            $rows[$table] = $this->connection->table($table)->orderBy('id')->get()->getResultArray();
+        }
+
+        return $rows;
+    }
+
     public function testLatestPickupFactsUseHandoffSemanticsAndElectricCharge(): void
     {
         $this->connection->table('vehicle_operational_profiles')->insert(['fleet_vehicle_id' => 10, 'energy_kind' => 'electric', 'created_by' => 7, 'updated_by' => 7]);
@@ -2242,8 +2381,8 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
         $this->assertNull($eventOnlyPickup['assessment_id']);
         $this->assertSame('Guest handoff recorded', $eventOnlyPickup['event_title']);
         $this->assertSame('Sep 3, 2026 8:05 AM', $eventOnlyPickup['occurred_at_label']);
-        $this->assertSame('Not captured', $eventOnlyPickup['cleanliness_label']);
-        $this->assertSame('Not captured', $eventOnlyPickup['energy_value']);
+        $this->assertSame('No prior observation', $eventOnlyPickup['cleanliness_label']);
+        $this->assertSame('No prior observation', $eventOnlyPickup['energy_value']);
 
         $olderAssessmentId = $this->assessments->record(10, 100, $handoffId, 'pickup', 'dirty', 25, '2026-09-03 08:06:00', 'checklist_operator', 7);
         $latestAssessmentId = $this->assessments->record(10, 100, $handoffId, 'pickup', 'clean', 82, '2026-09-03 08:07:00', 'checklist_operator', 8);
@@ -2312,8 +2451,8 @@ final class OperationalFactsServiceTest extends CIUnitTestCase
         $this->assertSame('Guest handoff recorded', $facts['event_title']);
         $this->assertSame('Sep 18, 2026 5:00 PM', $facts['occurred_at_label']);
         $this->assertSame('Unknown', $facts['location_class_label']);
-        $this->assertSame('Not captured', $facts['cleanliness_label']);
-        $this->assertSame('Not captured', $facts['energy_value']);
+        $this->assertSame('No prior observation', $facts['cleanliness_label']);
+        $this->assertSame('No prior observation', $facts['energy_value']);
 
         $location = (new CurrentVehicleLocationService($this->repository))->resolve(10, new DateTimeImmutable('2026-09-18 18:00:00'));
         $this->assertSame($eventId, (int) $location['event_id']);

@@ -358,10 +358,15 @@ $tripFacts ??= [
                                 <p class="trip-fact__time"><?= esc((string) $fact['occurred_at_label']) ?></p>
                                 <dl class="movement-fact-summary">
                                     <div><dt><?= esc((string) $fact['location_label']) ?></dt><dd><?= esc((string) $fact['location_class_label']) ?><?php if (($fact['airport_location_label'] ?? null) !== null): ?><span class="movement-fact-detail movement-fact-garage"><?= esc((string) $fact['airport_location_label']) ?></span><?php elseif ($fact['location_detail_value'] !== null): ?><span class="movement-fact-detail"><?= esc((string) $fact['location_detail_value']) ?></span><?php endif; ?></dd></div>
-                                    <div><dt>Cleanliness</dt><dd><?= esc((string) $fact['cleanliness_label']) ?></dd></div>
-                                    <div><dt><?= esc((string) $fact['energy_label']) ?></dt><dd><?= esc((string) $fact['energy_value']) ?></dd></div>
+                                    <?php if (($fact['condition_evidence'] ?? null) === null): ?>
+                                        <div><dt>Cleanliness</dt><dd><?= esc((string) $fact['cleanliness_label']) ?></dd></div>
+                                        <div><dt><?= esc((string) $fact['energy_label']) ?></dt><dd><?= esc((string) $fact['energy_value']) ?></dd></div>
+                                    <?php endif; ?>
                                     <div><dt>Provenance</dt><dd><?= esc((string) $fact['source_label']) ?> · <?= esc((string) $fact['actor_label']) ?></dd></div>
                                 </dl>
+                                <?php if (($fact['condition_evidence'] ?? null) !== null): ?>
+                                    <?= view('trip_movement_checklists/_handoff_condition', ['fact' => $fact]) ?>
+                                <?php endif; ?>
                                 <?php if ($tripIsOperational && $factType === 'return' && ($fact['event_code'] ?? null) === 'vehicle_recovered'): ?>
                                     <details class="secondary-disclosure"><summary>Void recovery</summary>
                                         <form class="issue-filters" action="/operations/checklists/<?= (int) $checklist['id'] ?>/recover-vehicle/void" method="post">

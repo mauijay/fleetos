@@ -25,7 +25,7 @@ if ($directory === false || $build === false || ! str_starts_with(strtolower($di
 }
 $scenario = $seedOnly || $renderOnly ? ($argv[2] ?? '') : ($_GET['scenario'] ?? 'historical');
 error_log('Synthetic movement start: ' . ($_SERVER['REQUEST_METHOD'] ?? 'CLI seed') . ' ' . ($_SERVER['REQUEST_URI'] ?? '') . ' / fixture ' . $scenario);
-if (! in_array($scenario, ['historical', 'recovery', 'later', 'valid', 'handoff', 'position', 'guest', 'schedule', 'schedule-early', 'schedule-equal'], true)) {
+if (! in_array($scenario, ['historical', 'recovery', 'later', 'valid', 'handoff', 'position', 'guest', 'schedule', 'schedule-early', 'schedule-equal', 'condition-both', 'condition-charge', 'condition-cleanliness', 'condition-none', 'condition-direct', 'condition-mixed', 'condition-long'], true)) {
     http_response_code(400);
     exit;
 }
@@ -50,6 +50,8 @@ if (! $db->tableExists('trip_movement_checklists')) {
             $db->table('trip_movement_checklists')->where('id', 302)->delete();
             $db->table('trip_movement_checklists')->where('id', 102)->update(['scheduled_at' => '2026-10-07 08:30:00']);
         }
+    } elseif (str_starts_with($scenario, 'condition-')) {
+        \Tests\Support\HandoffConditionPresentationFixture::seed($db, $scenario);
     } else {
         \Tests\Support\MovementPresentationFixture::seed($db, $scenario);
     }

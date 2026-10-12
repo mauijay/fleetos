@@ -1060,6 +1060,61 @@ class OperationalFactsRepository
         return array_values($facts);
     }
 
+    /**
+     * Read-only condition evidence in the handoff's uninterrupted pickup chain.
+     * One query supplies both fields; no vehicle-wide or other-trip fallback.
+     * @return array<string, array<string, mixed>>
+     */
+    public function preHandoffConditionEvidence(int $handoffEventId): array
+    {
+        $eventTable = $this->db->prefixTable('trip_movement_events');
+        $assessmentTable = $this->db->prefixTable('movement_assessments');
+        $rows = $this->db->table('trip_movement_events staging')
+            ->select('assessments.id AS assessment_id, assessments.cleanliness, assessments.energy_percent, assessments.source, assessments.actor_user_id, users.username AS actor_username, staging.id AS event_id, staging.occurred_at')
+            ->join('trip_movement_events handoffs', 'handoffs.company_id = staging.company_id AND handoffs.fleet_vehicle_id = staging.fleet_vehicle_id AND handoffs.turo_trip_normalized_id = staging.turo_trip_normalized_id')
+            ->join('movement_assessments assessments', 'assessments.trip_movement_event_id = staging.id AND assessments.company_id = staging.company_id AND assessments.fleet_vehicle_id = staging.fleet_vehicle_id AND assessments.turo_trip_normalized_id = staging.turo_trip_normalized_id')
+            ->join('users', 'users.id = assessments.actor_user_id', 'left')
+            ->where('handoffs.id', $handoffEventId)
+            ->where('handoffs.event_code', 'actual_handoff')
+            ->where('handoffs.movement_type', 'pickup')
+            ->where('handoffs.voided_at', null)
+            ->where('staging.event_code', 'vehicle_staged')
+            ->where('staging.movement_type', 'pickup')
+            ->where('staging.voided_at', null)
+            ->where('assessments.movement_type', 'pickup')
+            ->where('assessments.voided_at', null)
+            ->where('staging.occurred_at <= handoffs.occurred_at', null, false)
+            ->where('assessments.captured_at <= handoffs.occurred_at', null, false)
+            ->groupStart()->where('assessments.cleanliness IS NOT NULL', null, false)
+            ->orWhere('assessments.energy_percent IS NOT NULL', null, false)->groupEnd()
+            ->where("NOT EXISTS (SELECT 1 FROM {$eventTable} replacements WHERE replacements.supersedes_event_id = staging.id AND replacements.voided_at IS NULL)", null, false)
+            ->where("NOT EXISTS (SELECT 1 FROM {$assessmentTable} replacements WHERE replacements.supersedes_assessment_id = assessments.id AND replacements.voided_at IS NULL)", null, false)
+            ->where("NOT EXISTS (SELECT 1 FROM {$eventTable} boundary
+                WHERE boundary.company_id = staging.company_id AND boundary.fleet_vehicle_id = staging.fleet_vehicle_id
+                AND boundary.voided_at IS NULL
+                AND boundary.event_code IN ('vehicle_staged', 'actual_handoff', 'actual_return', 'vehicle_recovered', 'guest_return_staged')
+                AND (boundary.turo_trip_normalized_id <> handoffs.turo_trip_normalized_id OR boundary.event_code <> 'vehicle_staged')
+                AND (boundary.occurred_at > staging.occurred_at OR (boundary.occurred_at = staging.occurred_at AND boundary.id > staging.id))
+                AND (boundary.occurred_at < handoffs.occurred_at OR (boundary.occurred_at = handoffs.occurred_at AND boundary.id < handoffs.id))
+                AND NOT EXISTS (SELECT 1 FROM {$eventTable} replacements WHERE replacements.supersedes_event_id = boundary.id AND replacements.voided_at IS NULL))", null, false)
+            ->orderBy('staging.occurred_at', 'DESC')->orderBy('staging.id', 'DESC')
+            ->orderBy('assessments.captured_at', 'DESC')->orderBy('assessments.id', 'DESC')
+            ->get()->getResultArray();
+        $evidence = [];
+        foreach ($rows as $row) {
+            foreach (['cleanliness', 'energy_percent'] as $field) {
+                if (! isset($evidence[$field]) && $row[$field] !== null) {
+                    $evidence[$field] = $row;
+                }
+            }
+            if (count($evidence) === 2) {
+                break;
+            }
+        }
+
+        return $evidence;
+    }
+
     private function movementEventSelect(): string
     {
         $columns = 'id, fleet_vehicle_id, turo_trip_normalized_id, event_code, movement_type, occurred_at, location_class, location_detail, source, note';
