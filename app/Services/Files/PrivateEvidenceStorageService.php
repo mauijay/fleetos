@@ -261,7 +261,7 @@ class PrivateEvidenceStorageService
                 throw new RuntimeException('Private storage escapes its trusted root.');
             }
             // Existing common upload directories retain legacy permissions.
-            if ($mode === 0700 && str_contains(str_replace('\\', '/', $path), '/repair-documents')) {
+            if ($mode === 0700 && (str_contains(str_replace('\\', '/', $path), '/repair-documents') || str_contains(str_replace('\\', '/', $path), '/damage-evidence'))) {
                 if (! chmod($path, $mode)) {
                     throw new RuntimeException('Private directory permissions could not be established.');
                 }

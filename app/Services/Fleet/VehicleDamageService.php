@@ -383,7 +383,42 @@ class VehicleDamageService
         } catch (Throwable $exception) {
             return $this->failure('wheel', $exception->getMessage());
         }
-        return $this->updateWithEvent($item, ['updated_by' => $actorUserId, 'updated_at' => date('Y-m-d H:i:s')], 'observed_existing', $note, $actorUserId, $context, expectedCondition: $expected['expected_condition_state'] ?? null, expectedWheel: $expected['expected_wheel_state'] ?? null);
+        try {
+            $observedAt = isset($expected['observed_at']) ? $this->dateTime((string) $expected['observed_at']) : null;
+        } catch (\InvalidArgumentException $exception) {
+            return $this->failure('observed_at', $exception->getMessage());
+        }
+        return $this->updateWithEvent($item, ['updated_by' => $actorUserId, 'updated_at' => date('Y-m-d H:i:s')], 'observed_existing', $note, $actorUserId, $context, occurredAt: $observedAt, expectedCondition: $expected['expected_condition_state'] ?? null, expectedWheel: $expected['expected_wheel_state'] ?? null);
+    }
+
+    /** Trusted occurrence orchestration; reuse Damage evidence ownership without another physical event. */
+    public function writeOccurrenceEvidenceInTransaction(int $company, int $vehicle, int $condition, int $membership, array $data, int $actor): int
+    {
+        if ($this->db->transDepth < 1 || $actor < 1) {
+            throw new \InvalidArgumentException('An authenticated evidence transaction is required.');
+        }
+        $this->repo()->lockVehicle($company, $vehicle);
+        $this->repo()->lockItem($company, $vehicle, $condition);
+        $original = $this->repo()->item($company, $vehicle, $condition);
+        $canonical = $this->repo()->canonicalItem($company, $vehicle, $condition);
+        if ($original === null || $canonical === null) {
+            throw new \InvalidArgumentException('Owned occurrence condition is unavailable.');
+        }
+        if (VehicleWheelEpisodeGuard::participates($original) || VehicleWheelEpisodeGuard::participates($canonical)) {
+            $guard = new VehicleWheelEpisodeGuard($this->db);
+            $guard->assertRequest($canonical, array_intersect_key($original, array_flip(['panel_code', 'zone_code', 'damage_type_code'])));
+            $state = $guard->resolve($company, $vehicle, $canonical['panel_code'], true);
+            $guard->assertState($state);
+            if (in_array($canonical['status_code'], ['open', 'accepted_unrepaired'], true)) {
+                $guard->assertActive($canonical, $state);
+            }
+        }
+        $id = $this->addEvidence($company, $vehicle, $condition, $data, $actor, date('Y-m-d H:i:s'), $membership);
+        if ($id === null) {
+            throw new \InvalidArgumentException('Supply one private occurrence evidence reference.');
+        }
+        $this->audit('updated', $condition, null, ['occurrence_membership_id' => $membership, 'evidence_id' => $id], $actor);
+        return $id;
     }
 
     /** Evidence stays attached to its authorized original parent, including historical provenance. */
@@ -613,7 +648,7 @@ class VehicleDamageService
         ];
     }
 
-    private function addEvidence(int $companyId, int $vehicleId, int $itemId, array $data, int $actorUserId, string $now, ?int $occurrenceMembershipId = null): void
+    private function addEvidence(int $companyId, int $vehicleId, int $itemId, array $data, int $actorUserId, string $now, ?int $occurrenceMembershipId = null): ?int
     {
         $fileId = $this->nullableId($data['file_id'] ?? null);
         $imageId = $this->nullableId($data['image_id'] ?? null);
@@ -623,7 +658,7 @@ class VehicleDamageService
         }
         $provided = ($fileId === null ? 0 : 1) + ($imageId === null ? 0 : 1) + ($external === '' ? 0 : 1);
         if ($provided === 0) {
-            return;
+            return null;
         }
         if ($provided > 1) {
             throw new \InvalidArgumentException('Add one evidence reference at a time.');
@@ -648,7 +683,7 @@ class VehicleDamageService
             (new \App\Repositories\VehicleDamageOccurrenceRepository($this->db))->validateEvidenceLink($companyId, $vehicleId, $itemId, $occurrenceMembershipId);
             $values['vehicle_damage_incident_item_id'] = $occurrenceMembershipId;
         }
-        $this->repo()->insertEvidence($values);
+        return $this->repo()->insertEvidence($values);
     }
 
     private function dateTime(string $value): string

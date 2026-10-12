@@ -64,6 +64,35 @@ class VehicleDamageIncidentService
         });
     }
 
+    /** Explicit occurrence orchestration inside the caller's vehicle transaction. */
+    public function writeOccurrenceInTransaction(int $company, int $vehicle, array $data, array $area, int $actor, string $basis): array
+    {
+        if ($this->db->transDepth < 1 || $actor < 1) {
+            throw new InvalidArgumentException('An authenticated occurrence transaction is required.');
+        }
+        $this->items->lockVehicle($company, $vehicle);
+        $values = $this->incidentValues($company, $vehicle, $data, $actor);
+        $id = (int) ($data['incident_id'] ?? 0);
+        if ($id > 0) {
+            $incident = $this->requireIncident($company, $vehicle, $id);
+            if (! hash_equals(self::fingerprint($incident), (string) ($data['expected_incident_state'] ?? ''))) {
+                throw new InvalidArgumentException('Incident changed. Reload before adding an occurrence.');
+            }
+            foreach (['turo_trip_normalized_id', 'trip_movement_event_id', 'vehicle_recovery_exception_id', 'discovered_at', 'occurred_at', 'attribution_type'] as $field) {
+                if ((string) $incident[$field] !== (string) $values[$field]) {
+                    throw new InvalidArgumentException('Selected incident context must match the explicit occurrence.');
+                }
+            }
+            $effects = array_column($this->incidents->memberships($company, $vehicle, $id), 'effect_code');
+        } else {
+            $effects = [];
+            $id = $this->incidents->insert($values);
+            $this->audit('vehicle_damage_incidents', $id, null, $values, $actor);
+        }
+        $this->causalMemberships($values['attribution_type'], [...$effects, $area['effect_code']]);
+        return $this->area($company, $vehicle, $id, $area, $actor, $basis);
+    }
+
     /** Read-only confirmation data for backfilling an original incident, never a new condition. */
     public function historicalOriginalPreview(int $companyId, int $vehicleId, int $itemId): array
     {
@@ -248,7 +277,7 @@ class VehicleDamageIncidentService
         return hash('sha256', json_encode($state, JSON_THROW_ON_ERROR));
     }
 
-    private function area(int $companyId, int $vehicleId, int $incidentId, array $area, int $actor): void
+    private function area(int $companyId, int $vehicleId, int $incidentId, array $area, int $actor, ?string $basis = null): array
     {
         $provenance = $this->incidents->provenanceAvailable();
         $panel = (string) ($area['panel_code'] ?? '');
@@ -303,18 +332,19 @@ class VehicleDamageIncidentService
                 if ($severity !== $item['severity_code']) {
                     throw new InvalidArgumentException('Observation severity must match the canonical condition; select worsening to increase it.');
                 }
-                $result = $this->conditions->observe($companyId, $vehicleId, $itemId, $note, $actor, $context, $area);
+                $result = $this->conditions->observe($companyId, $vehicleId, $itemId, $note, $actor, $context, $area + ['observed_at' => $basis !== null ? $incident['discovered_at'] : null]);
             } else {
-                $result = $this->conditions->worsen($companyId, $vehicleId, $itemId, array_replace($area, ['severity_code' => $severity, 'note' => $note, 'occurred_at' => $incident['occurred_at']]), $actor, $context);
+                $result = $this->conditions->worsen($companyId, $vehicleId, $itemId, array_replace($area, ['severity_code' => $severity, 'note' => $note, 'occurred_at' => $incident['occurred_at'] ?? ($basis !== null ? $incident['discovered_at'] : null)]), $actor, $context);
             }
             $this->requireSuccess($result);
         }
         $condition = $this->items->item($companyId, $vehicleId, $itemId);
         $exactIdentity = ($condition['panel_code'] ?? null) === $panel && ($condition['damage_type_code'] ?? null) === $type;
-        $membershipId = $this->membership($companyId, $incidentId, $itemId, $effect, $area, $note, $actor, $provenance && $exactIdentity ? (int) $result['condition_event_id'] : null);
+        $membershipId = $this->membership($companyId, $incidentId, $itemId, $effect, $area, $note, $actor, $provenance && $exactIdentity ? (int) $result['condition_event_id'] : null, $basis);
         if (! empty($area['file_id']) || ! empty($area['image_id']) || ! empty($area['external_reference'])) {
             $this->requireSuccess($this->conditions->attachEvidence($companyId, $vehicleId, $evidenceItemId, $area, $actor, $provenance ? $membershipId : null));
         }
+        return ['incident_id' => $incidentId, 'condition_id' => $itemId, 'condition_event_id' => (int) $result['condition_event_id'], 'membership_id' => $membershipId];
     }
 
     /** Freeze generic incident intent before its outer vehicle-lock wait. */
@@ -341,7 +371,7 @@ class VehicleDamageIncidentService
         return $area;
     }
 
-    private function membership(int $companyId, int $incidentId, int $itemId, string $effect, array $snapshot, ?string $note, int $actor, ?int $conditionEventId = null): int
+    private function membership(int $companyId, int $incidentId, int $itemId, string $effect, array $snapshot, ?string $note, int $actor, ?int $conditionEventId = null, ?string $basis = null): int
     {
         $values = [
             'company_id' => $companyId, 'vehicle_damage_incident_id' => $incidentId, 'vehicle_damage_item_id' => $itemId,
@@ -351,6 +381,9 @@ class VehicleDamageIncidentService
         ];
         if ($conditionEventId !== null) {
             $values['condition_event_id'] = $conditionEventId;
+        }
+        if ($basis !== null) {
+            $values['basis_snapshot'] = $basis;
         }
         $id = $this->incidents->insertMembership($values);
         $this->audit('vehicle_damage_incident_items', $id, null, $values, $actor);

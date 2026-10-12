@@ -51,6 +51,11 @@ $routes->group('', ['filter' => 'session'], static function (RouteCollection $ro
         $routes->post('(:num)/health/tire-pressure-policy/disable', 'VehicleHealth::disableTirePressurePolicy/$1');
         $routes->post('(:num)/health/observations/(:num)/correct', 'VehicleHealth::correctObservation/$1/$2');
         $routes->post('(:num)/health/observations/(:num)/void', 'VehicleHealth::voidObservation/$1/$2');
+        $routes->get('(:num)/wheel-damage/new', 'VehicleWheelDamage::entry/$1');
+        $routes->post('(:num)/wheel-damage/(new|worsening|unchanged)', 'VehicleWheelDamage::command/$1/$2');
+        $routes->get('(:num)/wheel-damage/(:num)/occurrences/(:num)', 'VehicleWheelDamage::occurrence/$1/$2/$3');
+        $routes->post('(:num)/wheel-damage/(:num)/occurrences/(:num)/photos', 'VehicleWheelDamage::attachPhotos/$1/$2/$3');
+        $routes->get('(:num)/wheel-damage/(:num)/occurrences/(:num)/photos/(:num)', 'VehicleWheelDamage::viewPhoto/$1/$2/$3/$4');
         $routes->post('(:num)/damage', 'VehicleDamage::createForVehicle/$1');
         $routes->get('(:num)/damage-repairs', 'VehicleDamageRepairs::index/$1', ['as' => 'damage-repairs.index']);
         $routes->get('(:num)/damage-repairs/new', 'VehicleDamageRepairs::new/$1', ['as' => 'damage-repairs.new']);

@@ -500,6 +500,21 @@ class Services extends BaseService
         return $getShared ? static::getSharedInstance('vehicleDamageRepairService') : new \App\Services\Fleet\VehicleDamageRepairService(repository: static::vehicleDamageRepairRepository());
     }
 
+    public static function vehicleDamageOccurrenceRepository(bool $getShared = true): \App\Repositories\VehicleDamageOccurrenceRepository
+    {
+        return $getShared ? static::getSharedInstance('vehicleDamageOccurrenceRepository') : new \App\Repositories\VehicleDamageOccurrenceRepository(\Config\Database::connect());
+    }
+
+    public static function vehicleWheelDamageService(bool $getShared = true): \App\Services\Fleet\VehicleWheelDamageService
+    {
+        return $getShared ? static::getSharedInstance('vehicleWheelDamageService') : new \App\Services\Fleet\VehicleWheelDamageService();
+    }
+
+    public static function vehicleDamageOccurrenceEvidenceService(bool $getShared = true): \App\Services\Fleet\VehicleDamageOccurrenceEvidenceService
+    {
+        return $getShared ? static::getSharedInstance('vehicleDamageOccurrenceEvidenceService') : new \App\Services\Fleet\VehicleDamageOccurrenceEvidenceService(\Config\Database::connect());
+    }
+
     public static function vehicleDamageIncidentService(bool $getShared = true): \App\Services\Fleet\VehicleDamageIncidentService
     {
         return $getShared ? static::getSharedInstance('vehicleDamageIncidentService') : new \App\Services\Fleet\VehicleDamageIncidentService();

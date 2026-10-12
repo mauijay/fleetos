@@ -233,6 +233,25 @@ final class VehicleDamageRepairMariaDbFixture
                     return ['success' => false, 'errors' => ['source' => $exception->getMessage()]];
                 }
             }
+            if (in_array($request['operation'], ['wheelOccurrenceCreate', 'wheelOccurrenceWorsen', 'wheelOccurrenceAttach'], true)) {
+                $arguments = $request['arguments'];
+                $temporary = null;
+                if ($request['operation'] === 'wheelOccurrenceAttach') {
+                    $temporary = tempnam(sys_get_temp_dir(), 'wheel-race-');
+                    $image = imagecreatetruecolor(30, 20);
+                    imagepng($image, $temporary);
+                    imagedestroy($image);
+                    $arguments[4]['photos'] = [['role' => 'close_up', 'upload' => new \CodeIgniter\HTTP\Files\UploadedFile($temporary, 'synthetic-race.png', null, filesize($temporary), UPLOAD_ERR_OK)]];
+                }
+                try {
+                    $method = ['wheelOccurrenceCreate' => 'createNew', 'wheelOccurrenceWorsen' => 'recordWorsening', 'wheelOccurrenceAttach' => 'attachPhotos'][$request['operation']];
+                    return (new \App\Services\Fleet\VehicleWheelDamageService($connection))->{$method}(...$arguments);
+                } finally {
+                    if ($temporary !== null && is_file($temporary)) {
+                        unlink($temporary);
+                    }
+                }
+            }
             if ($request['operation'] === 'wheelIncidentCreate') {
                 return (new VehicleDamageIncidentService($connection))->create(...$request['arguments']);
             }
