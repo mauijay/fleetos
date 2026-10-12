@@ -102,6 +102,13 @@ class VehicleDamageService
         if ($actorUserId < 1) {
             return $this->failure('actor', 'An authenticated operator is required.');
         }
+        try {
+            if (isset($data['wheel_code'])) {
+                $data = VehicleWheelIdentity::input($data);
+            }
+        } catch (\InvalidArgumentException $exception) {
+            return $this->failure('wheel', $exception->getMessage());
+        }
         $errors = $this->validateCreate($data);
         if ($errors !== []) {
             return ['success' => false, 'errors' => $errors];
@@ -139,9 +146,26 @@ class VehicleDamageService
             $values['panel_code'] = $data['panel_code'];
         }
 
+        $guard = new VehicleWheelEpisodeGuard($this->db);
+        try {
+            $expectedWheel = null;
+            if (VehicleWheelEpisodeGuard::participates($values)) {
+                if ($values['zone_code'] !== 'wheel_tire') {
+                    throw new \InvalidArgumentException('Identity mismatch: wheel panel requires wheel_tire zone.');
+                }
+                $preview = $guard->resolve($companyId, $vehicleId, $values['panel_code']);
+                $expectedWheel = $data['expected_wheel_state'] ?? $preview['fingerprint'];
+                $guard->assertState($preview, $expectedWheel);
+            }
+        } catch (Throwable $exception) {
+            return $this->failure('wheel', $exception->getMessage());
+        }
         $this->db->transBegin();
         try {
             $this->repo()->lockVehicle($companyId, $vehicleId);
+            if ($expectedWheel !== null) {
+                $guard->assertEmpty($guard->resolve($companyId, $vehicleId, $values['panel_code'], true), $expectedWheel);
+            }
             $id = $this->repo()->insertItem($values);
             $eventId = $this->repo()->insertEvent($this->eventValues(
                 $companyId,
@@ -173,7 +197,7 @@ class VehicleDamageService
     /** @return array{success:bool,id?:int,condition_event_id?:int,errors:array<string,string>} */
     public function correctDetails(int $companyId, int $vehicleId, int $itemId, array $data, int $actorUserId): array
     {
-        $item = $this->repo()->canonicalItem($companyId, $vehicleId, $itemId);
+        $item = $this->commandItem($companyId, $vehicleId, $itemId);
         if ($item === null) {
             return $this->failure('item', 'Damage item not found in the active fleet company.');
         }
@@ -199,14 +223,32 @@ class VehicleDamageService
         }
 
         $values = ['zone_code' => $zone, 'damage_type_code' => $type, 'description' => $description, 'updated_by' => $actorUserId, 'updated_at' => date('Y-m-d H:i:s')];
-
-        return $this->updateWithEvent($item, $values, 'detail_corrected', $note, $actorUserId);
+        try {
+            if (isset($data['wheel_code'])) {
+                $data = VehicleWheelIdentity::input($data);
+            }
+            if (array_key_exists('panel_code', $data)) {
+                $panel = $data['panel_code'];
+                if ($panel !== null && ! isset(\Config\VehicleDamage::PANELS[$panel])) {
+                    throw new \InvalidArgumentException('Choose a valid panel.');
+                }
+                $values['panel_code'] = $panel;
+            }
+            $new = array_replace($item, $values);
+            $classification = ! VehicleWheelEpisodeGuard::participates($item) && VehicleWheelEpisodeGuard::participates($new);
+            if ($classification && empty($data['expected_condition_state'])) {
+                throw new \InvalidArgumentException('Explicit wheel classification requires the expected condition state and a correction reason. Reload and review.');
+            }
+        } catch (Throwable $exception) {
+            return $this->failure('wheel', $exception->getMessage());
+        }
+        return $this->updateWithEvent($item, $values, 'detail_corrected', $note, $actorUserId, expectedCondition: $data['expected_condition_state'] ?? null, expectedWheel: $data['expected_wheel_state'] ?? null);
     }
 
     /** @return array{success:bool,id?:int,condition_event_id?:int,errors:array<string,string>} */
     public function changeSeverity(int $companyId, int $vehicleId, int $itemId, string $severity, string $note, int $actorUserId): array
     {
-        $item = $this->repo()->canonicalItem($companyId, $vehicleId, $itemId);
+        $item = $this->commandItem($companyId, $vehicleId, $itemId);
         if ($item === null) {
             return $this->failure('item', 'Damage item not found in the active fleet company.');
         }
@@ -234,7 +276,7 @@ class VehicleDamageService
      */
     public function worsen(int $companyId, int $vehicleId, int $itemId, array $data, int $actorUserId, array $trustedContext = []): array
     {
-        $item = $this->repo()->canonicalItem($companyId, $vehicleId, $itemId);
+        $item = $this->commandItem($companyId, $vehicleId, $itemId);
         if ($item === null || ! in_array($item['status_code'], ['open', 'accepted_unrepaired'], true)) {
             return $this->failure('item', 'Only current physical damage can be marked worsened.');
         }
@@ -260,15 +302,21 @@ class VehicleDamageService
         } catch (\InvalidArgumentException $exception) {
             return $this->failure('occurred_at', $exception->getMessage());
         }
+        try {
+            if (VehicleWheelEpisodeGuard::participates($item) || ($data['damage_type_code'] ?? '') === 'wheel_curb_rash') {
+                (new VehicleWheelEpisodeGuard($this->db))->assertRequest($item, $data);
+            }
+        } catch (Throwable $exception) {
+            return $this->failure('wheel', $exception->getMessage());
+        }
         $values = ['severity_code' => $severity, 'updated_by' => $actorUserId, 'updated_at' => date('Y-m-d H:i:s')];
-
-        return $this->updateWithEvent($item, $values, 'worsened', $note, $actorUserId, $context, $occurredAt);
+        return $this->updateWithEvent($item, $values, 'worsened', $note, $actorUserId, $context, $occurredAt, $data['expected_condition_state'] ?? null, $data['expected_wheel_state'] ?? null);
     }
 
     /** @return array{success:bool,id?:int,condition_event_id?:int,errors:array<string,string>} */
     public function transitionStatus(int $companyId, int $vehicleId, int $itemId, string $status, string $note, int $actorUserId): array
     {
-        $item = $this->repo()->canonicalItem($companyId, $vehicleId, $itemId);
+        $item = $this->commandItem($companyId, $vehicleId, $itemId);
         if ($item === null) {
             return $this->failure('item', 'Damage item not found in the active fleet company.');
         }
@@ -316,9 +364,9 @@ class VehicleDamageService
     }
 
     /** An observation records history without changing physical severity or discovery. */
-    public function observe(int $companyId, int $vehicleId, int $itemId, string $note, int $actorUserId, array $context = []): array
+    public function observe(int $companyId, int $vehicleId, int $itemId, string $note, int $actorUserId, array $context = [], array $expected = []): array
     {
-        $item = $this->repo()->canonicalItem($companyId, $vehicleId, $itemId);
+        $item = $this->commandItem($companyId, $vehicleId, $itemId);
         if ($item === null || trim($note) === '' || mb_strlen($note) > 2000) {
             return $this->failure('item', 'Choose an owned condition and supply an observation note.');
         }
@@ -328,7 +376,14 @@ class VehicleDamageService
             return $this->failure('context', $exception->getMessage());
         }
 
-        return $this->updateWithEvent($item, ['updated_by' => $actorUserId, 'updated_at' => date('Y-m-d H:i:s')], 'observed_existing', $note, $actorUserId, $context);
+        try {
+            if (VehicleWheelEpisodeGuard::participates($item)) {
+                (new VehicleWheelEpisodeGuard($this->db))->assertRequest($item, $expected);
+            }
+        } catch (Throwable $exception) {
+            return $this->failure('wheel', $exception->getMessage());
+        }
+        return $this->updateWithEvent($item, ['updated_by' => $actorUserId, 'updated_at' => date('Y-m-d H:i:s')], 'observed_existing', $note, $actorUserId, $context, expectedCondition: $expected['expected_condition_state'] ?? null, expectedWheel: $expected['expected_wheel_state'] ?? null);
     }
 
     /** Evidence stays attached to its authorized original parent, including historical provenance. */
@@ -341,6 +396,17 @@ class VehicleDamageService
             }
             $this->repo()->lockVehicle($companyId, $vehicleId);
             $this->repo()->lockItem($companyId, $vehicleId, $itemId);
+            $original = $this->repo()->item($companyId, $vehicleId, $itemId);
+            $canonical = $this->repo()->canonicalItem($companyId, $vehicleId, $itemId);
+            if ($canonical !== null && (VehicleWheelEpisodeGuard::participates($canonical) || VehicleWheelEpisodeGuard::participates($original ?? []))) {
+                $guard = new VehicleWheelEpisodeGuard($this->db);
+                $guard->assertRequest($canonical, array_intersect_key($original, array_flip(['panel_code', 'zone_code', 'damage_type_code'])));
+                $state = $guard->resolve($companyId, $vehicleId, $canonical['panel_code'], true);
+                $guard->assertState($state);
+                if (in_array($canonical['status_code'], ['open', 'accepted_unrepaired'], true)) {
+                    $guard->assertActive($canonical, $state);
+                }
+            }
             $before = $this->repo()->evidence($companyId, $itemId);
             $this->addEvidence($companyId, $vehicleId, $itemId, $data, $actorUserId, date('Y-m-d H:i:s'), $occurrenceMembershipId);
             $after = $this->repo()->evidence($companyId, $itemId);
@@ -447,12 +513,22 @@ class VehicleDamageService
     }
 
     /** @param array<string,mixed> $item @param array<string,mixed> $values @param array{trip_id:?int,movement_event_id:?int}|null $context */
-    private function updateWithEvent(array $item, array $values, string $eventCode, string $note, int $actorUserId, ?array $context = null, ?string $occurredAt = null): array
+    private function updateWithEvent(array $item, array $values, string $eventCode, string $note, int $actorUserId, ?array $context = null, ?string $occurredAt = null, ?string $expectedCondition = null, ?string $expectedWheel = null): array
     {
         if ($actorUserId < 1) {
             return $this->failure('actor', 'An authenticated operator is required.');
         }
         $context ??= ['trip_id' => null, 'movement_event_id' => null];
+        $guard = new VehicleWheelEpisodeGuard($this->db);
+        try {
+            $intent = $guard->intent($item, $values);
+            $conditionState = $intent === [] ? null : ($expectedCondition ?? $guard->conditionState($item));
+            if ($expectedWheel !== null) {
+                $intent[array_replace($item, $values)['panel_code']] = $expectedWheel;
+            }
+        } catch (Throwable $exception) {
+            return $this->failure('wheel', $exception->getMessage());
+        }
         $this->db->transBegin();
         try {
             $this->repo()->lockVehicle((int) $item['company_id'], (int) $item['fleet_vehicle_id']);
@@ -461,7 +537,10 @@ class VehicleDamageService
             if ($locked !== $item || ! empty($locked['current_condition_item_id'])) {
                 throw new \RuntimeException('Condition changed concurrently. Reload before updating.');
             }
-            $eventId = $this->writeStateInTransaction($item, $values, $eventCode, $note, $actorUserId, $occurredAt ?? date('Y-m-d H:i:s'), $context);
+            if ($conditionState !== null && ! hash_equals($conditionState, (new \App\Repositories\VehicleDamageRepairRepository($this->db))->conditionFingerprint($locked, true))) {
+                throw new \InvalidArgumentException('Condition event state changed. Reload before updating.');
+            }
+            $eventId = $this->writeStateInTransaction($item, $values, $eventCode, $note, $actorUserId, $occurredAt ?? date('Y-m-d H:i:s'), $context, intent: $intent);
             if ($this->db->transStatus() === false) {
                 throw new \RuntimeException('Damage item update transaction failed.');
             }
@@ -493,11 +572,12 @@ class VehicleDamageService
                 throw new \InvalidArgumentException('Repair event must belong to this condition and company.');
             }
         }
-        return $this->writeStateInTransaction($item, $values, $eventCode, $note, $actor, $occurredAt, ['trip_id' => null, 'movement_event_id' => null], $repairEvent, $auditContext);
+        return $this->writeStateInTransaction($item, $values, $eventCode, $note, $actor, $occurredAt, ['trip_id' => null, 'movement_event_id' => null], $repairEvent, $auditContext, sqliteRepairTransaction: true);
     }
 
-    private function writeStateInTransaction(array $item, array $values, string $eventCode, string $note, int $actor, string $occurredAt, array $context, ?int $repairEvent = null, array $auditContext = []): int
+    private function writeStateInTransaction(array $item, array $values, string $eventCode, string $note, int $actor, string $occurredAt, array $context, ?int $repairEvent = null, array $auditContext = [], array $intent = [], bool $sqliteRepairTransaction = false): int
     {
+        (new VehicleWheelEpisodeGuard($this->db))->mutation($item, $values, $eventCode, $intent, $sqliteRepairTransaction);
         if (! $this->repo()->updateItem((int) $item['company_id'], (int) $item['fleet_vehicle_id'], (int) $item['id'], $values)) {
             throw new \RuntimeException('Damage item changed before it could be updated.');
         }
@@ -618,6 +698,20 @@ class VehicleDamageService
     private function failure(string $field, string $message): array
     {
         return ['success' => false, 'errors' => [$field => $message]];
+    }
+
+    private function commandItem(int $company, int $vehicle, int $id): ?array
+    {
+        try {
+            $item = $this->repo()->canonicalItem($company, $vehicle, $id);
+            $original = $this->repo()->item($company, $vehicle, $id);
+            if ($item !== null && $original !== null && (VehicleWheelEpisodeGuard::participates($item) || VehicleWheelEpisodeGuard::participates($original))) {
+                (new VehicleWheelEpisodeGuard($this->db))->assertRequest($item, array_intersect_key($original, array_flip(['panel_code', 'zone_code', 'damage_type_code'])));
+            }
+            return $item;
+        } catch (Throwable) {
+            return null;
+        }
     }
 
     private function repo(): VehicleDamageRepository

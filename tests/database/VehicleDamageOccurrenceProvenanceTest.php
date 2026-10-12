@@ -30,7 +30,13 @@ final class VehicleDamageOccurrenceProvenanceTest extends CIUnitTestCase
             $created = (new VehicleDamageService($db))->create(1, 10, ['zone_code' => 'wheel_tire', 'damage_type_code' => 'wheel_curb_rash', 'severity_code' => 'cosmetic', 'description' => 'Synthetic wheel position unknown', 'discovered_at' => '2026-10-01 10:00:00'], 7);
             $this->assertTrue($created['success']);
             $this->assertGreaterThan(0, $created['condition_event_id']);
-            $incident = $fixture->create(['areas' => [Fixture::area(['effect_code' => 'worsened', 'vehicle_damage_item_id' => $created['id'], 'external_reference' => 'Synthetic occurrence-specific reference'])]]);
+            $before = $fixture->rows();
+            $mismatch = (new VehicleDamageIncidentService($db))->create(1, 10, Fixture::incident(['areas' => [Fixture::area(['effect_code' => 'worsened', 'vehicle_damage_item_id' => $created['id']])]]), 7);
+            $this->assertFalse($mismatch['success'], 'Unknown wheel cannot be silently classified by an occurrence.');
+            $this->assertSame($before, $fixture->rows());
+            $generic = (new VehicleDamageService($db))->create(1, 10, ['zone_code' => 'wheel_tire', 'damage_type_code' => 'scratch_scuff', 'severity_code' => 'cosmetic', 'description' => 'Synthetic generic position unknown', 'discovered_at' => '2026-10-01 10:00:00'], 7);
+            $this->assertTrue($generic['success']);
+            $incident = $fixture->create(['areas' => [Fixture::area(['damage_type_code' => 'scratch_scuff', 'effect_code' => 'worsened', 'vehicle_damage_item_id' => $generic['id'], 'external_reference' => 'Synthetic occurrence-specific reference'])]]);
             $member = (new VehicleDamageIncidentRepository($db))->memberships(1, 10, $incident)[0];
             $this->assertNull($member['condition_event_id'], 'Incomplete prior identity is not invented into exact event provenance.');
             $this->assertNull($member['basis_snapshot']);
@@ -94,7 +100,7 @@ final class VehicleDamageOccurrenceProvenanceTest extends CIUnitTestCase
     {
         $fixture = new Fixture($engine);
         try {
-            $legacyIncident = $fixture->create(['areas' => [Fixture::area(['file_id' => 800])]]);
+            $legacyIncident = $fixture->createLegacy(['areas' => [Fixture::area(['file_id' => 800])]]);
             $legacyEvidence = (new VehicleDamageRepository($fixture->db))->evidence(1, 1);
             $fixture->migrate();
             $db = $fixture->db;
@@ -198,8 +204,8 @@ final class VehicleDamageOccurrenceProvenanceTest extends CIUnitTestCase
         try {
             $fixture->migrate();
             $db = $fixture->db;
-            $a = $fixture->create();
-            $b = $fixture->create(['areas' => [Fixture::area(['file_id' => 800])]]);
+            $a = $fixture->create(['areas' => [Fixture::area(['damage_type_code' => 'scratch_scuff'])]]);
+            $b = $fixture->create(['areas' => [Fixture::area(['file_id' => 800, 'damage_type_code' => 'scratch_scuff'])]]);
             $repo = new VehicleDamageIncidentRepository($db);
             $target = $repo->memberships(1, 10, $a)[0];
             $source = $repo->memberships(1, 10, $b)[0];
@@ -231,7 +237,7 @@ final class VehicleDamageOccurrenceProvenanceTest extends CIUnitTestCase
             $linked = $occurrences->evidence(1, 10, (int) $target['id']);
             $this->assertSame((int) $sourceItem['id'], (int) $linked[0]['vehicle_damage_item_id']);
             $before = $fixture->rows();
-            $failed = (new VehicleDamageIncidentService($db))->create(1, 10, Fixture::incident(['areas' => [Fixture::area(), Fixture::area(['file_id' => 801])]]), 7);
+            $failed = (new VehicleDamageIncidentService($db))->create(1, 10, Fixture::incident(['areas' => [Fixture::area(), Fixture::area(['panel_code' => 'front_right_wheel_tire', 'file_id' => 801])]]), 7);
             $this->assertFalse($failed['success']);
             $this->assertSame($before, $fixture->rows(), 'Failed occurrence/evidence rolls back all rows and audits.');
         } finally {

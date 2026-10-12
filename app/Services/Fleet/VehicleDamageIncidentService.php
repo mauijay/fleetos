@@ -32,6 +32,18 @@ class VehicleDamageIncidentService
     /** @return array{success:bool,id?:int,errors:array<string,string>} */
     public function create(int $companyId, int $vehicleId, array $data, int $actor): array
     {
+        try {
+            if (is_array($data['areas'] ?? null)) {
+                foreach ($data['areas'] as &$area) {
+                    if (is_array($area)) {
+                        $area = $this->wheelIntent($companyId, $vehicleId, $area);
+                    }
+                }
+                unset($area);
+            }
+        } catch (Throwable $exception) {
+            return ['success' => false, 'errors' => ['wheel' => $exception->getMessage()]];
+        }
         return $this->transaction($companyId, $vehicleId, $actor, function () use ($companyId, $vehicleId, $data, $actor): int {
             $areas = $data['areas'] ?? [];
             if (! is_array($areas) || count($areas) < 1 || count($areas) > 40) {
@@ -79,6 +91,10 @@ class VehicleDamageIncidentService
         return $this->transaction($companyId, $vehicleId, $actor, function () use ($companyId, $vehicleId, $itemId, $data, $actor): int {
             $this->items->lockItem($companyId, $vehicleId, $itemId);
             $preview = $this->historicalOriginalPreview($companyId, $vehicleId, $itemId);
+            if (VehicleWheelEpisodeGuard::participates($preview['item'])) {
+                $guard = new VehicleWheelEpisodeGuard($this->db);
+                $guard->assertState($guard->resolve($companyId, $vehicleId, $preview['item']['panel_code'], true));
+            }
             if (($data['confirmed'] ?? '') !== '1' || ! hash_equals($preview['expected_state'], (string) ($data['expected_state'] ?? ''))) {
                 throw new InvalidArgumentException('Explicitly confirm the unchanged historical preview. Reload if the condition changed.');
             }
@@ -109,6 +125,11 @@ class VehicleDamageIncidentService
     /** Post-create membership applies its explicitly selected effect transactionally. */
     public function attachArea(int $companyId, int $vehicleId, int $incidentId, array $area, int $actor): array
     {
+        try {
+            $area = $this->wheelIntent($companyId, $vehicleId, $area);
+        } catch (Throwable $exception) {
+            return ['success' => false, 'errors' => ['wheel' => $exception->getMessage()]];
+        }
         return $this->transaction($companyId, $vehicleId, $actor, function () use ($companyId, $vehicleId, $incidentId, $area, $actor): int {
             $incident = $this->requireIncident($companyId, $vehicleId, $incidentId);
             $effects = array_column($this->incidents->memberships($companyId, $vehicleId, $incidentId), 'effect_code');
@@ -178,12 +199,19 @@ class VehicleDamageIncidentService
             if ((new \App\Repositories\VehicleDamageRepairRepository($this->db))->hasAnyMembershipForCondition($companyId, $vehicleId, $sourceId)) {
                 throw new InvalidArgumentException('This condition has repair/work history and must remain canonical. B2.1 cannot retarget that history. Choose another source or leave the conditions separate.');
             }
+            $wheelLink = (new VehicleWheelEpisodeGuard($this->db))->historicalLink($source, $target, $data);
             $ranks = array_flip(array_keys(VehicleDamageService::SEVERITIES));
             $severity = $ranks[$source['severity_code']] > $ranks[$target['severity_code']] ? $source['severity_code'] : $target['severity_code'];
+            $values = ['current_condition_item_id' => $targetId, 'updated_by' => $actor, 'updated_at' => date('Y-m-d H:i:s')];
+            if ($wheelLink) {
+                // The reviewed reconciliation is atomic; the target is sole active root before its central writer runs.
+                $this->items->updateItem($companyId, $vehicleId, $sourceId, $values);
+            }
             $result = $this->conditions->worsen($companyId, $vehicleId, $targetId, ['severity_code' => $severity, 'note' => $reason], $actor);
             $this->requireSuccess($result);
-            $values = ['current_condition_item_id' => $targetId, 'updated_by' => $actor, 'updated_at' => date('Y-m-d H:i:s')];
-            $this->items->updateItem($companyId, $vehicleId, $sourceId, $values);
+            if (! $wheelLink) {
+                $this->items->updateItem($companyId, $vehicleId, $sourceId, $values);
+            }
             $this->items->insertEvent([
                 'company_id' => $companyId, 'vehicle_damage_item_id' => $sourceId, 'event_code' => 'historical_linked',
                 'occurred_at' => date('Y-m-d H:i:s'), 'note' => $reason . ' Canonical condition #' . $targetId . '.',
@@ -230,6 +258,13 @@ class VehicleDamageIncidentService
         if (! isset(VehicleDamage::PANELS[$panel], VehicleDamageService::DAMAGE_TYPES[$type], VehicleDamageService::SEVERITIES[$severity], VehicleDamage::EFFECTS[$effect])) {
             throw new InvalidArgumentException('Choose valid panel, type, severity and effect for every area.');
         }
+        if (isset($area['wheel_code'])) {
+            VehicleWheelIdentity::input($area);
+        }
+        if (VehicleWheelEpisodeGuard::participates($area)) {
+            $guard = new VehicleWheelEpisodeGuard($this->db);
+            $guard->assertState($guard->resolve($companyId, $vehicleId, $panel, true), $area['expected_wheel_state'] ?? null);
+        }
         $note = $this->text($area['note'] ?? '', true);
         $incident = $this->requireIncident($companyId, $vehicleId, $incidentId);
         $context = ['trip_id' => $incident['turo_trip_normalized_id'], 'movement_event_id' => $incident['trip_movement_event_id']];
@@ -240,6 +275,7 @@ class VehicleDamageIncidentService
             $result = $this->conditions->create($companyId, $vehicleId, [
                 'panel_code' => $panel, 'damage_type_code' => $type, 'severity_code' => $severity,
                 'zone_code' => VehicleDamage::zone($panel), 'description' => $note, 'discovered_at' => $incident['discovered_at'],
+                'expected_wheel_state' => $area['expected_wheel_state'] ?? null,
             ], $actor, $context + ['recovery_exception_id' => null]);
             $this->requireSuccess($result);
             $itemId = (int) $result['id'];
@@ -251,6 +287,9 @@ class VehicleDamageIncidentService
             $item = $this->items->canonicalItem($companyId, $vehicleId, $itemId);
             if ($item === null || ($effect === 'worsened' && ! in_array($item['status_code'], ['open', 'accepted_unrepaired'], true))) {
                 throw new InvalidArgumentException('Existing condition changed or is no longer current. Reload before recording.');
+            }
+            if (VehicleWheelEpisodeGuard::participates($item) || VehicleWheelEpisodeGuard::participates($area)) {
+                (new VehicleWheelEpisodeGuard($this->db))->assertRequest($item, ['panel_code' => $panel, 'damage_type_code' => $type, 'zone_code' => VehicleDamage::zone($panel)]);
             }
             $itemId = (int) $item['id'];
             $this->items->lockItem($companyId, $vehicleId, $itemId);
@@ -264,9 +303,9 @@ class VehicleDamageIncidentService
                 if ($severity !== $item['severity_code']) {
                     throw new InvalidArgumentException('Observation severity must match the canonical condition; select worsening to increase it.');
                 }
-                $result = $this->conditions->observe($companyId, $vehicleId, $itemId, $note, $actor, $context);
+                $result = $this->conditions->observe($companyId, $vehicleId, $itemId, $note, $actor, $context, $area);
             } else {
-                $result = $this->conditions->worsen($companyId, $vehicleId, $itemId, ['severity_code' => $severity, 'note' => $note, 'occurred_at' => $incident['occurred_at']], $actor, $context);
+                $result = $this->conditions->worsen($companyId, $vehicleId, $itemId, array_replace($area, ['severity_code' => $severity, 'note' => $note, 'occurred_at' => $incident['occurred_at']]), $actor, $context);
             }
             $this->requireSuccess($result);
         }
@@ -276,6 +315,30 @@ class VehicleDamageIncidentService
         if (! empty($area['file_id']) || ! empty($area['image_id']) || ! empty($area['external_reference'])) {
             $this->requireSuccess($this->conditions->attachEvidence($companyId, $vehicleId, $evidenceItemId, $area, $actor, $provenance ? $membershipId : null));
         }
+    }
+
+    /** Freeze generic incident intent before its outer vehicle-lock wait. */
+    private function wheelIntent(int $company, int $vehicle, array $area): array
+    {
+        if (isset($area['wheel_code'])) {
+            $area = VehicleWheelIdentity::input($area);
+        }
+        if (VehicleWheelEpisodeGuard::participates($area)) {
+            $guard = new VehicleWheelEpisodeGuard($this->db);
+            $state = $guard->resolve($company, $vehicle, $area['panel_code']);
+            $guard->assertState($state, $area['expected_wheel_state'] ?? null);
+            $area['expected_wheel_state'] ??= $state['fingerprint'];
+            if (($area['effect_code'] ?? '') !== 'new_damage') {
+                $item = $this->items->canonicalItem($company, $vehicle, (int) ($area['vehicle_damage_item_id'] ?? 0));
+                if ($item === null) {
+                    throw new InvalidArgumentException('Choose an owned canonical wheel condition.');
+                }
+                $guard->assertRequest($item, ['panel_code' => $area['panel_code'], 'damage_type_code' => $area['damage_type_code']]);
+                $guard->assertActive($item, $state);
+                $area['expected_condition_state'] ??= $guard->conditionState($item);
+            }
+        }
+        return $area;
     }
 
     private function membership(int $companyId, int $incidentId, int $itemId, string $effect, array $snapshot, ?string $note, int $actor, ?int $conditionEventId = null): int

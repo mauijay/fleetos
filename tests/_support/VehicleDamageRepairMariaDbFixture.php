@@ -233,6 +233,13 @@ final class VehicleDamageRepairMariaDbFixture
                     return ['success' => false, 'errors' => ['source' => $exception->getMessage()]];
                 }
             }
+            if ($request['operation'] === 'wheelIncidentCreate') {
+                return (new VehicleDamageIncidentService($connection))->create(...$request['arguments']);
+            }
+            if (in_array($request['operation'], ['wheelCreate', 'wheelWorsen', 'wheelCorrect', 'wheelRepair'], true)) {
+                $method = ['wheelCreate' => 'create', 'wheelWorsen' => 'worsen', 'wheelCorrect' => 'correctDetails', 'wheelRepair' => 'transitionStatus'][$request['operation']];
+                return (new \App\Services\Fleet\VehicleDamageService($connection))->{$method}(...$request['arguments']);
+            }
             if ($request['operation'] === 'link') {
                 return (new VehicleDamageIncidentService($connection))->linkHistorical(...$request['arguments']);
             }

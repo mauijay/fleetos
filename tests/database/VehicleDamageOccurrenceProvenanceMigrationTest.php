@@ -33,7 +33,7 @@ final class VehicleDamageOccurrenceProvenanceMigrationTest extends CIUnitTestCas
         $db = $fixture->db;
         try {
             if ($populated) {
-                $fixture->create(['areas' => [Fixture::area(['file_id' => 800]), Fixture::area(['panel_code' => 'rear_right_wheel_tire'])]]);
+                $fixture->createLegacy(['areas' => [Fixture::area(['file_id' => 800]), Fixture::area(['panel_code' => 'rear_right_wheel_tire'])]]);
             }
             $before = $fixture->rows();
             $fingerprint = hash('sha256', json_encode($before, JSON_THROW_ON_ERROR));
@@ -133,7 +133,7 @@ final class VehicleDamageOccurrenceProvenanceMigrationTest extends CIUnitTestCas
         $fixture = new Fixture($engine);
         try {
             $fixture->migrate();
-            $incident = $fixture->create(['areas' => [Fixture::area(['file_id' => 800])]]);
+            $incident = $fixture->createLegacy(['areas' => [Fixture::area(['file_id' => 800])]]);
             $db = $fixture->db;
             $member = $db->table('vehicle_damage_incident_items')->where('vehicle_damage_incident_id', $incident)->get()->getRowArray();
             $evidence = $db->table('vehicle_damage_item_evidence')->get()->getRowArray();
@@ -173,7 +173,7 @@ final class VehicleDamageOccurrenceProvenanceMigrationTest extends CIUnitTestCas
     {
         $fixture = new Fixture($engine);
         try {
-            $fixture->create(['areas' => [Fixture::area(['external_reference' => 'Synthetic legacy evidence'])]]);
+            $fixture->createLegacy(['areas' => [Fixture::area(['external_reference' => 'Synthetic legacy evidence'])]]);
             $db = $fixture->db;
             $before = $fixture->rows();
             foreach (array_slice(Schema::statements($db), 0, $completed) as $sql) {

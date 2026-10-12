@@ -195,7 +195,7 @@ class VehicleDamageRepairRepository
         return $result;
     }
 
-    private function fingerprint(array $condition, string $latest): string
+    public static function fingerprint(array $condition, string $latest): string
     {
         $fields = ['id', 'company_id', 'fleet_vehicle_id', 'current_condition_item_id', 'zone_code', 'panel_code', 'damage_type_code', 'description', 'severity_code', 'status_code', 'discovered_at', 'resolved_by', 'resolved_at', 'resolution_note', 'updated_by', 'updated_at'];
         $state = [];

@@ -231,6 +231,70 @@ class VehicleDamageRepository
             ->get()->getResultArray();
     }
 
+    /** Two bounded current reads; aliases and historical roots participate in the fingerprint. */
+    public function activeWheelCurbRashEpisodes(int $company, int $vehicle, string $panel, bool $lock = false): array
+    {
+        \App\Services\Fleet\VehicleWheelIdentity::code($panel);
+        (new VehicleDamageOccurrenceRepository($this->db))->requireReady();
+        if ($this->vehicle($company, $vehicle) === null) {
+            throw new \InvalidArgumentException('Vehicle not found in the active fleet company.');
+        }
+        if ($lock) {
+            if ($this->db->transDepth < 1 && $this->db->getPlatform() !== 'SQLite3') {
+                throw new \InvalidArgumentException('Locking wheel reads require a command transaction.');
+            }
+            $this->lockVehicle($company, $vehicle);
+        }
+        $builder = $this->db->table('vehicle_damage_items wheel')->select('wheel.*')
+            ->select('target.id AS target_id, target.company_id AS target_company, target.fleet_vehicle_id AS target_vehicle, target.panel_code AS target_panel, target.damage_type_code AS target_type, target.zone_code AS target_zone, target.current_condition_item_id AS target_alias')
+            ->join('vehicle_damage_items target', 'target.id = wheel.current_condition_item_id', 'left')
+            ->groupStart()
+                ->groupStart()->where('wheel.company_id', $company)->where('wheel.fleet_vehicle_id', $vehicle)->where('wheel.panel_code', $panel)->where('wheel.damage_type_code', 'wheel_curb_rash')->groupEnd()
+                ->orGroupStart()->where('target.company_id', $company)->where('target.fleet_vehicle_id', $vehicle)->where('target.panel_code', $panel)->where('target.damage_type_code', 'wheel_curb_rash')->groupEnd()
+            ->groupEnd()->orderBy('wheel.id');
+        $rows = $this->wheelRows($builder->getCompiledSelect(), $lock);
+        $events = [];
+        if ($rows !== []) {
+            $events = $this->wheelRows($this->db->table('vehicle_damage_item_events')->select('id, vehicle_damage_item_id')
+                ->where('company_id', $company)->whereIn('vehicle_damage_item_id', array_column($rows, 'id'))->orderBy('id', 'DESC')->getCompiledSelect(), $lock);
+        }
+        $latest = [];
+        foreach ($events as $event) {
+            $latest[(int) $event['vehicle_damage_item_id']] ??= (int) $event['id'];
+        }
+        $candidates = [];
+        $fingerprints = [];
+        $integrity = 'valid';
+        foreach ($rows as $row) {
+            $owned = (int) $row['company_id'] === $company && (int) $row['fleet_vehicle_id'] === $vehicle;
+            $alias = $row['current_condition_item_id'] !== null;
+            if (! $owned || $row['panel_code'] !== $panel || $row['damage_type_code'] !== 'wheel_curb_rash' || $row['zone_code'] !== 'wheel_tire'
+                || ($alias && ($row['target_id'] === null || (int) $row['target_company'] !== $company || (int) $row['target_vehicle'] !== $vehicle
+                    || $row['target_panel'] !== $panel || $row['target_type'] !== 'wheel_curb_rash' || $row['target_zone'] !== 'wheel_tire'
+                    || $row['target_alias'] !== null || (int) $row['target_id'] === (int) $row['id']))) {
+                $integrity = 'invalid';
+            }
+            $eventId = $latest[(int) $row['id']] ?? null;
+            $fingerprints[] = [VehicleDamageRepairRepository::fingerprint($row, (string) ($eventId ?? '')), array_intersect_key($row, array_flip(['target_id', 'target_company', 'target_vehicle', 'target_panel', 'target_type', 'target_zone', 'target_alias']))];
+            if ($owned && ! $alias && in_array($row['status_code'], ['open', 'accepted_unrepaired'], true)) {
+                $candidates[] = ['id' => (int) $row['id'], 'status_code' => $row['status_code'], 'latest_condition_event_id' => $eventId,
+                    'fingerprint' => VehicleDamageRepairRepository::fingerprint($row, (string) ($eventId ?? ''))];
+            }
+        }
+        return ['state' => count($candidates) === 0 ? 'none' : (count($candidates) === 1 ? 'one' : 'conflict'),
+            'panel_code' => $panel, 'candidates' => $candidates, 'alias_integrity' => $integrity,
+            'fingerprint' => hash('sha256', json_encode([$company, $vehicle, $panel, $fingerprints], JSON_THROW_ON_ERROR))];
+    }
+
+    private function wheelRows(string $sql, bool $lock): array
+    {
+        $result = $this->db->query($sql . ($lock && $this->db->getPlatform() !== 'SQLite3' ? ' FOR UPDATE' : ''));
+        if ($result === false) {
+            throw new \RuntimeException('Wheel state is locked. Reload and retry.');
+        }
+        return $result->getResultArray();
+    }
+
     public function insertItem(array $values): int
     {
         $this->db->table('vehicle_damage_items')->insert($values);

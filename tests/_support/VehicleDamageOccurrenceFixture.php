@@ -65,6 +65,17 @@ final class VehicleDamageOccurrenceFixture
         return (int) $result['id'];
     }
 
+    /** Pre-000036 generic history uses a different family; wheel commands now require acknowledged provenance. */
+    public function createLegacy(array $changes = []): int
+    {
+        $data = self::incident($changes);
+        foreach ($data['areas'] as &$area) {
+            $area['damage_type_code'] = 'scratch_scuff';
+        }
+        unset($area);
+        return $this->create($data);
+    }
+
     /** Stable values of all business rows, excluding only framework migration history. */
     public function rows(): array
     {
