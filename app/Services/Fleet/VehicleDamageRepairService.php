@@ -511,6 +511,10 @@ class VehicleDamageRepairService
             $eventId = $this->repairs->insertEvent(['company_id' => $company, 'vehicle_damage_repair_job_id' => $jobId, 'vehicle_damage_repair_job_item_id' => $memberRef, 'vehicle_damage_item_id' => $conditionRef, 'event_code' => $event, 'job_version' => (int) $job['version'], 'actor_user_id' => $actor, 'recorded_at' => $now, 'occurred_at' => $occurred, 'reason_category_code' => $this->text($data['reason_category_code'] ?? null, 40), 'reason' => $this->text($eventReason, 2000), 'before_json' => $before === null ? null : json_encode($before, JSON_THROW_ON_ERROR), 'after_json' => json_encode($after, JSON_THROW_ON_ERROR), 'command_key' => $key, 'command_payload_hash' => $hash]);
             if ($physical !== null) {
                 $this->conditions->writeRepairStateInTransaction($physical['before'], $physical['values'], $physical['event'], $physical['note'], $actor, $occurred, $eventId, ['reason_category_code' => $data['reason_category_code'] ?? null]);
+                if ($physical['event'] === 'repaired' && VehicleWheelEpisodeGuard::participates($physical['before'])) {
+                    $guard = new VehicleWheelEpisodeGuard($this->db);
+                    $guard->assertEmpty($guard->resolve($company, $vehicle, $physical['before']['panel_code'], true));
+                }
             }
             $this->audit('vehicle_damage_repair_jobs', $jobId, $before['job'] ?? null, $job, $actor);
             if ($financialParticipates) {
@@ -677,6 +681,20 @@ class VehicleDamageRepairService
                 if ($occurred < $job['started_at'] || $occurred < $condition['discovered_at']) {
                     throw new InvalidArgumentException('Inspection precedes the recorded work or discovery.');
                 }
+                if (VehicleWheelEpisodeGuard::participates($condition)) {
+                    $guard = new VehicleWheelEpisodeGuard($this->db);
+                    $guard->assertActive($condition, $guard->resolve($company, $vehicle, $condition['panel_code'], true));
+                    // An inspection cannot resolve damage known to have occurred after it.
+                    $later = $this->db->table('vehicle_damage_incident_items members')->select('members.id')
+                        ->join('vehicle_damage_incidents incidents', 'incidents.id = members.vehicle_damage_incident_id AND incidents.company_id = members.company_id')
+                        ->join('vehicle_damage_items originals', 'originals.id = members.vehicle_damage_item_id AND originals.company_id = members.company_id AND originals.fleet_vehicle_id = incidents.fleet_vehicle_id')
+                        ->where('members.company_id', $company)->where('incidents.fleet_vehicle_id', $vehicle)
+                        ->where('COALESCE(originals.current_condition_item_id, originals.id)', $conditionRef)->whereIn('members.effect_code', ['new_damage', 'worsened'])
+                        ->where('COALESCE(incidents.occurred_at, incidents.discovered_at) >', $occurred)->limit(1)->get()->getRowArray();
+                    if ($later !== null) {
+                        throw new InvalidArgumentException('Inspection precedes a recorded wheel damage occurrence. Review the episode chronology.');
+                    }
+                }
                 $note = $this->text($data['inspection_note'] ?? '', 2000, true);
                 $this->memberUpdate($company, $member, ['result_code' => 'repaired', 'note' => $note, 'occurred_at' => $occurred], $actor, $now);
                 $physical = ['before' => $condition, 'values' => ['status_code' => 'repaired', 'resolved_by' => $actor, 'resolved_at' => $now, 'resolution_note' => $note, 'updated_by' => $actor, 'updated_at' => $now], 'event' => 'repaired', 'note' => $note];
@@ -839,6 +857,10 @@ class VehicleDamageRepairService
         $this->confirmed($selection['canonical_confirmed'] ?? null);
         $this->current($canonical);
         $this->checkFingerprint($canonical, $selection['expected_condition_state'] ?? '');
+        if (VehicleWheelEpisodeGuard::participates($canonical)) {
+            $guard = new VehicleWheelEpisodeGuard($this->db);
+            $guard->assertActive($canonical, $guard->resolve((int) $canonical['company_id'], (int) $canonical['fleet_vehicle_id'], $canonical['panel_code'], true));
+        }
         return $canonical;
     }
 

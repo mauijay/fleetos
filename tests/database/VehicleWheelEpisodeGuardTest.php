@@ -313,12 +313,14 @@ final class VehicleWheelEpisodeGuardTest extends CIUnitTestCase
                 $this->success($damage->reopenRepairedCondition(1, 10, $source, ['command_key' => Work::commandKey(), 'expected_condition_state' => $guard->conditionState($items->item(1, 10, $source)), 'confirmed' => 1,
                     'observed_at' => date('Y-m-d H:i:s'), 'reason_category_code' => 'repair_failure', 'note' => 'Synthetic reopened prior episode'], 7));
             }
+            // Establish genuine prior work before introducing the deliberate legacy conflict.
+            // Current repair targeting must reject a conflict rather than manufacture this history.
+            if (in_array($case, ['source_work', 'target_work'], true)) {
+                $this->success((new Work($f->db))->createJob(1, 10, RepairFixture::creation($f->db, [$case === 'source_work' ? $source : $target]), 7));
+            }
             if ($case !== 'different_wheel') {
                 $f->db->table('vehicle_damage_items')->where('id', $source)->update(['panel_code' => $case === 'unknown' ? null : self::data()['panel_code'],
                     'damage_type_code' => $case === 'different_type' ? 'scratch_scuff' : 'wheel_curb_rash']);
-            }
-            if (in_array($case, ['source_work', 'target_work'], true)) {
-                $this->success((new Work($f->db))->createJob(1, 10, RepairFixture::creation($f->db, [$case === 'source_work' ? $source : $target]), 7));
             }
             $a = $items->item(1, 10, $source);
             $b = $items->item(1, 10, $target);

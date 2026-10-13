@@ -574,7 +574,12 @@ class VehicleDamageRepairs extends BaseController
         Services::vehicleDamageRepairRepository()->requireReady();
         $damage = Services::vehicleDamageReadService()->workspace($company, $vehicle);
         $conditions = array_merge($damage['current'], $damage['history']);
-        return ['companyId' => $company, 'vehicle' => $owned, 'vehicleDamage' => $damage, 'work' => $damage['work'], 'conditionsById' => array_column($conditions, null, 'id'), 'fingerprints' => Services::vehicleDamageRepairRepository()->fingerprints($company, $conditions), 'vendors' => Services::vehicleDamageRepairRepository()->vendors($company), 'assets' => Services::assetManifestService()->appAssets(), 'notice' => CoreServices::session()->getFlashdata('damage_work_notice'), 'errors' => CoreServices::session()->getFlashdata('damage_work_errors') ?? [], 'formData' => CoreServices::session()->getFlashdata('damage_work_data') ?? []];
+        $wheelRepair = [];
+        if (array_any($conditions, \App\Services\Fleet\VehicleWheelEpisodeGuard::participates(...))) {
+            $projection = Services::vehicleWheelConditionReadService()->forVehicles($company, [$vehicle])[$vehicle];
+            $wheelRepair = \App\Services\Fleet\VehicleWheelRepairPresentation::contexts($conditions, $projection);
+        }
+        return ['wheelRepair' => $wheelRepair, 'companyId' => $company, 'vehicle' => $owned, 'vehicleDamage' => $damage, 'work' => $damage['work'], 'conditionsById' => array_column($conditions, null, 'id'), 'fingerprints' => Services::vehicleDamageRepairRepository()->fingerprints($company, $conditions), 'vendors' => Services::vehicleDamageRepairRepository()->vendors($company), 'assets' => Services::assetManifestService()->appAssets(), 'notice' => CoreServices::session()->getFlashdata('damage_work_notice'), 'errors' => CoreServices::session()->getFlashdata('damage_work_errors') ?? [], 'formData' => CoreServices::session()->getFlashdata('damage_work_data') ?? []];
     }
 
     private function jobContext(int $vehicle, int $job): array

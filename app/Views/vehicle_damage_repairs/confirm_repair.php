@@ -1,4 +1,4 @@
-<section class="section"><h1>Confirm physical repair</h1><p><?= esc($condition['description']) ?> · <?= esc($condition['status_code']) ?></p><p>Job completion and a reported repair do not confirm physical resolution. Confirm your inspection separately.</p>
+<section class="section"><h1>Confirm physical repair</h1><?= view('vehicle_damage_repairs/_wheel_context') ?><p><?= esc($condition['description']) ?> · <?= esc($condition['status_code']) ?></p><p>Job completion and a reported repair do not confirm physical resolution. Confirm your inspection separately.</p>
 <form action="/fleet/vehicles/<?= (int) $vehicle['id'] ?>/damage-repairs/<?= (int) $job['id'] ?>/conditions/<?= (int) $member['id'] ?>/confirm-repair" method="post">
 <?= csrf_field() ?><?= view('vehicle_damage_repairs/_command', ['workAction' => 'confirm']) ?><input type="hidden" name="expected_condition_state" value="<?= esc($fingerprints[$condition['id']], 'attr') ?>">
 <label>Inspection time<input type="datetime-local" name="inspected_at" required value="<?= esc((string) ($formData['inspected_at'] ?? date('Y-m-d\TH:i')), 'attr') ?>"></label>

@@ -5624,6 +5624,8 @@ h3 {
 .work-page input:not([type="checkbox"]), .work-page select, .work-page textarea { max-width: 100%; min-width: 0; width: 100%; }
 .work-page fieldset { min-width: 0; padding: 1rem; }
 .work-scope { border: 1px solid var(--border, #ccd5df); border-radius: .7rem; padding: 1rem; margin-block: 1rem; min-width: 0; overflow-wrap: anywhere; }
+.wheel-repair-context a { display: inline-flex; align-items: center; min-height: 44px; overflow-wrap: anywhere; }
+.wheel-repair-context a:focus-visible { outline: 3px solid var(--focus, #2563eb); outline-offset: 3px; }
 .work-facts { display: flex; flex-wrap: wrap; gap: 1rem; }
 .work-actions { display: grid; gap: .7rem; }
 .work-badge { overflow-wrap: anywhere; }
