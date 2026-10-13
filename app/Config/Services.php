@@ -515,6 +515,11 @@ class Services extends BaseService
         return $getShared ? static::getSharedInstance('vehicleWheelConditionReadService') : new \App\Services\Fleet\VehicleWheelConditionReadService();
     }
 
+    public static function vehicleWheelChecklistService(bool $getShared = true): \App\Services\Fleet\VehicleWheelChecklistService
+    {
+        return $getShared ? static::getSharedInstance('vehicleWheelChecklistService') : new \App\Services\Fleet\VehicleWheelChecklistService(\Config\Database::connect(), static::vehicleWheelConditionReadService());
+    }
+
     public static function vehicleDamageOccurrenceEvidenceService(bool $getShared = true): \App\Services\Fleet\VehicleDamageOccurrenceEvidenceService
     {
         return $getShared ? static::getSharedInstance('vehicleDamageOccurrenceEvidenceService') : new \App\Services\Fleet\VehicleDamageOccurrenceEvidenceService(\Config\Database::connect());

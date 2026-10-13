@@ -6,6 +6,7 @@
 <a class="wheel-cell<?= $wheel['state']==='conflict'?' wheel-cell-conflict':'' ?>" href="<?= esc($wheel['history_url'],'attr') ?>" aria-label="<?= esc($wheel['label'].': '.$wheel['status'].'. View wheel history','attr') ?>">
 <strong><?= esc($wheel['wheel_code']) ?> · <?= esc($wheel['label']) ?></strong><span><?= esc($wheel['status']) ?></span>
 <?php if($wheel['trip_badge']!==null): ?><small><?= esc($wheel['trip_badge']) ?><?= $wheel['trip_badge_noncausal']?' — noncausal observation':'' ?></small><?php endif; ?>
+<?php if($wheel['trip_badge']!=='Observed on this trip' && ($wheel['trip_observation']??null)!==null): ?><small>Observed on this trip - noncausal observation</small><?php endif; ?>
 <?php $repair=$wheel['repair_context']; if($repair!==null && $repair['physical_event_code']==='repaired' && $wheel['active_condition_id']===null): ?><small>Repaired <?= esc((string)$repair['physical_occurred_at']) ?></small><?php elseif($repair!==null && $repair['work_membership_id']!==null && $repair['withdrawn_at']===null): ?><small>Work result: <?= esc(str_replace('_',' ',(string)$repair['result_code'])) ?></small><?php endif; ?>
 <small>View history</small></a>
 <?php endforeach; ?></div>

@@ -123,6 +123,8 @@ $routes->group('', ['filter' => 'session'], static function (RouteCollection $ro
         $routes->post('(:num)/damage/(:num)/status/(:segment)', 'VehicleDamage::transition/$1/$2/$3');
     });
     $routes->get('operations/checklists/(:num)', 'TripMovementChecklists::show/$1', ['filter' => 'permission:admin.access']);
+    $routes->get('operations/checklists/(:num)/wheel-curb-rash/(LF|RF|RR|LR)/(new|worsening|unchanged)', 'VehicleWheelChecklist::entry/$1/$2/$3', ['filter' => 'permission:admin.access']);
+    $routes->post('operations/checklists/(:num)/wheel-curb-rash/(LF|RF|RR|LR)/(new|worsening|unchanged)', 'VehicleWheelChecklist::command/$1/$2/$3', ['filter' => 'permission:admin.access']);
     $routes->get('operations/vehicles/(:num)/trip-history', 'TripMovementChecklists::vehicleTripHistory/$1', ['filter' => 'permission:admin.access']);
     $routes->get('operations/trips/(:num)/commitments', 'TripCommitments::index/$1', ['filter' => 'permission:admin.access']);
     $routes->post('operations/trips/(:num)/commitments', 'TripCommitments::create/$1', ['filter' => 'permission:admin.access']);

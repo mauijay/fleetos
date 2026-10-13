@@ -145,7 +145,7 @@ $tripFacts ??= [
             <?php endif; ?>
             <?= view('trip_movement_checklists/_guest_commitments', ['checklist' => $checklist, 'guestCommitments' => $guestCommitments ?? [], 'extraPreparation' => $extraPreparation ?? [], 'extraVerification' => $extraVerification ?? null, 'readiness' => $readiness, 'renderFulfillment' => true]) ?>
             <?= view('trip_movement_checklists/_future_preparation', ['checklist' => $checklist, 'readiness' => $readiness, 'futureExtraPreparation' => $futureExtraPreparation ?? []]) ?>
-            <?= view('trip_movement_checklists/_known_damage', ['checklist' => $checklist, 'vehicleDamage' => $vehicleDamage, 'availableDamageExceptions' => $availableDamageExceptions, 'notice' => $vehicleDamageNotice, 'errors' => $vehicleDamageErrors, 'form' => $vehicleDamageForm, 'formData' => $vehicleDamageData]) ?>
+            <?= view('trip_movement_checklists/_known_damage', ['checklist' => $checklist, 'vehicleDamage' => $vehicleDamage, 'availableDamageExceptions' => $availableDamageExceptions, 'notice' => $vehicleDamageNotice, 'errors' => $vehicleDamageErrors, 'form' => $vehicleDamageForm, 'formData' => $vehicleDamageData, 'wheelStaging' => $wheelStaging ?? null, 'stagingWheelNotice' => $stagingWheelNotice ?? null]) ?>
 
             <?php if (($checklist['movement_type'] ?? null) === 'return'): ?>
                 <?php if ($canRecover): ?>

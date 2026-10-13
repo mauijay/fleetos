@@ -1,0 +1,12 @@
+<?php if ($wheelStaging !== null && ($wheelStaging['projection']['available'] ?? false)): ?>
+<?php $projection = $wheelStaging['projection']; $context = $wheelStaging['context']; ?>
+<?= view('vehicle_wheel_history/_strip', ['projection' => $projection]) ?>
+<style>.staging-wheel-actions{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.staging-wheel-actions article{min-width:0;overflow-wrap:anywhere}.staging-wheel-actions a,.wheel-optional>summary{display:flex;align-items:center;min-height:44px;padding:8px;box-sizing:border-box}.staging-wheel-actions a:focus-visible,.wheel-optional>summary:focus-visible{outline:3px solid #2563eb;outline-offset:3px}@media(max-width:600px){.staging-wheel-actions{grid-template-columns:repeat(2,minmax(0,1fr))}}</style>
+<p class="muted">Wheel review is optional. No wheel confirmation is required for staging or pickup readiness.</p>
+<?php if (!$context['can_record']): ?><p><?= esc($context['read_only_reason']) ?></p><p><a href="/fleet/vehicles/<?= (int)$context['fleet_vehicle_id'] ?>/wheel-damage/new">Open vehicle Damage workflow</a></p>
+<?php else: ?><details class="capital-disclosure wheel-optional"><summary>Optional wheel actions</summary><div class="staging-wheel-actions">
+<?php foreach($projection['wheels'] as $wheel): ?><article data-wheel-actions="<?= esc($wheel['wheel_code'],'attr') ?>"><h3><?= esc($wheel['label']) ?></h3><a href="<?= esc($wheel['history_url'],'attr') ?>">Review photos/history</a>
+<?php if($wheel['state']==='none' && $wheel['alias_integrity']==='valid'): ?><a href="<?= esc(\App\Services\Fleet\VehicleWheelChecklistService::actionUrl((int)$context['id'],$wheel['wheel_code'],'new'),'attr') ?>" aria-label="<?= esc($wheel['label'].': Record new curb rash','attr') ?>">Record new curb rash</a>
+<?php elseif($wheel['state']==='one' && $wheel['alias_integrity']==='valid'): ?><a href="<?= esc(\App\Services\Fleet\VehicleWheelChecklistService::actionUrl((int)$context['id'],$wheel['wheel_code'],'unchanged'),'attr') ?>" aria-label="<?= esc($wheel['label'].': Confirm unchanged','attr') ?>">Confirm unchanged</a><a href="<?= esc(\App\Services\Fleet\VehicleWheelChecklistService::actionUrl((int)$context['id'],$wheel['wheel_code'],'worsening'),'attr') ?>" aria-label="<?= esc($wheel['label'].': Record worsening','attr') ?>">Record worsening</a><?php endif; ?></article><?php endforeach; ?>
+</div></details><?php endif; ?>
+<?php else: ?><p class="muted">Wheel history unavailable.</p><?php endif; ?>

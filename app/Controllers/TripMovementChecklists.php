@@ -157,6 +157,8 @@ class TripMovementChecklists extends BaseController
             'canRecover' => $canRecover,
             'recoveryExceptions' => $recoveryExceptions,
             'vehicleDamage' => $vehicleDamage,
+            'wheelStaging' => ($checklist['exists'] ?? false) && $companyId > 0 ? Services::vehicleWheelChecklistService()->forChecklist($companyId, $id, $asOf) : null,
+            'stagingWheelNotice' => CoreServices::session()->getFlashdata('staging_wheel_notice'),
             'availableDamageExceptions' => ($checklist['exists'] ?? false) && $companyId > 0
                 ? Services::vehicleDamageService()->availableDamageExceptions($companyId, (int) $checklist['fleet_vehicle_id'], (int) $checklist['turo_trip_normalized_id'])
                 : [],

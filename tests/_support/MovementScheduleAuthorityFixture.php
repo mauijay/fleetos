@@ -25,6 +25,8 @@ final class MovementScheduleAuthorityFixture
     /** @return array<string, array{count:int,sha256:string}> */
     public static function fingerprints(BaseConnection $db): array
     {
+        // Fixture DDL can leave a cached table list; compare every actual table on both sides.
+        $db->resetDataCache();
         $result = [];
         foreach ($db->listTables() as $table) {
             $rows = $db->table($table)->get()->getResultArray();
