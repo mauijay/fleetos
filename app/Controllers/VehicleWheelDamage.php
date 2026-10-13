@@ -104,8 +104,12 @@ class VehicleWheelDamage extends BaseController
                 ->with('wheel_notice', 'Save outcome needs verification. Use Recover pending save with its original UUID and photo identity.');
         }
         if (! $result['success']) {
+            $formData = array_filter($this->request->getPost(), static fn (mixed $value): bool => is_scalar($value) || $value === null);
+            // The route action and original fingerprints describe the rejected intent.
+            // A refreshed current slot must not reinterpret New as Worsening.
+            $formData['_wheel_action'] = $action;
             return CoreServices::redirectresponse()->to($failureUrl ?? '/fleet/vehicles/' . $vehicle . '/wheel-damage/new?wheel_code=' . rawurlencode((string) ($data['wheel_code'] ?? 'LF')))
-                ->with('wheel_errors', $result['errors'])->with('wheel_data', $this->request->getPost())
+                ->with('wheel_errors', $result['errors'])->with('wheel_data', $formData)
                 ->with('wheel_notice', 'Selected files must be reselected before retrying. Other form values have been preserved.');
         }
         $session->remove($this->retryKey($vehicle));

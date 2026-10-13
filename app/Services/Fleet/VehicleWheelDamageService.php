@@ -189,7 +189,7 @@ class VehicleWheelDamageService
                 $this->evidence->release();
                 return ['success' => false, 'uncertain' => true, 'retry_payload' => $this->semantic($data), 'errors' => ['wheel' => 'Save outcome is uncertain. Retry the original command UUID and frozen photo descriptors to recover its receipt.']];
             }
-            return ['success' => false, 'errors' => ['wheel' => $exception->getMessage()]];
+            return ['success' => false, 'errors' => ['wheel' => $exception instanceof InvalidArgumentException ? $exception->getMessage() : 'Wheel occurrence could not be saved. Reload and retry.']];
         }
     }
 

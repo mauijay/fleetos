@@ -190,13 +190,24 @@ try {
   delete stalePacket['photos[]'];
   await submit('#wheel-occurrence-form');
   await navigate('/fleet/vehicles/10/wheel-damage/new?wheel_code=LR');
-  const currentTokens = await evaluate('Object.fromEntries([...document.querySelectorAll("#wheel-occurrence-form input[type=hidden]")].filter(f=>f.name.includes("csrf")).map(f=>[f.name,f.value]))');
-  Object.assign(stalePacket, currentTokens, { command_uuid: randomUUID() });
-  const beforeStale = await counts();
-  const staleHtml = await evaluate(`(async()=>{const response=await fetch('/fleet/vehicles/10/wheel-damage/new',{method:'POST',body:new URLSearchParams(${JSON.stringify(stalePacket)}),redirect:'follow'}); return await response.text();})()`);
-  assert(staleHtml.includes('Wheel state changed'), staleHtml);
-  assert.deepEqual(await counts(), beforeStale, 'Stale New remains New and creates no worsening');
-  results.push({ label: 'stale-New-no-auto-conversion', counts: beforeStale });
+  for (const width of [390,1280,1920]) {
+    await call('Emulation.setDeviceMetricsOverride', { width, height:900, deviceScaleFactor:1, mobile:width===390 });
+    await navigate('/fleet/vehicles/10/wheel-damage/new?wheel_code=LR');
+    await fill('#wheel-occurrence-form',{command_uuid:randomUUID(),expected_wheel_state:stalePacket.expected_wheel_state,note:stalePacket.note,discovered_at:stalePacket.discovered_at});
+    // Re-submit the original New route/snapshot after another writer occupied it.
+    await evaluate('document.querySelector("#wheel-occurrence-form").action="/fleet/vehicles/10/wheel-damage/new"');
+    const beforeStale = await counts();
+    await submit('#wheel-occurrence-form');
+    assert((await evaluate('document.body.innerText')).includes('Wheel state changed'));
+    assert.equal(await evaluate('document.querySelector("#wheel-occurrence-form").getAttribute("action")'),'/fleet/vehicles/10/wheel-damage/new');
+    assert.equal(await evaluate('document.querySelector("[name=expected_wheel_state]").value'),stalePacket.expected_wheel_state);
+    assert.equal(await evaluate('document.querySelector("#wheel-note").value'),stalePacket.note);
+    assert(!await evaluate('!!document.querySelector("button[formaction]")'),'Stale New cannot become Worsening or Unchanged');
+    await inspect(width,'stale-new-preserved');
+    assert.deepEqual(await counts(),beforeStale,'Rejected command and repeated error GET are pure');
+    await submit('#wheel-occurrence-form');
+    assert.deepEqual(await counts(),beforeStale,'Retry keeps rejected New intent and cannot create worsening');
+  }
   const csrfBefore = await counts();
   const csrf = await fetch(base + '/fleet/vehicles/10/wheel-damage/new', { method: 'POST', body: new URLSearchParams({ note: 'Synthetic forged submission' }), redirect: 'manual' });
   assert(csrf.status >= 400); assert.deepEqual(await counts(), csrfBefore);
