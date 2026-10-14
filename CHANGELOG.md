@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.35.1 — Repair Selection Empty-State Fix
+
+Release date: 2026-10-13
+
+### Fixed
+
+- Repair selection now renders correctly for vehicles with no current known Damage.
+- No schema or migration changes.
+
 ## v0.35.0 — Wheel Curb-Rash Tracking
 
 Release date: 2026-10-13
