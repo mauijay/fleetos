@@ -1,0 +1,58 @@
+# Privileged missing historical handoff
+
+`historical_missing_handoff.v1` supplies exactly one omitted `actual_handoff` / `pickup` in an already closed historical interval. It requires a noncanceled owned trip, exact pickup/return checklist identities, a conflict-free prior operator custody boundary, and exactly one active original later same-trip `vehicle_recovered`. An optional earlier `guest_return_staged` and its recovery assessment remain unchanged. Imported `in_progress` is accepted only inside this operation when the physical recovery proves closure.
+
+The CLI is intended for trusted server operators. The explicit `--actor` must be an existing active, unbanned Shield superadmin with `admin.access` under the current same-database Settings matrix. No browser route exposes this service; actor fields inside the JSON are rejected. Ordinary movement writers and paired historical repair retain their existing guards.
+
+Keep the request outside the public directory, protect it with filesystem permissions (mode 0600 on Unix or a private Windows ACL), and protect command output because previews contain trip authority. An explicit canonical v4 UUID, reason, attestation, and each preserved boundary ID are mandatory. Use explicit `null` for a recovery assessment only when none exists. Request files must be JSON objects no larger than 64 KiB.
+
+This is a synthetic request shape; obtain real identifiers from a separately authorized read-only review:
+
+```json
+{
+  "operation_uuid": "a42682b2-d10d-4d51-8c02-d2a48a77e3ba",
+  "company_id": 8101,
+  "vehicle_id": 8201,
+  "trip_id": 8301,
+  "pickup_checklist_id": 8501,
+  "return_checklist_id": 8502,
+  "recovery_event_id": 8601,
+  "recovery_assessment_id": 8701,
+  "handoff": {
+    "occurred_at": "2024-03-14 11:27:00",
+    "location_class": "airport_hnl",
+    "airport_garage_code": "international",
+    "airport_parking_level": 2,
+    "airport_parking_row": "F",
+    "location_note": "Synthetic charging bay"
+  },
+  "reason": "Synthetic archive review found an omitted handoff.",
+  "attestation": "Synthetic operator attests the occurrence and location; no measurements were captured."
+}
+```
+
+Times use the application's Honolulu timezone and exact `Y-m-d H:i:s`. Existing HNL garage/level/row validation produces the canonical location detail; an optional additional note remains separate. Other existing known location classes are accepted under their domain rules. Unsupported fields, measurements, unknown locations, and contradictory structured/text details fail closed. No assessment or observation is fabricated. The new event's `occurred_at` is historical, while its normal `created_at` records the correction time.
+
+Preview first:
+
+```text
+php spark fleet:repair:missing-handoff --request <private-request.json> --actor <superadmin-id>
+```
+
+Review scope, original schedule and checklist state, proposed location/time, prior/report/recovery/assessment/later boundaries, open pickup task discrepancy, current custody/position, other-workspace readiness, availability, and preservation fingerprints. Preview has no business, audit, or receipt writes. It does not complete the pickup checklist task.
+
+Apply only with the exact reviewed fingerprint:
+
+```text
+php spark fleet:repair:missing-handoff --request <same-private-request.json> --actor <same-superadmin-id> --apply --confirm <exact-preview-sha256>
+```
+
+The root transaction locks the existing receipt range, company/vehicle and complete bounded movement ranges, authorization, commercial inputs, reference values, and related audits. On MariaDB all affected inputs must use InnoDB; locking reads precede any consistent data snapshot. It rechecks ownership, absence, chronology, interval closure, projections and the exact fingerprint under lock. Any changed authority requires a newly reviewed preview. Display `as_of` and position-age clocks are excluded from preservation comparisons, but time-dependent eligibility and freshness are still evaluated.
+
+Success creates one handoff and two existing `operational_fact_audits` rows: explicit creation audit and successful UUID receipt. Every preexisting row and all protected projections must match before commit, including after receipt persistence. No schema, recovery, assessment, position, checklist, task, future reservation, Damage, Extras or financial write is permitted. Reads are bounded; exceeding a bound requires separate review rather than a partial result. Locks intentionally favor safety over concurrency for this low-frequency command.
+
+Same UUID and normalized payload/actor with the original fingerprint replays the original event/audit IDs without additional writes. If acknowledgement is lost, inspect or replay that UUID before assuming failure. A changed payload, actor or original event/creation audit fails closed. A replay reports preservation at the original apply; later independently authorized changes are not undone. Never blindly retry an uncertain result with a new UUID.
+
+Existing or voided handoffs, ambiguous/voided/superseding recoveries, pickup assessments, cross-trip guest overlap, same-second ambiguity, and any changed protected readiness or authority require separate review. The guard also protects other existing checklist workspaces; it does not silently retire their readiness actions.
+
+A later code release/deployment requires its own authorization. Any exact real historical correction requires separate authorization after that code is deployed, a fresh read-only preview, and explicit apply confirmation. This local implementation does not authorize either stage.
