@@ -1,5 +1,40 @@
 # Changelog
 
+## v0.35.0 — Wheel Curb-Rash Tracking
+
+Release date: 2026-10-13
+
+### Wheel Curb-Rash
+
+- Track LF/RF/RR/LR wheels with one persistent unrepaired curb-rash episode per
+  wheel and explicit new damage, worsening, and unchanged observations.
+- Record guest-associated worsening and explicit causal attribution separately;
+  trip association alone does not establish cause.
+- Describe clock positions with the valve stem at 12 o'clock as the reference.
+- Add private occurrence photos, frozen before/after guest comparisons, episode
+  history, and wheel Damage filters.
+- Integrate optional wheel review into Current Known Damage on movement checklists.
+- Support batch and partial repair with exact episode scope, new episodes after
+  confirmed repair, and occupied-slot reopening protections.
+
+### Safety and Provenance
+
+- Keep existing panel_code as the sole wheel identity and the Damage Ledger as
+  physical condition authority; no duplicate wheel-position persistence.
+- Keep staging review optional and nonblocking, with read-only GET rendering.
+- Preserve explicit physical repair confirmation; repair job completion does not
+  imply physical repair or change financial authorities.
+- Add replay receipts, exact event/membership provenance, stale-state and
+  concurrency guards, and safe rejected-command retries.
+- Make no automatic clean-wheel claim when no active rash is recorded.
+
+### Schema
+
+- Add migration 000036 with nullable condition-event, frozen comparison-basis,
+  and occurrence-evidence links, plus accepted indexes, foreign keys, and bounded
+  JSON constraints.
+- Perform no business-data backfill; legacy provenance remains NULL.
+
 ## v0.34.1 — Handoff Condition Presentation
 
 Release date: 2026-10-11
