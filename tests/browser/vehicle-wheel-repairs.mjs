@@ -118,6 +118,29 @@ try {
   for (width of [390, 1280, 1920]) {
     await call('Network.setCookie', {name:'slice6_width', value:String(width), url:base});
     await call('Emulation.setDeviceMetricsOverride', { width, height:1100, deviceScaleFactor:1, mobile:width===390 });
+
+    // Empty/non-wheel/historical and adversarial selection controls use isolated fixtures.
+    for (const scenario of ['empty','body','wheel','mixed','historical','conflict','unknown','generic']) {
+      await call('Network.setCookie', {name:'repair_form_case',value:scenario,url:base});
+      const fixtureState = async () => (await fetch(base+'/synthetic-wheel-state',{headers:{Cookie:`slice6_width=${width}; repair_form_case=${scenario}`}})).json();
+      const before = await fixtureState();
+      await navigate('/fleet/vehicles/10/damage-repairs/new'); await inspect('repair-form-'+scenario);
+      assert.equal((await fixtureState()).hash,before.hash,'Repair form GET purity: '+scenario);
+      const selection = await evaluate(`({empty:document.body.innerText.includes('No current known damage recorded.'),targets:document.querySelectorAll('input[name$="[canonical_confirmed]"]').length,disabled:document.querySelectorAll('input[name$="[canonical_confirmed]"]:disabled').length,mitigationDisabled:document.querySelector('[name=performed_confirmed]').disabled,text:document.body.innerText})`);
+      assert.equal(selection.targets,{empty:0,body:1,wheel:4,mixed:5,historical:0,conflict:3,unknown:1,generic:3}[scenario]);
+      assert.equal(selection.empty,['empty','historical'].includes(scenario));
+      assert.equal(selection.disabled,scenario==='conflict'?2:0); assert.equal(selection.mitigationDisabled,false);
+      assert(!/Undefined|Warning:|Fatal error|Exception:|C:\\|\/home\//.test(selection.text),selection.text);
+      if(['wheel','mixed'].includes(scenario))for(const code of ['LF','RF','RR','LR'])assert(selection.text.includes(code+' Wheel — curb rash'));
+      if(scenario==='mixed')assert(!selection.text.includes('Synthetic historical'));
+      if(scenario==='unknown')assert(selection.text.includes('Synthetic wheel position unknown')&&!selection.text.includes('LF Wheel — curb rash'));
+      await evaluate("document.querySelector('[name=summary]').focus()");
+      await call('Input.dispatchKeyEvent',{type:'keyDown',key:'Tab',code:'Tab',windowsVirtualKeyCode:9});
+      await call('Input.dispatchKeyEvent',{type:'keyUp',key:'Tab',code:'Tab',windowsVirtualKeyCode:9});
+      assert.equal(await evaluate('document.activeElement.name'),'intent_code');
+      assert.notEqual(await evaluate('getComputedStyle(document.activeElement).outlineStyle'),'none','Visible form keyboard focus');
+    }
+    await call('Network.setCookie',{name:'repair_form_case',value:'accepted',url:base});
     await pureNavigate('/fleet/vehicles/10/damage-repairs/new'); await inspect('wheel-selection');
     let text = await evaluate('document.body.innerText');
     for (const wheel of ['LF','RF','RR','LR']) assert(text.includes(wheel + ' Wheel'), text);
@@ -153,7 +176,7 @@ try {
     await pureNavigate('/fleet/vehicles/10/wheel-history/LF'); await inspect('later-active-history');
     await pureNavigate('/fleet/vehicles/10/damage-repairs/new'); await inspect('conflict-selection');
     assert(await evaluate('document.body.innerText.includes("Review conflicting records")'));
-    assert.equal(await evaluate('[...document.querySelectorAll("input[type=checkbox]:disabled")].length'),2);
+    assert.equal(await evaluate('[...document.querySelectorAll("input:disabled")].filter(e=>e.name.endsWith("[canonical_confirmed]")).length'),2);
     await evaluate(`document.querySelector('.wheel-repair-context a').focus()`);
     for (const modifiers of [0,8]) {
       await call('Input.dispatchKeyEvent',{type:'keyDown',key:'Tab',code:'Tab',windowsVirtualKeyCode:9,modifiers});

@@ -35,7 +35,11 @@ $width = (string) ($_COOKIE['slice6_width'] ?? '390');
 if (! in_array($width, ['390', '1280', '1920'], true)) {
     throw new RuntimeException('Synthetic viewport required.');
 }
-$configuration['database'] = $directory . '/synthetic-' . $width . '.sqlite';
+$case = (string) ($_COOKIE['repair_form_case'] ?? 'accepted');
+if ($case !== 'accepted' && ! in_array($case, \Tests\Support\VehicleRepairFormFixture::CASES, true)) {
+    throw new RuntimeException('Unknown synthetic repair form case.');
+}
+$configuration['database'] = $directory . '/synthetic-' . $case . '-' . $width . '.sqlite';
 $configuration['DBPrefix'] = '';
 $db = \Config\Database::connect($configuration, false);
 if (! $db->tableExists('vehicle_damage_repair_jobs')) {
@@ -44,11 +48,15 @@ if (! $db->tableExists('vehicle_damage_repair_jobs')) {
 }
 if ($db->table('companies')->countAllResults() === 0) {
     \Tests\Support\VehicleDamageDatabaseFixture::seed($db);
-    $wheelFixture = new \Tests\Support\VehicleWheelRepairFixture($db);
-    foreach (['LF', 'RF', 'RR', 'LR'] as $wheel) {
-        $wheelFixture->create($wheel, ['note' => 'Synthetic ' . $wheel . ' rash at 2 o\'clock. ' . str_repeat('Longdescription', 70)]);
+    if ($case !== 'accepted') {
+        \Tests\Support\VehicleRepairFormFixture::seed($db, $case);
+    } else {
+        $wheelFixture = new \Tests\Support\VehicleWheelRepairFixture($db);
+        foreach (['LF', 'RF', 'RR', 'LR'] as $wheel) {
+            $wheelFixture->create($wheel, ['note' => 'Synthetic ' . $wheel . ' rash at 2 o\'clock. ' . str_repeat('Longdescription', 70)]);
+        }
+        \Tests\Support\VehicleDamageRepairDatabaseFixture::condition($db);
     }
-    \Tests\Support\VehicleDamageRepairDatabaseFixture::condition($db);
 
 }
 // Read-only whole-business snapshot; framework session state is outside business authority.
