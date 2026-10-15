@@ -387,11 +387,14 @@ final class HistoricalMissingHandoffRepairTest extends TestCase
         $this->assertSame($before, HistoricalMovementRepairFixture::snapshot($this->db));
     }
 
-    public function testHistoricalHandoffWouldRetireAnotherWorkspaceReadinessAndIsRejected(): void
+    public function testHistoricalHandoffMayRetireClosedWorkspaceActionsWithResolvedExtras(): void
     {
+        $this->db->table('vehicle_operational_profiles')->insert(['fleet_vehicle_id' => Fixture::VEHICLE, 'energy_kind' => 'electric', 'ready_energy_target_percent' => 80, 'created_by' => Fixture::ACTOR, 'updated_by' => Fixture::ACTOR]);
         $facts = new OperationalFactsRepository($this->db);
         (new App\Services\Fleet\TripMovementChecklistService(new App\Repositories\MovementChecklistRepository($this->db)))->ensureForMovement($facts->tripSchedule(8300), 'return');
-        $this->reject($this->r);
+        $preview = $this->repair->preview($this->r, Fixture::ACTOR);
+        $this->assertCount(2, $preview['historical_affordances_retired']);
+        $this->assertSame($preview['current_future_before'], $preview['current_future_after']);
     }
 
     private function reject(array $r, int $actor = Fixture::ACTOR): void

@@ -53,12 +53,42 @@ final class HistoricalMissingHandoffFixture
         foreach (['pickup', 'return'] as $type) {
             $checklists->ensureForMovement($facts->tripSchedule(8302), $type);
         }
+        self::freshExtras($db);
         return ['operation_uuid' => self::uuid(), 'company_id' => self::COMPANY, 'vehicle_id' => self::VEHICLE, 'trip_id' => self::TRIP,
             'pickup_checklist_id' => (int) $pickup['id'], 'return_checklist_id' => (int) $return['id'],
             'recovery_event_id' => $recovery, 'recovery_assessment_id' => $assessment,
             'handoff' => ['occurred_at' => '2024-03-14 11:27:00', 'location_class' => 'airport_hnl',
                 'airport_garage_code' => 'international', 'airport_parking_level' => 2, 'airport_parking_row' => 'F', 'location_note' => 'Synthetic charging bay'],
             'reason' => 'Synthetic archive review found an omitted guest handoff.', 'attestation' => 'Synthetic operator attests this occurrence and location; no pickup measurements were captured.'];
+    }
+
+    /** Closed owner, two immutable workspace snapshots and an independent future pickup. */
+    public static function historicalAffordances(BaseConnection $db): array
+    {
+        $facts = new OperationalFactsRepository($db);
+        $checklists = new TripMovementChecklistService(new MovementChecklistRepository($db));
+        $old = $checklists->ensureForMovement($facts->tripSchedule(8300), 'return');
+        $duplicate = $db->table('trip_movement_checklists')->where('id', $old['id'])->get()->getRowArray();
+        unset($duplicate['id']);
+        $duplicate['scheduled_at'] = '2024-03-12 08:00:00';
+        $db->table('trip_movement_checklists')->insert($duplicate);
+        $ids = [(int) $old['id'], (int) $db->insertID()];
+        $db->table('vehicle_operational_profiles')->insert(['fleet_vehicle_id' => self::VEHICLE,
+            'energy_kind' => 'electric', 'ready_energy_target_percent' => 80, 'created_by' => self::ACTOR, 'updated_by' => self::ACTOR]);
+        return $ids;
+    }
+
+    public static function freshExtras(BaseConnection $db): void
+    {
+        $db->table('turo_import_batches')->insert(['import_type_lookup_value_id' => (new LookupRepository($db))->valueId('import_type', 'turo_extras'), 'source_hash' => hash('sha256', 'synthetic-empty'), 'created_at' => gmdate('Y-m-d H:i:s')]);
+        $batch = (int) $db->insertID();
+        $db->table('turo_extra_reservation_snapshots')->insert([
+            'company_id' => self::COMPANY, 'turo_import_batch_id' => $batch, 'turo_trip_normalized_id' => self::TRIP,
+            'created_at' => gmdate('Y-m-d H:i:s'), 'source_payload_hash' => hash('sha256', 'synthetic-empty'),
+            'turo_reservation_id' => 'SYNTHETIC-ARCHIVE-RES-' . self::TRIP,
+            'observed_at' => gmdate('Y-m-d H:i:s', time() - 60), 'snapshot_complete' => 1,
+            'source_payload' => json_encode(['extras' => []], JSON_THROW_ON_ERROR),
+        ]);
     }
 
     public static function uuid(): string

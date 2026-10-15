@@ -74,14 +74,23 @@ final class HistoricalMissingHandoffRepairService
                 $owned = $this->ownership($r);
                 $state = $this->repository->state($r['vehicle_id']);
                 $before = $this->projection->capture($r, $state, $now);
-                $boundaries = $this->validate($r, $owned, $state, $before, $now);
+                try {
+                    $boundaries = $this->validate($r, $owned, $state, $before, $now);
+                } catch (RuntimeException $e) {
+                    if ($confirmation !== null) {
+                        throw new RuntimeException('Historical handoff preview is stale or unsafe: ' . $e->getMessage(), 0, $e);
+                    }
+                    throw $e;
+                }
                 $hash = $this->hash([self::OPERATION, $r, $actor, $owned, $state, $before, $boundaries]);
                 $result = ['operation' => self::OPERATION, 'status' => 'preview', 'operation_uuid' => $r['operation_uuid'],
                     'confirmation' => $hash, 'scope' => array_intersect_key($r, array_flip(['company_id', 'vehicle_id', 'trip_id'])),
                     'creates' => ['actual_handoff' => $r['handoff']], 'assessment_creation' => false,
                     'boundaries' => $boundaries, 'schedule' => $owned['trip'], 'checklists' => $owned['checklists'],
                     'pickup_task_discrepancy' => array_values(array_filter($state['trip_movement_checklist_items'], static fn ($i) => (int) $i['trip_movement_checklist_id'] === $r['pickup_checklist_id'] && $i['item_code'] === 'guest_handoff_completed')),
-                    'before' => $before['projected'], 'projected_after' => $before['projected'], 'conflicts' => [],
+                    'before' => $before['projected'], 'projected_after' => $boundaries['preservation']['historical_after'], 'conflicts' => [],
+                    'historical_affordances_retired' => $boundaries['preservation']['retired'],
+                    'current_future_before' => $boundaries['preservation']['current_before'], 'current_future_after' => $boundaries['preservation']['current_after'],
                     'preservation_fingerprints' => ['state' => $this->hash($state), 'inputs' => $this->hash($before['inputs']), 'authority' => $this->hash($before['projected'])]];
                 if ($confirmation !== null) {
                     if (! hash_equals($hash, $confirmation)) {
@@ -247,22 +256,18 @@ final class HistoricalMissingHandoffRepairService
             'custody_trip_ends_at' => $owned['trip']['ends_at'], 'custody_trip_status_code' => $owned['trip']['trip_status_code'], 'custody_trip_canceled_at' => null];
         $timeline[] = $event;
         $closed = $custody->resolveEvents(array_values(array_filter($timeline, static fn ($e) => $e['occurred_at'] <= $recovery['occurred_at'])));
-        $hyp = $before['inputs'];
-        $hyp['timeline'] = $timeline;
-        foreach ($hyp['contexts'] as &$context) {
-            $resolved = $custody->resolveEvents($timeline);
-            $context['vehicle_custody'] = $resolved;
-            $context['latest_custody_event'] = $resolved['basis_event'];
-            $context['latest_vehicle_use_event'] = $custody->resolveEvents(array_values(array_filter($timeline, static fn ($e) => $e['event_code'] !== 'vehicle_staged')))['basis_event'];
-            if ((int) ($context['next_trip']['id'] ?? 0) === $r['trip_id']) {
-                $context['next_pickup_handoff'] = $event;
-            }
+        $hyp = $this->projection->withHandoff($r, $before['inputs'], $event);
+        $historical = $this->projection->historicalView($r, $hyp, $before['inputs']['commercial'], $now);
+        $currentBefore = $this->projection->currentFuture($r, $before['inputs'], $now);
+        $currentAfter = $this->projection->currentFuture($r, $hyp, $now);
+        $retired = (new HistoricalMissingHandoffPreservation())->compare($r, $before['inputs'], $before['projected'], $historical, $currentBefore, $currentAfter);
+        if ($closed['custody'] !== 'operator' || $closed['basis_event_id'] !== $r['recovery_event_id'] || $closed['integrity_conflict']) {
+            throw new RuntimeException('Hypothetical handoff fails interval closure.');
         }
-        unset($context);
-        if ($this->projection->project($r, $hyp, $now) !== $before['projected'] || $closed['custody'] !== 'operator' || $closed['basis_event_id'] !== $r['recovery_event_id'] || $closed['integrity_conflict']) {
-            throw new RuntimeException('Hypothetical handoff changes current authority or fails interval closure.');
-        }
-        return ['prior' => $prior['basis_event'], 'guest_return_staged' => $reports, 'recovery' => $recovery,
+        $preservation = ['retired' => $retired, 'historical_after' => $historical, 'current_before' => $currentBefore, 'current_after' => $currentAfter,
+            'unfiltered_hypothetical_fingerprint' => $this->hash([$hyp, $this->projection->project($r, $hyp, $now)]),
+            'classification_fingerprint' => $this->hash($retired)];
+        return ['preservation' => $preservation, 'prior' => $prior['basis_event'], 'guest_return_staged' => $reports, 'recovery' => $recovery,
             'recovery_assessment' => $linked[0] ?? null, 'later_events' => array_values(array_filter($events, static fn ($e) => $e['occurred_at'] > $recovery['occurred_at']))];
     }
 
@@ -290,6 +295,9 @@ final class HistoricalMissingHandoffRepairService
             'company_id' => $r['company_id'], 'vehicle_id' => $r['vehicle_id'], 'trip_id' => $r['trip_id'], 'event_id' => $id,
             'occurred_at' => $h['occurred_at'], 'recorded_at' => $event['created_at'], 'reason' => $r['reason'], 'attestation' => $r['attestation'],
             'confirmation' => $confirmation, 'preserved_recovery_event_id' => $r['recovery_event_id'], 'preserved_recovery_assessment_id' => $r['recovery_assessment_id'],
+            'historical_affordances_retired' => $boundaries['preservation']['retired'],
+            'historical_classification_fingerprint' => $boundaries['preservation']['classification_fingerprint'],
+            'current_future_authority_fingerprint' => $this->hash($boundaries['preservation']['current_before']),
             'preserved_authority_fingerprint' => $this->hash($before['projected']), 'boundary_fingerprint' => $this->hash($boundaries)];
         $this->repository->audit($r['company_id'], 'trip_movement_events', $id, 'historical_missing_handoff_created', $actor, [], $auditData);
         $creationAudit = (int) $this->db->insertID();
@@ -297,12 +305,20 @@ final class HistoricalMissingHandoffRepairService
         $afterState = $this->repository->state($r['vehicle_id']);
         $after = $this->projection->capture($r, $afterState, $now);
         $oldProjection = $this->projection->project($r, $before['inputs'], $now);
-        if ($after['projected'] !== $oldProjection || $this->protectedState($afterState, $id, [$creationAudit]) !== $state) {
+        if ($this->protectedState($afterState, $id, [$creationAudit]) !== $state) {
             throw new RuntimeException('Historical handoff preservation failed; entire operation rolled back.');
         }
+        $historicalAfter = $this->projection->historicalView($r, $after['inputs'], $before['inputs']['commercial'], $now);
+        $currentBefore = $this->projection->currentFuture($r, $before['inputs'], $now);
+        $currentAfter = $this->projection->currentFuture($r, $after['inputs'], $now);
+        $retired = (new HistoricalMissingHandoffPreservation())->compare($r, $before['inputs'], $oldProjection, $historicalAfter, $currentBefore, $currentAfter);
+        if ($retired !== $boundaries['preservation']['retired']) {
+            throw new RuntimeException('Historical handoff classification changed during apply; preservation failed.');
+        }
         $result = ['operation' => self::OPERATION, 'status' => 'applied', 'operation_uuid' => $r['operation_uuid'], 'confirmation' => $confirmation,
-            'event_id' => $id, 'creation_audit_id' => $creationAudit, 'before' => $oldProjection, 'after' => $after['projected'], 'preservation' => true, 'assessment_created' => false];
-        $receipt = $auditData + ['fingerprint' => $this->hash([$r, $actor]), 'event_hash' => $this->hash($event), 'creation_audit_hash' => $this->hash($this->repository->rows('operational_fact_audits', ['id' => $creationAudit], false, 1)[0]), 'result' => $result];
+            'event_id' => $id, 'creation_audit_id' => $creationAudit, 'before' => $oldProjection, 'after' => $historicalAfter, 'historical_affordances_retired' => $retired,
+            'current_future_fingerprints' => ['before' => $this->hash($currentBefore), 'after' => $this->hash($currentAfter)], 'preservation' => true, 'assessment_created' => false];
+        $receipt = $auditData + ['fingerprint' => $this->hash([$r, $actor]), 'event_hash' => $this->hash($event), 'creation_audit_hash' => $this->hash($this->repository->rows('operational_fact_audits', ['id' => $creationAudit], false, 1)[0]), 'result' => $result, 'result_hash' => $this->hash($result)];
         $this->repository->audit($r['company_id'], 'turo_trips_normalized', $r['trip_id'], HistoricalMissingHandoffRepairRepository::RECEIPT_ACTION, $actor, [], $receipt);
         $receiptId = (int) $this->db->insertID();
         $finalState = $this->repository->state($r['vehicle_id']);
@@ -321,13 +337,29 @@ final class HistoricalMissingHandoffRepairService
         return $state;
     }
 
+    private function receiptPreservationIntact(array $receipt): bool
+    {
+        $result = $receipt['result'];
+        if (! array_key_exists('result_hash', $receipt)) {
+            // Original v1 receipts predate the exception and required equality.
+            return ($result['before'] ?? null) === ($result['after'] ?? null);
+        }
+        return is_string($receipt['result_hash']) && hash_equals($receipt['result_hash'], $this->hash($result))
+            && is_string($result['current_future_fingerprints']['before'] ?? null)
+            && $result['current_future_fingerprints']['before'] === ($result['current_future_fingerprints']['after'] ?? null)
+            && is_array($result['historical_affordances_retired'] ?? null)
+            && $result['historical_affordances_retired'] === ($receipt['historical_affordances_retired'] ?? null)
+            && $this->hash($result['historical_affordances_retired']) === ($receipt['historical_classification_fingerprint'] ?? null)
+            && $result['current_future_fingerprints']['before'] === ($receipt['current_future_authority_fingerprint'] ?? null);
+    }
+
     private function replay(array $r, int $actor, ?string $confirmation, array $row): array
     {
         $receipt = $row['receipt'];
         if (($receipt['operation'] ?? null) !== self::OPERATION || ($receipt['fingerprint'] ?? null) !== $this->hash([$r, $actor]) || ($confirmation !== null && ($receipt['confirmation'] ?? null) !== $confirmation)) {
             throw new RuntimeException('Operation UUID was already used with a different payload, actor or preview.');
         }
-        if (! is_array($receipt['result'] ?? null) || ($receipt['result']['operation'] ?? null) !== self::OPERATION || ($receipt['result']['status'] ?? null) !== 'applied' || ($receipt['result']['operation_uuid'] ?? null) !== $r['operation_uuid'] || ($receipt['result']['confirmation'] ?? null) !== ($receipt['confirmation'] ?? null) || ($receipt['result']['event_id'] ?? null) !== ($receipt['event_id'] ?? null) || ($receipt['result']['preservation'] ?? null) !== true || ($receipt['result']['assessment_created'] ?? null) !== false || ($receipt['result']['before'] ?? null) !== ($receipt['result']['after'] ?? null)) {
+        if (! is_array($receipt['result'] ?? null) || ($receipt['result']['operation'] ?? null) !== self::OPERATION || ($receipt['result']['status'] ?? null) !== 'applied' || ($receipt['result']['operation_uuid'] ?? null) !== $r['operation_uuid'] || ($receipt['result']['confirmation'] ?? null) !== ($receipt['confirmation'] ?? null) || ($receipt['result']['event_id'] ?? null) !== ($receipt['event_id'] ?? null) || ($receipt['result']['preservation'] ?? null) !== true || ($receipt['result']['assessment_created'] ?? null) !== false || ! $this->receiptPreservationIntact($receipt)) {
             throw new RuntimeException('Original historical handoff receipt result changed; separate review required.');
         }
         $event = $this->facts->event((int) ($receipt['event_id'] ?? 0));

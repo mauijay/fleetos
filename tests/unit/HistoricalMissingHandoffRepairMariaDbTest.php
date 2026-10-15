@@ -142,6 +142,67 @@ final class HistoricalMissingHandoffRepairMariaDbTest extends TestCase
         return [['correction'], ['position'], ['assessment']];
     }
 
+    #[DataProvider('historicalAuthorityWinners')]
+    public function testHistoricalRetirementClassificationWaitsAndRejectsConcurrentCurrentAuthority(string $operation): void
+    {
+        $db = $this->fixture->db;
+        Fixture::historicalAffordances($db);
+        $repair = new Repair($db);
+        $preview = $repair->preview($this->r, Fixture::ACTOR);
+        $this->assertCount(4, $preview['historical_affordances_retired']);
+        $db->transBegin();
+        if ($operation === 'lifecycle') {
+            $db->table('turo_trips_normalized')->where('id', 8300)->update(['trip_status_lookup_value_id' => (new App\Repositories\LookupRepository($db))->valueId('trip_status', 'booked')]);
+        } elseif ($operation === 'extras') {
+            $db->table('turo_extra_reservation_snapshots')->where('company_id', Fixture::COMPANY)->delete();
+        } else {
+            $facts = new OperationalFactsRepository($db);
+            $at = (new DateTimeImmutable())->modify('-1 minute')->format('Y-m-d H:i:s');
+            $event = (new MovementEventService($facts))->record(Fixture::VEHICLE, null, 'vehicle_readiness_observed', null, $at, null, null, 'synthetic_operator', Fixture::ACTOR);
+            (new App\Services\Fleet\MovementAssessmentService($facts))->record(Fixture::VEHICLE, null, $event, 'current', 'clean', 88, $at, 'synthetic_operator', Fixture::ACTOR);
+        }
+        $worker = $this->start('apply', $this->r, $preview['confirmation']);
+        $db->transCommit();
+        $before = HistoricalMovementRepairFixture::snapshot($db);
+        $loser = $this->finish($worker);
+        $this->assertFalse($loser['success']);
+        $this->assertMatchesRegularExpression('/stale|current|eligible/', $loser['error']);
+        $this->assertSame($before, HistoricalMovementRepairFixture::snapshot($db));
+        $this->assertCount(0, $db->table('trip_movement_events')->where(['turo_trip_normalized_id' => Fixture::TRIP, 'event_code' => 'actual_handoff'])->get()->getResultArray());
+    }
+
+    public static function historicalAuthorityWinners(): array
+    {
+        return [['lifecycle'], ['current_readiness'], ['extras']];
+    }
+
+    public function testHistoricalRetirementAppliesAndReplaysWithExactNativeWriteSet(): void
+    {
+        $db = $this->fixture->db;
+        Fixture::historicalAffordances($db);
+        $repair = new Repair($db);
+        $before = HistoricalMovementRepairFixture::snapshot($db);
+        $preview = $repair->preview($this->r, Fixture::ACTOR);
+        $this->assertSame($before, HistoricalMovementRepairFixture::snapshot($db));
+        $this->assertCount(4, $preview['historical_affordances_retired']);
+        $result = $repair->apply($this->r, Fixture::ACTOR, $preview['confirmation']);
+        $this->assertSame($result['current_future_fingerprints']['before'], $result['current_future_fingerprints']['after']);
+        $after = HistoricalMovementRepairFixture::snapshot($db);
+        foreach ($before as $table => $rows) {
+            $newRows = $after[$table];
+            if ($table === 'trip_movement_events') {
+                $this->assertCount(count($rows) + 1, $newRows);
+                $newRows = array_values(array_filter($newRows, static fn ($e) => (int) $e['id'] !== $result['event_id']));
+            } elseif ($table === 'operational_fact_audits') {
+                $this->assertCount(count($rows) + 2, $newRows);
+                $newRows = array_values(array_filter($newRows, static fn ($a) => ! in_array((int) $a['id'], [$result['creation_audit_id'], $result['receipt_audit_id']], true)));
+            }
+            $this->assertSame($rows, $newRows, $table);
+        }
+        $this->assertSame('already_applied', $repair->apply($this->r, Fixture::ACTOR, $preview['confirmation'])['status']);
+        $this->assertSame($after, HistoricalMovementRepairFixture::snapshot($db));
+    }
+
     public function testActualCommitLostAcknowledgementReplaysOriginalIds(): void
     {
         $db = $this->fixture->db;
