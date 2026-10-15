@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.35.3 — Historical Affordance Preservation
+
+Release date: 2026-10-15
+
+### Historical Movement Repair
+
+- Permit projection-only retirement of historical cleaning and energy actions only
+  when canonical completed source and target lifecycles are proven.
+- Check target-trip and current relevance independently of historical checklist
+  ownership; preserve all current and future actionable work and readiness.
+- Preserve all persisted facts and require stale-preview checks and locked apply
+  revalidation before any historical missing-handoff correction.
+
+### Schema
+
+- No migration or schema change; latest App migration remains 000036.
+
 ## v0.35.2 — Historical Missing-Handoff Tooling
 
 Release date: 2026-10-14
