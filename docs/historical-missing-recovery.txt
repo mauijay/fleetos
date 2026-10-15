@@ -1,0 +1,75 @@
+# Privileged missing historical recovery
+
+`historical_missing_recovery.v1` inserts one omitted `vehicle_recovered` and one truthful `return` assessment for an already handed-off historical reservation. It never recreates or changes the handoff. This is a separate trusted CLI operation, without an HTTP route. Ordinary movement validation, paired repair and missing-handoff repair retain their rules.
+
+The active, unbanned actor must be a Shield superadmin with `admin.access` under the same-database Settings matrix. Authorization is repeated for apply and replay. Actor identity cannot be supplied inside the request. Protect request/output files, keep requests outside public, and use private filesystem permissions (0600 on Unix, private ACL on Windows). Requests are bounded JSON objects of at most 64 KiB.
+
+The accepted boundary has exactly one active original same-trip handoff, explicit owned company/vehicle/trip and pickup/return checklist identities, and an explicit preserved handoff assessment ID (or null only when absent). Recovery must follow handoff, precede now, and belong to a noncanceled historical reservation whose scheduled end has passed. A corrected/superseding, voided or ambiguous handoff, any existing equivalent recovery/return or return assessment (including historical voided rows), contradictory guest custody, or ambiguous same-second movement requires separate review. An existing guest return report is optional and must fall strictly between handoff and recovery. No return report is invented.
+
+Only explicit observations become assessment authority. Canonical cleanliness supports `clean`, `dirty`, or null. An operator's more specific clean observation is represented by explicit `clean` plus the operator's supplied wording in `assessment.note`; the command does not silently interpret prose or accept an unsupported enum. Charge/fuel is an explicitly observed integer 0 through 100 or null. Omitted/null measurements remain unknown. No pickup, schedule, telemetry, later preparation, odometer, tire, photo or other observation is inferred. The supplied note is preserved; no note is fabricated.
+
+Synthetic request (identifiers must be obtained through a separately authorized inspection):
+
+```json
+{
+  "operation_uuid": "f8f13620-6680-4d06-80ce-0771d871cc5b",
+  "company_id": 9101,
+  "vehicle_id": 9201,
+  "trip_id": 9301,
+  "pickup_checklist_id": 9501,
+  "return_checklist_id": 9502,
+  "handoff_event_id": 9601,
+  "handoff_assessment_id": 9701,
+  "recovery": {
+    "occurred_at": "2023-06-09 15:22:00",
+    "location_class": "other_delivery",
+    "location_detail": "Synthetic Harbor Depot",
+    "location_note": "Synthetic covered bay"
+  },
+  "assessment": {
+    "cleanliness": "clean",
+    "energy_percent": 67,
+    "note": "Synthetic operator observed an exceptionally clean interior."
+  },
+  "reason": "Synthetic archive found an omitted recovery.",
+  "attestation": "Synthetic operator attests the historical recovery, location and observations."
+}
+```
+
+Use exact local `Y-m-d H:i:s` in the application's Honolulu timezone. Known recovery location classes follow the canonical location model. HNL requires `airport_garage_code`, `airport_parking_level`, and `airport_parking_row`; the existing garage catalog produces canonical detail and rejects contradictory free text. Optional `location_note` remains separate from structured location and the assessment observation note. Unsupported fields, ambiguous coercion and noncanonical values reject.
+
+Preview first, without `--apply`:
+
+```text
+php spark fleet:repair:missing-recovery --request <private-request.json> --actor <superadmin-id>
+```
+
+Preview uses a read-only MariaDB transaction / SELECT-only SQLite reads and creates no business, audit or receipt rows. It shows scope, preserved handoff/assessment, recovery and assessment, canonical cleanliness and supplied note, later events, persisted checklist state, before/after custody, position, current readiness, checklist readiness, cleaning/energy work, movement execution, preparation, commercial obligations, future reservation blockers and return-overdue retirement. Expected differences are reported by family with complete before/after values. A fingerprint is issued only when unrelated authority is preserved.
+
+Custody changing from the target guest handoff to operator custody is expected. Normal canonical consequences can expire older vehicle readiness, retire target return confirmation and expose cleaning/energy or next-pickup work. Same-day energy applicability follows the existing read model; blocker totals are derived rather than prescribed. The classifier keeps checklist identities/history, schedules, availability, commercial obligations, unrelated requirement families and future execution exact. Existing later custody must remain exact; a shape that would change a conflict indicator or unrelated authority is rejected. A newly inserted historical measurement cannot replace a more recent observation. A completed prior return workspace may disappear from the current/future subset only when it contains exclusively already-inactive cleaning/energy or fresh Extras-verification preparation owned by the newly closed target. Both trips must be canonically historical; actionable/relevant work, stale verification, purchased selections, fulfillments and manual commitments cannot use this exception. Full historical checklist projections and all persisted rows remain protected.
+
+Recovery establishes observed recovery location. Existing later position events remain intact and retain their canonical authority. Without a later position, preview's `position_after_recovery` explicitly shows the recovery location as current; it lasts until a separately authorized positioning write. `positioning_separate` is always true. This command cannot accept or create a sequence of positions.
+
+Apply only after reviewing the complete expected changes, with the same request, UUID, actor and exact fingerprint:
+
+```text
+php spark fleet:repair:missing-recovery --request <same-private-request.json> --actor <same-superadmin-id> --apply --confirm <exact-preview-sha256>
+```
+
+Apply owns the root transaction. Existing receipt-range, company/vehicle, event/assessment/checklist, schedule, commercial, reference and authorization locks precede consistent authority reads. Existing InnoDB authority is required. Re-read ownership, chronology, all relevant source rows and projections under lock; changed authority fails stale. The fingerprint binds normalized request/actor, preserved handoff/assessment, canonical observations, later events, schedules/checklists, custody/position/readiness, commercial inputs, audits and a streaming all-table row-count/hash firewall. This low-frequency tool deliberately has conservative locking and staleness: even an unrelated database row change between preview and apply requires a fresh review. Existing inspection bounds fail closed rather than truncate.
+
+The only successful write set is five inserted rows:
+
+* one `trip_movement_events` row, `vehicle_recovered` / `return`;
+* one `movement_assessments` row, linked to that event, preserving supplied cleanliness, energy and note;
+* three `operational_fact_audits` rows: event creation, assessment creation, and UUID receipt/result.
+
+Event `occurred_at` and assessment `captured_at` are the historical observation time. Normal `created_at` records actual correction time. No preexisting business row is edited. Ordinary recovery does not complete persisted checklist tasks; this operation does not either. It does not invalidate positioning plan rows, create exceptions or complete observations/tasks. A plan/projection conflict instead fails closed. Extras, Guest Commitments, Damage and financial authority remain unchanged.
+
+Before commit, an independent canonical database read must equal the frozen recovery overlay after normalization of only newly allocated artifact IDs and recorded timestamps. Classification must equal preview. Full scoped facts and all-table count/hash checks, excluding only the five inserted IDs, must equal baseline even after receipt persistence. Unexpected side effects or mismatches roll back everything. The existing ordinary recovery and equivalent return writers acquire a vehicle anchor and current locking duplicate read on MariaDB so a waiting writer cannot insert a second closure from an older repeatable-read snapshot; their sequential rules and assessment behavior are unchanged.
+
+Same UUID plus same normalized payload and actor returns the original event/assessment/audit IDs. Different time, location, observation, actor, trip or supplied confirmation fails. Replay validates the original receipt/result hashes, handoff and handoff assessment, created event/assessment and creation audits. Later independent positions are not undone; replay describes preservation at original apply. If commit acknowledgement is lost, inspect/replay the original UUID before assuming failure. Never blindly retry with a new UUID.
+
+Permanent synthetic SQLite tests cover purity, exact writes, rollback, mapped/unknown observations, later positions, mixed newer readiness, same-day energy, expected blocker increases, unrelated obligations/readiness, malformed scope, chronology, stale previews and replay integrity. Independent disposable MariaDB tests exercise competing applies, replay/first apply, ordinary recovery/return including an older snapshot, later position, handoff correction, stale assessment and actual lost acknowledgement, plus the trusted CLI. They require explicit local server/datadir configuration and do not substitute a skip.
+
+Any later deployment requires separate authorization. After deployment and an accepted correction preview/apply, later known positions must be recorded separately, chronologically, through the existing guarded positioning workflow. This implementation authorizes no production access or correction.

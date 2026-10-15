@@ -286,6 +286,7 @@ class MovementOperationalFactService
 
         $this->db->transBegin();
         try {
+            $this->lockReturnClosure($vehicleId, $tripId);
             $this->rejectLaterHandoffConflict($vehicleId, $tripId, $occurredAt);
             if ($this->events->activeForTrip($tripId, ['actual_return', 'vehicle_recovered']) !== null) {
                 throw new \InvalidArgumentException('This return is already complete. Correct or void the existing fact instead.');
@@ -834,6 +835,23 @@ class MovementOperationalFactService
         }
     }
 
+    /** Serialize closure with privileged repairs before reading duplicate state. */
+    private function lockReturnClosure(int $vehicleId, int $tripId): void
+    {
+        if ($this->db->DBDriver !== 'MySQLi') {
+            return;
+        }
+        $vehicles = $this->db->prefixTable('fleet_vehicles');
+        $events = $this->db->prefixTable('trip_movement_events');
+        $this->db->query("SELECT id FROM {$vehicles} WHERE id=? FOR UPDATE", [$vehicleId])->getResultArray();
+        // A locking read sees the committed winner even when an outer caller
+        // already established a repeatable-read snapshot before waiting.
+        $closed = $this->db->query("SELECT id FROM {$events} WHERE fleet_vehicle_id=? AND turo_trip_normalized_id=? AND voided_at IS NULL AND event_code IN ('actual_return','vehicle_recovered') ORDER BY id FOR UPDATE", [$vehicleId, $tripId])->getRowArray();
+        if ($closed !== null) {
+            throw new \InvalidArgumentException('This return is already complete. Correct or void the existing fact instead.');
+        }
+    }
+
     private function recordObservation(array $checklist, array $data, int $actorUserId, string $eventCode): bool
     {
         $movementType = (string) $checklist['movement_type'];
@@ -844,6 +862,9 @@ class MovementOperationalFactService
 
         $this->db->transBegin();
         try {
+            if ($eventCode === 'actual_return') {
+                $this->lockReturnClosure((int) $checklist['fleet_vehicle_id'], (int) $checklist['turo_trip_normalized_id']);
+            }
             if ($eventCode === 'vehicle_staged') {
                 $this->rejectOtherTripGuestPossession(
                     (int) $checklist['fleet_vehicle_id'],
