@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.35.2 — Historical Missing-Handoff Tooling
+
+Release date: 2026-10-14
+
+### Historical Movement Repair
+
+- Add privileged preview-first tooling to insert one missing historical handoff
+  while preserving the correct later same-trip recovery and its assessment.
+- Require stale-preview protection and transactional, audited, idempotent apply;
+  preserve current custody, position, readiness, and later and future authority.
+- Keep absent pickup measurements absent and ordinary movement writers unchanged.
+
+### Safety
+
+- Require superadmin authority and reject cross-trip overlaps, ambiguous recoveries,
+  and duplicate handoffs. Production corrections require separate authorization.
+
+### Schema
+
+- No migration or schema change; latest App migration remains 000036.
+
 ## v0.35.1 — Repair Selection Empty-State Fix
 
 Release date: 2026-10-13
