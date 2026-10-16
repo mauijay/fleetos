@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.35.4 — Historical Missing-Recovery Tooling
+
+Release date: 2026-10-15
+
+### Historical Movement Repair
+
+- Add a privileged preview/apply workflow for one missing historical recovery,
+  preserving the existing correct handoff and recording a truthful return assessment.
+- Preserve supported structured cleanliness and observed charge; leave unknown
+  measurements absent and keep later positioning as a separate workflow.
+- Classify expected recovery-driven custody/readiness changes and reject unrelated
+  authority changes, with locked stale-preview, concurrency and idempotency guards.
+
+### Safety
+
+- Never recreate the handoff or fabricate measurements. Ordinary movement validation
+  and assessment semantics remain unchanged; serialize competing recovery closures.
+
+### Schema
+
+- No migration or schema change; latest App migration remains 000036.
+
 ## v0.35.3 — Historical Affordance Preservation
 
 Release date: 2026-10-15
