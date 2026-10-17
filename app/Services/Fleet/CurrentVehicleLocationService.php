@@ -17,6 +17,12 @@ class CurrentVehicleLocationService
     {
         $asOf ??= new \DateTimeImmutable();
         $custody = $this->custody()->resolve($vehicleId, $asOf);
+        return $this->projectEvents($custody, $custody['custody'] === 'guest' ? null : $this->repo()->latestLocationEvent($vehicleId, $asOf->format('Y-m-d H:i:s')), $asOf);
+    }
+
+    /** Pure existing position semantics for bulk readers. @return array<string, mixed> */
+    public function projectEvents(array $custody, ?array $latestLocation, \DateTimeImmutable $asOf): array
+    {
         $lifecycle = $custody['basis_event'];
         if (($lifecycle['event_code'] ?? null) === 'guest_return_staged') {
             return $this->awaitingRecovery($lifecycle);
@@ -26,7 +32,7 @@ class CurrentVehicleLocationService
             return $this->presentEvent($lifecycle, $asOf, 'guest');
         }
 
-        $event = $this->operatorLocationEvent($custody, $this->repo()->latestLocationEvent($vehicleId, $asOf->format('Y-m-d H:i:s')));
+        $event = $this->operatorLocationEvent($custody, $latestLocation);
         if ($event === null) {
             return $this->unknownLocation();
         }

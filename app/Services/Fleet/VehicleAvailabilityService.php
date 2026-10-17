@@ -156,7 +156,7 @@ class VehicleAvailabilityService
         return null;
     }
 
-    private function statusForVehicle(array $vehicle, ?array $currentReservation): string
+    public function statusForVehicle(array $vehicle, ?array $currentReservation): string
     {
         if (! (bool) ($vehicle['is_available_for_booking'] ?? false)) {
             return (string) ($vehicle['status_code'] ?? 'out_of_service');

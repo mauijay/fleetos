@@ -87,6 +87,16 @@ class VehicleHealthReminderProjectionService
             return null;
         }
         $observation = $this->observations()->latestTirePressure($companyId, $vehicleId, $asOf->format('Y-m-d H:i:s'));
+        return $this->projectTirePressure($companyId, $vehicle, $policy, $observation, $asOf);
+    }
+
+    /** Pure projection of owned bulk-loaded health evidence. @return array<string, mixed>|null */
+    public function projectTirePressure(int $companyId, array $vehicle, ?array $policy, ?array $observation, DateTimeImmutable $asOf): ?array
+    {
+        if ($policy === null || ! $this->lifecycleActive($vehicle, $asOf)) {
+            return null;
+        }
+        $vehicleId = (int) $vehicle['id'];
         if ($observation === null) {
             return $this->baseReminder($companyId, $vehicle, [
                 'identity' => "vehicle-health:{$companyId}:{$vehicleId}:tire-pressure-check",

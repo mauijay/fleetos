@@ -749,17 +749,17 @@ class MovementReadinessProjectionService
     /** @param array<string, mixed> $context @return list<array<string, mixed>> */
     private function vehicleHealthRequirements(array $context): array
     {
-        if ($this->vehicleHealthProjectionService === null) {
+        if ($this->vehicleHealthProjectionService === null && ! array_key_exists('vehicle_health_reminders', $context)) {
             return [];
         }
         $asOf = new \DateTimeImmutable((string) ($context['as_of'] ?? 'now'));
         $requirements = [];
-        foreach ($this->vehicleHealthProjectionService->forVehicle(
+        foreach (($context['vehicle_health_reminders'] ?? $this->vehicleHealthProjectionService?->forVehicle(
             (int) $context['company_id'],
             (int) $context['fleet_vehicle_id'],
             $asOf,
             false,
-        ) as $reminder) {
+        ) ?? []) as $reminder) {
             if (($reminder['reminder_code'] ?? null) !== 'tire_pressure_check'
                 || ! ($reminder['movement_relevance'] ?? false)) {
                 continue;

@@ -30,6 +30,16 @@ class TripEnergyRuleResolver
             return $normalPolicy;
         }
 
+        return $this->forOverride($normalPolicy, $override);
+    }
+
+    /** Pure policy composition for an already owned, active override. @return array<string, mixed> */
+    public function forOverride(array $normalPolicy, ?array $override): array
+    {
+        if ($override === null) {
+            return $normalPolicy;
+        }
+
         $comparison = (string) $override['energy_comparison'];
         $mode = match ($comparison) {
             'minimum' => 'minimum',

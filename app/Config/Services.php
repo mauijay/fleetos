@@ -666,6 +666,15 @@ class Services extends BaseService
         return new OperationalFactsRepository();
     }
 
+    public static function fleetOperationalReconciliationService(bool $getShared = true): \App\Services\Fleet\FleetOperationalReconciliationService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('fleetOperationalReconciliationService');
+        }
+
+        return new \App\Services\Fleet\FleetOperationalReconciliationService();
+    }
+
     public static function movementReadinessReadModelRepository(bool $getShared = true): MovementReadinessReadModelRepository
     {
         if ($getShared) {
