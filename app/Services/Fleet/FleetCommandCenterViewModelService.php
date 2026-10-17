@@ -27,6 +27,7 @@ class FleetCommandCenterViewModelService
         private readonly ?TuroTripReconciliationService $tripReconciliationService = null,
         private readonly ?DailyOperationsDashboardService $dailyOperationsService = null,
         private readonly ?OperationalFactsRepository $operationalFactsRepository = null,
+        private readonly ?FleetOperationalReconciliationService $reconciliationService = null,
     ) {
     }
 
@@ -36,6 +37,9 @@ class FleetCommandCenterViewModelService
         $asOf ??= new DateTimeImmutable();
         $dailyOperations = $this->dailyOperations()->forToday($asOf, $movementFilter);
         $companyId = (int) $dailyOperations['fleet_snapshot']['company_id'];
+        $reconciliation = (new OperationalReconciliationViewModel())->summary(
+            ($this->reconciliationService ?? \Config\Services::fleetOperationalReconciliationService())->forCompany($companyId, $asOf),
+        );
         $financialSummary = $dailyOperations['financial_summary'] ?? [
             'realized_operating_revenue' => 0.0,
             'realized_recoveries' => 0.0,
@@ -65,6 +69,7 @@ class FleetCommandCenterViewModelService
         $dailyOperations['queue_view'] = $queueView;
 
         return [
+            'operational_reconciliation' => $reconciliation,
             'page_title' => 'Fleet Command Center',
             'as_of' => $asOf->format('M j, Y g:i A'),
             'navigation' => $this->navigation(),
@@ -92,6 +97,7 @@ class FleetCommandCenterViewModelService
         return [
             ['label' => 'Fleet Command Center', 'href' => '/', 'active' => 'true'],
             ['label' => 'Fleet Activity', 'href' => '#fleet-activity', 'active' => 'false'],
+            ['label' => 'Operational Reconciliation', 'href' => '/operations/reconciliation', 'active' => 'false'],
             ['label' => 'Vehicles', 'href' => '/fleet/vehicles', 'active' => 'false'],
             ['label' => 'Incidentals Review', 'href' => '/operations/incidentals', 'active' => 'false'],
             ['label' => 'Supercharger Reimbursements', 'href' => '/operations/supercharger-reimbursements', 'active' => 'false'],

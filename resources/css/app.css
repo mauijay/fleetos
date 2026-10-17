@@ -5629,3 +5629,61 @@ h3 {
 .work-facts { display: flex; flex-wrap: wrap; gap: 1rem; }
 .work-actions { display: grid; gap: .7rem; }
 .work-badge { overflow-wrap: anywhere; }
+
+/* Operational Reconciliation: recorded authority review. */
+.reconciliation-main { min-width: 0; width: 100%; }
+.reconciliation-main .top-status > div { min-width: 0; }
+.reconciliation-main h1 { overflow-wrap: anywhere; }
+.reconciliation-counts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.reconciliation-count { border: 1px solid var(--line); border-top: 3px solid var(--muted); border-radius: var(--radius); padding: 16px; background: var(--surface); }
+.reconciliation-count strong { display: flex; justify-content: space-between; gap: 12px; font-size: 1.25rem; }
+.reconciliation-count small { display: block; color: var(--muted); margin-top: 8px; }
+.reconciliation-p0 { border-color: var(--danger-border); border-left: 4px solid var(--danger); }
+.reconciliation-count.reconciliation-p0 { border-top-color: var(--danger); }
+.reconciliation-p1 { border-color: var(--warning-border); border-left: 3px solid var(--warning); }
+.reconciliation-count.reconciliation-p1 { border-top-color: var(--warning); }
+.reconciliation-coverage { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 16px; color: var(--muted); }
+.reconciliation-coverage strong { color: var(--text); }
+.reconciliation-filters { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-top: 16px; align-items: end; }
+.reconciliation-filters label { display: grid; gap: 8px; font-size: .875rem; min-width: 0; }
+.reconciliation-filters input, .reconciliation-filters select { min-height: 44px; width: 100%; min-width: 0; }
+.reconciliation-filters label:has(input) { grid-column: span 2; }
+.reconciliation-actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; grid-column: span 2; }
+.reconciliation-actions button, .reconciliation-actions a, .reconciliation-review-links a, .reconciliation-pagination a, .reconciliation-summary > a { display: inline-flex; align-items: center; min-height: 44px; padding: 10px 14px; border: 1px solid var(--line); border-radius: var(--radius); }
+.reconciliation-main a:focus-visible, .reconciliation-main button:focus-visible, .reconciliation-main select:focus-visible, .reconciliation-main input:focus-visible, .reconciliation-summary a:focus-visible { outline: 3px solid var(--info); outline-offset: 3px; }
+.reconciliation-errors { border: 1px solid var(--danger); padding: 16px; margin-block: 16px; }
+.reconciliation-groups { display: grid; gap: 28px; }
+.reconciliation-vehicle { min-width: 0; border: 1px solid var(--line); border-radius: var(--radius); overflow: clip; }
+.reconciliation-vehicle-header { padding: 20px; background: var(--surface-2); }
+.reconciliation-vehicle-header h3 { font-size: 1.2rem; font-weight: 650; }
+.reconciliation-vehicle-header p, .reconciliation-meta { font-size: .8125rem; color: var(--muted); margin-top: 8px; overflow-wrap: anywhere; }
+.reconciliation-context, .reconciliation-evidence { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 24px; margin-top: 16px; }
+.reconciliation-context dt, .reconciliation-evidence dt { color: var(--muted); font-size: .8125rem; margin-bottom: 4px; }
+.reconciliation-context dd, .reconciliation-evidence dd { margin: 0; overflow-wrap: anywhere; font-size: .875rem; }
+.reconciliation-issue { padding: 20px; background: var(--surface); border-top: 1px solid var(--line); min-width: 0; }
+.reconciliation-issue.reconciliation-p0 { background: linear-gradient(90deg, var(--danger-bg), transparent 60%), var(--surface); }
+.reconciliation-issue-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 10px; font-size: .8125rem; }
+.reconciliation-badge { display: inline-block; font-weight: 750; padding: 4px 10px; border: 1px solid var(--line); border-radius: 5px; }
+.reconciliation-p0 .reconciliation-badge { color: var(--danger-text); border-color: var(--danger-border); }
+.reconciliation-p1 .reconciliation-badge { color: var(--warning-text); border-color: var(--warning-border); }
+.reconciliation-scope { color: var(--muted); }
+.reconciliation-issue h4 { font-size: 1rem; font-weight: 650; }
+.reconciliation-authority { margin-top: 14px; font-size: .875rem; }
+.reconciliation-review-links { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 20px; }
+.reconciliation-review-links a { gap: 10px; font-size: .875rem; overflow-wrap: anywhere; }
+.reconciliation-family { margin-top: 16px; }
+.reconciliation-family h5 { font-weight: 650; }
+.reconciliation-family ul { list-style: disc; padding-left: 20px; font-size: .875rem; }
+.reconciliation-family li { margin-top: 8px; overflow-wrap: anywhere; }
+.reconciliation-family li span { color: var(--muted); font-size: .8125rem; }
+.reconciliation-pagination { display: flex; gap: 16px; align-items: center; justify-content: center; flex-wrap: wrap; margin-top: 24px; }
+.reconciliation-healthy { color: var(--muted); }
+.reconciliation-summary { display: flex; gap: 20px; flex-wrap: wrap; align-items: center; justify-content: space-between; padding: 20px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.reconciliation-summary.reconciliation-p0 { border-left: 4px solid var(--danger); border-color: var(--danger-border); }
+.reconciliation-summary.reconciliation-p1 { border-left: 3px solid var(--warning); border-color: var(--warning-border); }
+.reconciliation-summary-counts { display: flex; gap: 18px; flex-wrap: wrap; }
+@media (min-width: 1600px) { .reconciliation-context { grid-template-columns: repeat(3, minmax(0, 1fr)); } .reconciliation-evidence { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 700px) { .reconciliation-counts, .reconciliation-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); } .reconciliation-context, .reconciliation-evidence { grid-template-columns: minmax(0, 1fr); } .reconciliation-issue, .reconciliation-vehicle-header { padding: 16px; } }
+@media (max-width: 420px) { .reconciliation-filters { grid-template-columns: minmax(0, 1fr); } .reconciliation-filters label:has(input), .reconciliation-actions { grid-column: auto; } }
+
+.reconciliation-main .site-footer a { display: inline-flex; align-items: center; min-height: 44px; padding-inline: 4px; }

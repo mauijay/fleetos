@@ -25,6 +25,14 @@ use PHPUnit\Framework\MockObject\MockObject;
  */
 final class FleetIntelligenceServicesTest extends CIUnitTestCase
 {
+    private ?\CodeIgniter\Database\BaseConnection $reconciliationDb = null;
+
+    protected function tearDown(): void
+    {
+        $this->reconciliationDb?->close();
+        parent::tearDown();
+    }
+
     public function testRevenueServiceSeparatesCompletedForecastAndCancelledRevenue(): void
     {
         $repository = $this->repositoryMock(['revenueMonthly', 'operatingCosts', 'operatingCostSignals', 'fleetCapital', 'reservationsBetween']);
@@ -551,7 +559,7 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
         $dailyOperations->method('forToday')->willReturn($this->dailyOperations());
         $operationalFacts->method('authoritativeMovementCompletionsForCompany')->willReturn([]);
 
-        $service = new FleetCommandCenterViewModelService($command, $statistics, $health, $tasks, $availability, $analytics, $decisionSupport, $importIssues, $vehicleMappings, $tripReconciliation, $dailyOperations, $operationalFacts);
+        $service = new FleetCommandCenterViewModelService($command, $statistics, $health, $tasks, $availability, $analytics, $decisionSupport, $importIssues, $vehicleMappings, $tripReconciliation, $dailyOperations, $operationalFacts, new \App\Services\Fleet\FleetOperationalReconciliationService($this->reconciliationDb = \Tests\Support\GuestCommitmentProjectionFixture::sqlite()));
         $viewModel = $service->forToday(new DateTimeImmutable('2026-06-15 08:00:00'));
         $tomorrowViewModel = $service->forToday(new DateTimeImmutable('2026-06-15 08:00:00'), 'tomorrow', 'return');
 
@@ -559,6 +567,7 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
         $this->assertSame([
             'Fleet Command Center',
             'Fleet Activity',
+            'Operational Reconciliation',
             'Vehicles',
             'Incidentals Review',
             'Supercharger Reimbursements',
@@ -566,7 +575,7 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
             'Turo Import',
             'Extras Import',
             'Import Issues',
-        ], array_slice(array_column($viewModel['navigation'], 'label'), 0, 9));
+        ], array_slice(array_column($viewModel['navigation'], 'label'), 0, 10));
         $this->assertSame('true', $viewModel['navigation'][0]['active']);
         $this->assertNotContains('Fleet', array_column($viewModel['navigation'], 'label'));
         $this->assertTrue($viewModel['mission_clear']);
@@ -698,7 +707,7 @@ final class FleetIntelligenceServicesTest extends CIUnitTestCase
         $dailyOperations->method('forToday')->willReturn($this->dailyOperations());
         $operationalFacts->method('authoritativeMovementCompletionsForCompany')->willReturn([]);
 
-        $viewModel = (new FleetCommandCenterViewModelService($command, $statistics, $health, $tasks, $availability, $analytics, $decisionSupport, $importIssues, $vehicleMappings, $tripReconciliation, $dailyOperations, $operationalFacts))
+        $viewModel = (new FleetCommandCenterViewModelService($command, $statistics, $health, $tasks, $availability, $analytics, $decisionSupport, $importIssues, $vehicleMappings, $tripReconciliation, $dailyOperations, $operationalFacts, new \App\Services\Fleet\FleetOperationalReconciliationService($this->reconciliationDb = \Tests\Support\GuestCommitmentProjectionFixture::sqlite())))
             ->forToday(new DateTimeImmutable('2026-06-15 08:00:00'));
 
         $this->assertTrue($viewModel['import_issues']['has_unresolved']);

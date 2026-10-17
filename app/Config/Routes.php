@@ -122,6 +122,7 @@ $routes->group('', ['filter' => 'session'], static function (RouteCollection $ro
         $routes->post('(:num)/damage/(:num)/worsen', 'VehicleDamage::worsenForVehicle/$1/$2');
         $routes->post('(:num)/damage/(:num)/status/(:segment)', 'VehicleDamage::transition/$1/$2/$3');
     });
+    $routes->get('operations/reconciliation', 'OperationalReconciliation::index', ['filter' => 'permission:admin.access']);
     $routes->get('operations/checklists/(:num)', 'TripMovementChecklists::show/$1', ['filter' => 'permission:admin.access']);
     $routes->get('operations/checklists/(:num)/wheel-curb-rash/(LF|RF|RR|LR)/(new|worsening|unchanged)', 'VehicleWheelChecklist::entry/$1/$2/$3', ['filter' => 'permission:admin.access']);
     $routes->post('operations/checklists/(:num)/wheel-curb-rash/(LF|RF|RR|LR)/(new|worsening|unchanged)', 'VehicleWheelChecklist::command/$1/$2/$3', ['filter' => 'permission:admin.access']);

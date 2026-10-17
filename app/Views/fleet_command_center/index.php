@@ -32,6 +32,10 @@
                 </div>
             </header>
 
+            <?php if (isset($commandCenter['operational_reconciliation']) && $commandCenter['operational_reconciliation']['priority'] === 'P0'): ?>
+                <?= view('fleet_command_center/components/reconciliation_summary', ['summary' => $commandCenter['operational_reconciliation']]) ?>
+            <?php endif; ?>
+
             <section class="section briefing-card" id="morning-briefing" aria-labelledby="briefing-heading">
                 <p class="eyebrow">Morning Briefing</p>
                 <h2 id="briefing-heading"><?= esc($commandCenter['daily_operations']['briefing']['greeting']) ?></h2>
@@ -94,6 +98,10 @@
                     <?php endforeach; ?>
                 </div>
             </section>
+
+            <?php if (isset($commandCenter['operational_reconciliation']) && $commandCenter['operational_reconciliation']['priority'] !== 'P0'): ?>
+                <?= view('fleet_command_center/components/reconciliation_summary', ['summary' => $commandCenter['operational_reconciliation']]) ?>
+            <?php endif; ?>
 
             <section class="section" id="operations-status" aria-labelledby="operations-status-heading">
                 <div class="section-heading">
