@@ -44,6 +44,13 @@ try {
         $result = $operation === 'ordinary_return'
             ? ['recorded' => $writer->recordForChecklist($checklist + ['exists' => true], $data, Fixture::ACTOR)]
             : ['id' => $writer->recoverVehicle($checklist + ['exists' => true], $data, Fixture::ACTOR)];
+    } elseif ($operation === 'extra_update') {
+        $repository = new App\Repositories\FleetExtraRepository($db);
+        $extra = $db->table('fleet_extras')->where('company_id', Fixture::COMPANY)->get()->getRowArray();
+        $extra['display_name'] = 'Synthetic concurrent catalog update';
+        $service = new App\Services\Fleet\FleetExtraService($repository, new App\Repositories\AuditLogRepository($db), new App\Repositories\LookupRepository($db), new App\Services\Fleet\TripExtraFulfillmentService(new App\Repositories\TripExtraFulfillmentRepository($db)));
+        $service->updateExtra(Fixture::COMPANY, (int) $extra['id'], $extra, Fixture::ACTOR);
+        $result = ['updated' => true];
     } else {
         $result = match ($operation) {
             'apply' => (new HistoricalMissingRecoveryRepairService($db))->apply($input['request'], Fixture::ACTOR, $input['confirmation']),

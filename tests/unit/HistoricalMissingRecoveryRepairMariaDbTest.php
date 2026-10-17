@@ -161,6 +161,53 @@ final class HistoricalMissingRecoveryRepairMariaDbTest extends TestCase
         return [['handoff'], ['ordinary_recovery'], ['position'], ['assessment']];
     }
 
+    #[DataProvider('commercialWinners')]
+    public function testWaitingRecoveryRejectsOldHistoricalExtraFingerprintAfterCommercialWinner(string $change): void
+    {
+        $db = $this->fixture->db;
+        $db->table('turo_trips_normalized')->where('id', Fixture::TRIP)->update(['trip_status_lookup_value_id' => (new App\Repositories\LookupRepository($db))->valueId('trip_status', 'completed')]);
+        $selection = Tests\Support\HistoricalRecoveryExtraFixture::seed($db);
+        $preview = (new Repair($db))->preview($this->r, Fixture::ACTOR);
+        $this->assertContains('historical_extra_membership', array_column($preview['expected_changes'], 'family'));
+        $db->transBegin();
+        // Use the same company/trip lock order as the ordinary commercial writer.
+        (new App\Repositories\TripExtraFulfillmentRepository($db))->lockOwnedTrip(Fixture::COMPANY, Fixture::TRIP);
+        Tests\Support\HistoricalRecoveryExtraFixture::change($db, $selection, $change);
+        $worker = $this->start('apply', $this->r, $preview['confirmation']);
+        $db->transCommit();
+        $committed = HistoricalMovementRepairFixture::snapshot($db);
+        $loser = $this->finish($worker);
+        $this->assertFalse($loser['success']);
+        $this->assertStringContainsString('stale', $loser['error']);
+        $this->assertSame($committed, HistoricalMovementRepairFixture::snapshot($db));
+        $this->assertSame(0, $db->table('trip_movement_events')->where(['turo_trip_normalized_id' => Fixture::TRIP, 'event_code' => 'vehicle_recovered'])->countAllResults());
+    }
+
+    public static function commercialWinners(): array
+    {
+        return [['actionable'], ['completed'], ['fulfillment_note'], ['snapshot']];
+    }
+
+    public function testOrdinaryExtrasUpdateWaitsUntilRecoveryAndItsPreservationFirewallCommit(): void
+    {
+        $db = $this->fixture->db;
+        $db->table('turo_trips_normalized')->where('id', Fixture::TRIP)->update(['trip_status_lookup_value_id' => (new App\Repositories\LookupRepository($db))->valueId('trip_status', 'completed')]);
+        $selection = Tests\Support\HistoricalRecoveryExtraFixture::seed($db);
+        $preview = (new Repair($db))->preview($this->r, Fixture::ACTOR);
+        $worker = [];
+        $repo = $this->callbackRepository(function () use (&$worker): void {
+            $worker = $this->start('extra_update', $this->r);
+        }, 'historical_missing_recovery_created');
+        $result = (new Repair($db, $repo))->apply($this->r, Fixture::ACTOR, $preview['confirmation']);
+        $update = $this->finish($worker);
+        $this->assertSame('applied', $result['status']);
+        $this->assertTrue($update['success'], $update['error'] ?? '');
+        $this->assertTrue($update['result']['updated']);
+        $this->assertSame('Synthetic concurrent catalog update', $db->table('fleet_extras')->where('company_id', Fixture::COMPANY)->get()->getRowArray()['display_name']);
+        $this->assertSame('pending', $db->table('trip_extra_fulfillments')->where('turo_extra_selection_id', $selection)->get()->getRowArray()['state']);
+        $this->assertSame(1, $db->table('trip_movement_events')->where(['turo_trip_normalized_id' => Fixture::TRIP, 'event_code' => 'vehicle_recovered'])->countAllResults());
+    }
+
     public function testCommitLostAcknowledgementReturnsOriginalReceiptWithoutDuplication(): void
     {
         $db = $this->fixture->db;

@@ -51,6 +51,7 @@ final class HistoricalMissingRecoveryPreservation
         foreach ($a['readiness'] as $id => $row) {
             $this->readiness($r, $row, $b['readiness'][$id], $release);
         }
+        $retired = [];
         $currentA = $before['current_future'];
         $currentB = $after['current_future'];
         foreach (array_unique(array_merge(array_keys($currentA['readiness']), array_keys($currentB['readiness']))) as $id) {
@@ -76,7 +77,7 @@ final class HistoricalMissingRecoveryPreservation
                 }
                 continue;
             }
-            if ($this->inactiveTargetPreparation($r, $inputs, $id, $owner, $left, $right)) {
+            if ($this->inactiveTargetPreparation($r, $inputs, $id, $owner, $left, $right, $before, $after, $retired)) {
                 continue;
             }
             if ($left === null || $right === null || ! array_is_list($left) || ! array_is_list($right)) {
@@ -127,11 +128,15 @@ final class HistoricalMissingRecoveryPreservation
                 $changes[] = ['family' => $family, 'classification' => 'expected_recovery_dependency', 'before' => $currentA[$family], 'after' => $currentB[$family]];
             }
         }
+        if ($retired !== []) {
+            $changes[] = ['family' => 'historical_extra_membership', 'classification' => 'inactive_historical_purchased_extra_retirement', 'entries' => $retired,
+                'commercial_fingerprint' => hash('sha256', json_encode([$inputs['commercial'], $currentA['extras'], $currentB['extras']], JSON_THROW_ON_ERROR))];
+        }
         return $changes;
     }
 
     /** Only explanatory membership of already-inactive target preparation may retire. */
-    private function inactiveTargetPreparation(array $r, array $inputs, int $id, array $owner, ?array $before, ?array $after): bool
+    private function inactiveTargetPreparation(array $r, array $inputs, int $id, array $owner, ?array $before, ?array $after, array $beforeViews, array $afterViews, array &$retired): bool
     {
         $context = $inputs['canonical_contexts'][$id] ?? [];
         if ($after !== null || $before === null || ! array_is_list($before)
@@ -144,7 +149,20 @@ final class HistoricalMissingRecoveryPreservation
         if (! $policy->closedTrip((int) $owner['trip_id'], $inputs) || ! $policy->closedTrip($r['trip_id'], $closed)) {
             return false;
         }
+        $canonical = array_values(array_filter($beforeViews['authority']['readiness'][$id]['requirements'], static fn ($row) => $row['phase'] === MovementReadinessProjectionService::PHASE_NEXT_PICKUP_PREPARATION));
+        if ($before !== $canonical) {
+            return false;
+        }
+        $candidates = [];
         foreach ($before as $row) {
+            if (($row['source_type'] ?? null) === 'extra_fulfillment') {
+                $evidence = $this->inactivePurchasedExtra($r, $inputs, $id, $owner, $row, $beforeViews, $afterViews, $closed);
+                if ($evidence === null) {
+                    return false;
+                }
+                $candidates[] = $evidence;
+                continue;
+            }
             $physical = in_array($row['code'], ['vehicle_clean', 'energy_known', 'energy_ready'], true) && ($row['source_type'] ?? null) === 'derived';
             $verification = ($row['source_type'] ?? null) === 'extras_verification' && $row['code'] === 'extras_verification_' . $r['company_id'] . '_' . $r['trip_id'];
             if ((! $physical && ! $verification) || $row['phase'] !== MovementReadinessProjectionService::PHASE_NEXT_PICKUP_PREPARATION
@@ -157,7 +175,96 @@ final class HistoricalMissingRecoveryPreservation
                 return false;
             }
         }
+        array_push($retired, ...$candidates);
         return true;
+    }
+
+    /** Recovery-only membership exception; the full historical requirement never changes. */
+    private function inactivePurchasedExtra(array $r, array $inputs, int $id, array $owner, array $row, array $before, array $after, array $closed): ?array
+    {
+        $context = $inputs['canonical_contexts'][$id];
+        $extra = $row['extra_fulfillment'] ?? [];
+        $selection = (int) ($row['selection_id'] ?? 0);
+        $fulfillment = (int) ($row['fulfillment_id'] ?? 0);
+        if (($row['code'] ?? null) !== 'extra_fulfillment_' . $fulfillment || $selection < 1 || $fulfillment < 1
+            || ($row['phase'] ?? null) !== MovementReadinessProjectionService::PHASE_NEXT_PICKUP_PREPARATION
+            || ($row['status'] ?? null) !== 'unsatisfied' || ($row['actionable'] ?? null) !== false || ($row['relevant'] ?? null) !== false
+            || ! array_key_exists('action', $row) || $row['action'] !== null || ($row['retired_reason'] ?? null) !== 'target_handoff'
+            || ($row['commitment_id'] ?? null) !== null || ($row['synchronization_required'] ?? true) !== false
+            || (int) ($owner['company_id'] ?? 0) !== $r['company_id'] || (int) ($owner['vehicle_id'] ?? 0) !== $r['vehicle_id']
+            || (int) ($owner['checklist_id'] ?? 0) !== $id || (int) ($context['id'] ?? 0) !== $id
+            || (int) ($context['turo_trip_normalized_id'] ?? 0) !== (int) $owner['trip_id']) {
+            return null;
+        }
+        foreach (['company_id' => $r['company_id'], 'vehicle_id' => $r['vehicle_id'], 'trip_id' => $r['trip_id'], 'target_trip_id' => $r['trip_id']] as $key => $value) {
+            if ((int) ($row[$key] ?? 0) !== $value) {
+                return null;
+            }
+        }
+        if ((int) ($context['company_id'] ?? 0) !== $r['company_id'] || (int) ($context['fleet_vehicle_id'] ?? 0) !== $r['vehicle_id']
+            || (int) ($extra['company_id'] ?? 0) !== $r['company_id'] || (int) ($extra['fleet_vehicle_id'] ?? 0) !== $r['vehicle_id']
+            || (int) ($extra['turo_trip_normalized_id'] ?? 0) !== $r['trip_id']
+            || (int) ($extra['selection_id'] ?? 0) !== $selection || (int) ($extra['fulfillment_id'] ?? 0) !== $fulfillment
+            || ($extra['source_kind'] ?? null) !== 'purchased_extra' || ($extra['fulfillment_state'] ?? null) !== 'pending'
+            || ($extra['is_completed'] ?? null) !== false || ($extra['completed_at'] ?? null) !== null
+            || ($extra['completed_by_user_id'] ?? null) !== null || ($extra['completed_basis_hash'] ?? null) !== null
+            || ($extra['is_actionable'] ?? null) !== false || ($extra['is_blocking'] ?? null) !== false
+            || ($extra['is_suppressed_after_handoff'] ?? null) !== true || ($extra['permitted_actions'] ?? null) !== []
+            || ($extra['review_required'] ?? null) !== true || ($extra['synchronization_required'] ?? true) !== false
+            || ! in_array($extra['fulfillment_phase'] ?? null, ['preparation', 'pickup'], true)) {
+            return null;
+        }
+        // The source/target closure checks are shared with the existing physical
+        // rule. The target must be open before, closed only by this recovery.
+        if ((new HistoricalMissingHandoffPreservation())->closedTrip($r['trip_id'], $inputs)) {
+            return null;
+        }
+        foreach ([(int) $owner['trip_id'], $r['trip_id']] as $tripId) {
+            $trips = array_values(array_filter($inputs['commercial']['trips'], static fn ($trip) => (int) $trip['id'] === $tripId
+                && (int) $trip['company_id'] === $r['company_id'] && (int) $trip['fleet_vehicle_id'] === $r['vehicle_id']));
+            if (count($trips) !== 1) {
+                return null;
+            }
+        }
+        $commercial = $before['current_future']['extras'][$r['trip_id']] ?? null;
+        if ($commercial === null || $commercial !== ($after['current_future']['extras'][$r['trip_id']] ?? null)) {
+            return null;
+        }
+        foreach (['refresh_required', 'advisory', 'optional_active_refresh'] as $flag) {
+            if (($commercial['verification'][$flag] ?? null) !== false || ($extra['verification'][$flag] ?? null) !== false) {
+                return null;
+            }
+        }
+        foreach ($commercial['rows'] as $work) {
+            if (($work['is_actionable'] ?? false) || ($work['is_blocking'] ?? false) || ($work['permitted_actions'] ?? []) !== []
+                || ($work['source_kind'] ?? null) === 'manual') {
+                return null;
+            }
+        }
+        $historical = [];
+        foreach ([$before, $after] as $view) {
+            $matches = array_values(array_filter($view['authority']['readiness'][$id]['requirements'] ?? [], static fn ($q) => $q['phase'] === $row['phase'] && $q['code'] === $row['code']));
+            if ($matches !== [$row]) {
+                return null;
+            }
+            $historical[] = $matches[0];
+        }
+        $raw = array_values(array_filter($inputs['commercial']['selections'], static fn ($q) => (int) $q['selection_id'] === $selection && (int) $q['fulfillment_id'] === $fulfillment));
+        $purchased = array_values(array_filter($commercial['purchased'] ?? [], static fn ($q) => (int) $q['selection_id'] === $selection && (int) $q['fulfillment_id'] === $fulfillment));
+        $snapshots = array_values(array_filter($inputs['commercial']['snapshots'], static fn ($q) => (int) $q['id'] === (int) ($extra['snapshot_id'] ?? 0)
+            && (int) $q['company_id'] === $r['company_id'] && (int) $q['turo_trip_normalized_id'] === $r['trip_id']));
+        if (count($raw) !== 1 || count($purchased) !== 1 || count($snapshots) !== 1
+            || (int) $raw[0]['company_id'] !== $r['company_id'] || (int) $raw[0]['fleet_vehicle_id'] !== $r['vehicle_id']
+            || (int) $raw[0]['turo_trip_normalized_id'] !== $r['trip_id'] || $raw[0]['fulfillment_state'] !== 'pending'
+            || $purchased[0] !== $extra
+            || $purchased[0]['review_required'] !== true || $purchased[0]['permitted_actions'] !== []
+            || $purchased[0]['fulfillment_state'] !== $extra['fulfillment_state'] || $purchased[0]['is_completed'] !== $extra['is_completed']) {
+            return null;
+        }
+        return ['checklist_id' => $id, 'source_trip_id' => (int) $owner['trip_id'], 'target_trip_id' => $r['trip_id'],
+            'code' => $row['code'], 'selection_id' => $selection, 'fulfillment_id' => $fulfillment, 'completion_state' => $extra['fulfillment_state'],
+            'reason' => 'source_closed; target_closed_by_recovery; already_inactive; historical_review_and_commercial_authority_unchanged',
+            'evidence_fingerprint' => hash('sha256', json_encode([$raw, $snapshots, $historical, $purchased, $context, $inputs['timeline'], $closed['timeline']], JSON_THROW_ON_ERROR))];
     }
 
     private function readiness(array $r, array $before, array $after, bool $release): void
@@ -165,6 +272,14 @@ final class HistoricalMissingRecoveryPreservation
         $derived = ['ready', 'blocking_remaining_count', 'additional_actions_remaining_count', 'human_actions_remaining_count', 'known_facts_satisfied_count', 'requirements', 'preparation_assessment', 'last_known_vehicle_facts', 'is_same_day_turnaround'];
         if (array_diff_key($before, array_flip($derived)) !== array_diff_key($after, array_flip($derived))) {
             throw new RuntimeException('Unrelated checklist state, readiness identity or evidence changed.');
+        }
+        foreach ([$before, $after] as $row) {
+            if (isset($row['readiness_phase'], $row['blocking_remaining_count'])) {
+                $blocking = count(array_filter($row['requirements'], static fn ($q) => $q['phase'] === $row['readiness_phase'] && MovementReadinessProjectionService::isBlocking($q)));
+                if ($row['blocking_remaining_count'] !== $blocking || $row['ready'] !== ($blocking === 0)) {
+                    throw new RuntimeException('Unrelated readiness blocker count changed.');
+                }
+            }
         }
         $a = $this->requirements($before['requirements']);
         $b = $this->requirements($after['requirements']);

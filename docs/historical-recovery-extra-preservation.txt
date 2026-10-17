@@ -1,0 +1,189 @@
+Historical purchased-Extra membership during a missing recovery
+==============================================================
+
+Scope
+
+Only historical_missing_recovery.v1 uses this refinement. No normal Extras,
+Guest Commitments, handoff, staging, recovery, or import semantics change. No
+schema or release metadata change. No commercial writer is added or invoked by
+the classifier. This document and all fixtures use synthetic identities/times.
+
+Previous behavior
+
+HistoricalMissingRecoveryPreservation::compare independently compares complete
+canonical history and current/future projections. inactiveTargetPreparation
+allows a closed prior return checklist's next-pickup preparation membership to
+retire when the recovery closes its target. It previously accepted only derived
+cleaning/energy and already-inactive Extras verification. It rejected every
+extra_fulfillment requirement, including a persisted pending fulfillment whose
+action/relevance were already retired by an existing handoff. This made a valid
+physical closure fail with unrelated current/future readiness membership changed.
+
+Exception proof
+
+The existing physical and verification branches keep their eligibility rules.
+The separate recovery-only purchased branch requires all of the following:
+
+* Retiring membership is exactly the canonical full-history next-preparation list; duplicates or unexplained members reject.
+* Exact extra_fulfillment source and code, positive matching selection/fulfillment
+  IDs, next_pickup_preparation phase, no commitment or synchronization requirement.
+* Company, vehicle, source checklist, source trip, next target and purchased trip
+  agree across canonical context, full projection and captured commercial inputs.
+* Canonically closed source; target open before and canonically closed only by
+  the proposed recovery. Closure uses actual lifecycle facts and allowed imported
+  status, not calendar age. Only current/future membership disappears.
+* Unsatisfied historical requirement already has action=null, actionable=false,
+  relevant=false and retired_reason=target_handoff. Pending underlying fulfillment
+  is incomplete and suppressed after handoff, with no completion timestamp/user/
+  basis, no available actions, no blocker and no current synchronization work.
+* No required/advisory/optional active refresh. No actionable/blocking purchased
+  row or active manual row on the target. Uncertain or unsupported cases reject.
+* Exact same requirement occurs once in full history before AND after, including
+  unresolved pending status and review_required=true. Same purchased row remains
+  visible in the commercial projection. Captured selection, fulfillment and
+  snapshot ownership/identity are independently established. No source evidence
+  or completion record changes.
+* Independent current/future commercial projections and future schedule remain
+  exactly equal. Existing custody, position, availability, readiness, movement
+  execution and physical-work comparisons still run. Blocker aggregates must be
+  derived from the canonical requirements; a changed count cannot hide an Extra.
+
+A completed source does not make its target's real obligation historical. Actual
+current/actionable or pre-refresh cases reject. The separate handoff preservation
+policy is unchanged. Existing recovery-specific cleaning/energy and legitimate
+physical-access deferral/release behavior remain in place; commercial obligations
+are still visible even when physical work is deferred by guest possession.
+
+Fingerprint and locking
+
+The new expected_changes entry identifies source checklist/trip, target trip,
+selection, fulfillment and pending completion state. Its evidence fingerprint
+binds captured selection/completion data, snapshot, exact full historical rows,
+purchased review visibility, source context and before/after lifecycle evidence.
+A commercial fingerprint binds captured commercial inputs and both independently
+compared commercial projections. Existing confirmation hashing also binds the
+normalized request, actor, full scoped state, full captured inputs, canonical
+before/after and streaming all-table preservation firewall.
+
+Apply recomputes everything after the existing receipt, company/vehicle, trip,
+commercial range and authorization locks. Changed identity, source payload,
+completion, manual work or lifecycle makes the old confirmation stale. Existing
+read-only preview and audited apply write sets are unchanged: recovery event,
+return assessment and three operational audits; no existing row is edited.
+Classification adds ZERO database queries. It scans only already captured,
+bounded inputs, with existing inspection limits and fail-closed overflow.
+
+Synthetic seven-fact proof
+
+Existing correct Trip A handoff and an older closed return are seeded, with an
+unresolved inactive historical purchased Extra on A. Trips B/C initially have no
+movement facts. A real future purchased Extra and manual task are also seeded.
+All dates below are synthetic local application time, independent of any live
+correction. C is the final physical holder despite incomplete imported history.
+
+Step  Existing workflow                     Time                 Result
+1     historical_missing_recovery.v1         2023-06-09 15:22     operator / no active trip
+2     stageForChecklist B                   2023-06-10 10:20     operator / staged B
+3     confirmGuestPickup B                  2023-06-10 13:15     guest / B
+4     stageGuestReturn B                    2023-06-11 14:30     guest / B awaiting recovery
+5     recoverVehicle B                      2023-06-12 07:40     operator / no active trip
+6     stageForChecklist C                   2023-06-12 08:35     operator / staged C
+7     confirmGuestPickup C                  2023-06-12 13:55     guest / C
+
+B staging/handoff use coarse HNL International Garage text, with structured
+parking fields omitted. Unknown pickup level/row remain NULL; the later return
+bay is never borrowed. B's guest return report records synthetic 83% only as
+guest-report note evidence. It does not create an assessment and leaves position
+unverified, with the reported bay separate from verified position. B recovery
+uses independently known International level 5 row G. Its required return
+assessment has energy=NULL and cleanliness=NULL, with an explicit unknown-energy
+reason; reported 83% is not copied. C stage is clean/79%, International level 4
+row H, and C handoff inherits that known location. No invented Home position.
+
+The final canonical authority is guest/C at C's handoff location. Every earlier
+handoff interval is closed before another begins, with no conflicting guest
+states. Future physical preparation is deferred while C is away; the future
+purchased Extra, its pending state/action/blocker and manual commitment survive.
+Persisted checklist/history/status rows remain byte-for-byte unchanged. The
+fixture has no active positioning plans or airport workflow rows requiring
+normal workflow synchronization; live preflight must inspect these separately.
+
+Atomicity decision: A, conditional on a proven external observation fence
+
+These workflows each own/commit their transaction. The privileged repair rejects
+an outer transaction; pretending all seven calls are one database transaction
+would require new orchestration and different semantics. The existing services
+write local transactional facts/assessments and, where present, synchronously
+update owned airport workflow history or invalidate positioning plans. The traced
+paths have no external dispatch/outbox side effect. Current custody/readiness
+are recomputed from committed facts. Separate commits are adequate INSIDE a
+verified window in which no operator, HTTP/public reader, importer, cron, worker,
+in-flight request or other database client can observe/use intermediate states.
+The local synthetic harness has no such observers. It does not prove any actual
+server is suspended, and no production connection was made to establish that.
+
+A write-only maintenance screen is insufficient: public/read routes and direct
+clients must be fenced too. Record each entry point, prior running state and
+proof that it is stopped/blocked and drained. Retain the one controlled correction
+session and necessary independent read-only verification. If the operator cannot
+prove this fence, STOP before the first fact. Reassess orchestration; this change
+does not silently substitute an atomic batch. No orchestration was implemented.
+
+Mandatory gates, at entry and after EACH individual commit
+
+1. Fresh protected backup before correction, with hash/access controls and restore
+   evidence; establish and verify the complete observation/write/cron fence.
+2. Resolve owned vehicle, trips, checklists, original handoff/assessment, statuses,
+   full movement timeline and equivalent facts. Reconcile current reality anew;
+   a later new movement or changed commercial input invalidates the old plan.
+3. For step 1, obtain a new safe recovery preview and review its bound historical
+   retirement, complete projections and exact confirmation. Apply that exact hash
+   with one durable operation UUID. A non-safe preview blocks the sequence.
+4. Before every next fact, re-read and verify the precise preceding event ID,
+   code, owned trip, timestamp, location, source and assessment. Compare the full
+   timeline against the recorded prefix; reject an unexpected concurrent event.
+5. Check custody/basis and position against the table above, including the staged
+   target association and unverified guest-return report. Validate strictly ordered
+   actual handoff/recovery intervals and no overlap or duplicate lifecycle fact.
+6. Compare unrelated commercial, checklist, schedule, availability, Damage and
+   financial rows against the protected baseline. Ordinary target-owned workflow
+   synchronization/audit must be identified and reviewed in advance. Unexpected
+   invalidation of unrelated plans/authority is a blocker, never accepted silently.
+7. Save exact event/assessment/audit receipts and committed state after each gate.
+   Before the final handoff verify C's clean/known-charge stage and its location.
+8. Reopen HTTP/cron/observers ONLY after all seven gates pass and final canonical
+   custody, position, readiness, future obligations and business firewall agree.
+   Restore only the processes/entry points that were running before the window.
+
+Failure after a committed prefix
+
+Failure after steps 1/2/3/4/5/6/7 leaves respectively: operator/no trip,
+operator/staged B, guest/B, guest/B awaiting recovery, operator/no trip,
+operator/staged C, guest/C (final verification/reopening still outstanding).
+Keep all observers and writers suspended, stop and record the exact committed
+prefix, identifiers, receipts, custody and position. No blind rollback of true
+historical facts, no automatic re-run and no fresh UUID retry. Diagnose read-only
+and explicitly review a resumed plan. A lost acknowledgement is not proof of
+rollback: inspect/replay the original privileged UUID and inspect ordinary facts
+for exact equivalents before any further action. If final verification fails,
+even after step 7, the window stays closed.
+
+Permanent validation
+
+HistoricalMissingRecoveryExtraPreservationTest covers safe pending history,
+preview purity, exact writes/replay, zero classification queries, ownership/action/
+completion/source/history predicates, current/future commercial hard gates and
+stale confirmations after commercial changes. HistoricalRecoverySequenceTest
+executes all seven ordinary facts and independently interrupts after every commit,
+checking exact prefixes, non-overlap, current position, unknown evidence separation,
+future obligations, all unrelated tables and persisted checklist history.
+
+The existing independent-process MariaDB harness adds committed commercial winners
+(actionable configuration, valid completion, pending-row edit, source snapshot)
+against a waiting recovery apply: all old fingerprints reject with zero repair
+writes. A genuine ordinary catalog update also waits for a winning recovery and
+its preservation firewall, then commits independently. No required skip is used.
+The full local suite includes historical recovery/handoff, ordinary movement,
+Extras/Commitments, Damage, wheel/repair, expenses, financial results and
+reconciliation regressions. Test/build evidence is recorded in the ignored local
+build directory; release metadata remains at the original baseline.
