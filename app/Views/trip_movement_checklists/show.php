@@ -112,6 +112,7 @@ $tripFacts ??= [
             </div>
             <a class="action-link" href="/">Command Center</a>
         </header>
+<?= view('operational_reconciliation/context', ['context' => $reconciliationContext ?? null]) ?>
 
         <?php if ($notice !== null): ?><section class="section import-message tone-success"><strong><?= esc($notice) ?></strong></section><?php endif; ?>
         <?php if ($error !== null): ?><section class="section import-message tone-danger"><strong><?= esc($error) ?></strong></section><?php endif; ?>

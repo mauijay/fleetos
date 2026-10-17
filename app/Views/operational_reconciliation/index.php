@@ -30,6 +30,7 @@ $navigation = [
                 <p class="reconciliation-meta">Recorded authorities as of <?= esc($r['as_of']) ?> · Pacific/Honolulu</p>
             </div>
         </header>
+        <?php if ($r['return_link'] !== null): ?><a class="reconciliation-return" href="<?= esc($r['return_link']['href'], 'attr') ?>"><?= esc($r['return_link']['label']) ?></a><?php endif; ?>
         <section class="section" aria-label="Fleet reconciliation coverage">
             <div class="reconciliation-counts">
                 <?php foreach ($r['summary']['counts'] as $severity => $count): ?>
@@ -44,6 +45,7 @@ $navigation = [
                 <div class="reconciliation-errors" role="alert"><h3>Check the review filters</h3><ul><?php foreach ($r['errors'] as $error): ?><li><?= esc($error) ?></li><?php endforeach; ?></ul></div>
             <?php endif; ?>
             <form method="get" action="/operations/reconciliation" class="reconciliation-filters">
+                <?php foreach (['trip', 'checklist', 'issue', 'return'] as $key): ?><?php if ($r['filters'][$key] !== ''): ?><input type="hidden" name="<?= esc($key, 'attr') ?>" value="<?= esc($r['filters'][$key], 'attr') ?>"><?php endif; ?><?php endforeach; ?>
                 <?php foreach (['severity' => ['' => 'All severities'] + array_combine(array_keys($r['legend']), array_keys($r['legend'])), 'scope' => ['' => 'All scopes', 'CURRENT' => 'Current', 'FUTURE' => 'Future', 'HISTORICAL' => 'Historical'], 'vehicle' => ['' => 'All owned vehicles'] + $r['vehicles'], 'category' => ['' => 'All categories'] + $r['categories']] as $name => $options): ?>
                     <label for="filter-<?= esc($name, 'attr') ?>"><?= esc(ucfirst($name)) ?><select id="filter-<?= esc($name, 'attr') ?>" name="<?= esc($name, 'attr') ?>"><?php foreach ($options as $value => $label): ?><option value="<?= esc((string) $value, 'attr') ?>" <?= (string) $r['filters'][$name] === (string) $value ? 'selected' : '' ?>><?= esc($label) ?></option><?php endforeach; ?></select></label>
                 <?php endforeach; ?>
@@ -52,6 +54,7 @@ $navigation = [
             </form>
         </section>
         <section class="section" aria-labelledby="findings-heading">
+            <?php if ($r['context_label'] !== null): ?><p class="reconciliation-meta"><?= esc($r['context_label']) ?> &middot; Findings tied to this context. <a class="reconciliation-return" href="/operations/reconciliation">Review all fleet findings</a></p><?php endif; ?>
             <div class="section-heading split-heading"><h2 id="findings-heading">Authority findings</h2><span><?= esc((string) $r['total']) ?> matching · Page <?= esc((string) $r['page']) ?> of <?= esc((string) $r['pages']) ?></span></div>
             <?php if ($r['errors'] === [] && $r['groups'] === []): ?>
                 <div class="empty-state"><?php if ($r['summary']['with_findings'] === 0): ?>No operational reconciliation issues found.<?php else: ?>No findings match these filters.<?php endif; ?> <?= esc((string) $r['summary']['reviewed']) ?> vehicles reviewed against recorded authorities.</div>
@@ -70,12 +73,17 @@ $navigation = [
                                 <div class="reconciliation-issue-heading"><span class="reconciliation-badge"><?= esc($issue['severity']) ?></span><span class="reconciliation-scope"><?= esc($issue['scope']) ?></span><?php if ($issue['scope'] === 'HISTORICAL'): ?><span>Historical review</span><?php endif; ?></div>
                                 <h4><?= esc($issue['summary']) ?></h4>
                                 <p class="reconciliation-meta"><?= esc($issue['code']) ?> · <?= esc($issue['trip_label']) ?></p>
+                                <details class="reconciliation-detail" <?= $r['filters']['issue'] === $issue['fingerprint'] ? 'open' : '' ?>>
+                                <summary>Review evidence <span class="reconciliation-meta"><?= esc($issue['severity'] . ' / ' . $issue['code']) ?></span></summary>
                                 <p class="reconciliation-authority"><strong>Authority basis:</strong> <?= esc($issue['authority_label']) ?></p>
                                 <dl class="reconciliation-evidence"><?php foreach ($issue['facts'] as $fact): ?><div><dt><?= esc($fact['label']) ?></dt><dd><?= esc($fact['value']) ?></dd></div><?php endforeach; ?></dl>
                                 <?php foreach ($issue['families'] as $family => $items): ?>
                                     <div class="reconciliation-family"><h5><?= esc($family) ?></h5><ul><?php foreach ($items as $item): ?><li><strong><?= esc($item['code']) ?></strong> · <?= esc($item['status']) ?><br><span><?= esc($item['classification']) ?> · <?= esc($item['actionability']) ?></span></li><?php endforeach; ?></ul></div>
                                 <?php endforeach; ?>
+                                <ol class="reconciliation-chronology" aria-label="Concise authority chronology"><?php foreach ($issue['chronology'] as $step): ?><li><strong><?= esc($step['label']) ?></strong><span><?= esc($step['value']) ?></span></li><?php endforeach; ?></ol>
+                                <details class="reconciliation-support"><summary>Support reference</summary><p>Issue fingerprint <code><?= esc($issue['fingerprint']) ?></code></p></details>
                                 <nav class="reconciliation-review-links" aria-label="Review <?= esc($group['name'] . ' ' . $issue['code'], 'attr') ?>"><?php foreach ($issue['links'] as $link): ?><a href="<?= esc($link['href'], 'attr') ?>"><?= esc($link['label']) ?> <span aria-hidden="true">&#8599;</span></a><?php endforeach; ?></nav>
+                                </details>
                             </article>
                         <?php endforeach; ?>
                     </section>

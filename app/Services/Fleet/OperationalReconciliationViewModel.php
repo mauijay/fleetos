@@ -33,8 +33,10 @@ final class OperationalReconciliationViewModel
 
     public function present(OperationalReconciliation $projection, array $query = []): array
     {
-        $errors = [];
-        $filters = [];
+        $context = new ReconciliationContextService($projection);
+        $target = $context->target($query);
+        $errors = $target['errors'];
+        $filters = $target['filters'];
         foreach (['severity' => ReconciliationIssue::SEVERITIES, 'scope' => ReconciliationIssue::SCOPES, 'category' => array_keys(self::CATEGORIES)] as $key => $allowed) {
             $value = $query[$key] ?? '';
             if (! is_string($value) || ($value !== '' && ! in_array($value, $allowed, true))) {
@@ -66,7 +68,7 @@ final class OperationalReconciliationViewModel
             $errors[] = 'Choose a valid page.';
             $page = '1';
         }
-        if (array_diff(array_keys($query), ['severity', 'scope', 'category', 'vehicle', 'q', 'page']) !== []) {
+        if (array_diff(array_keys($query), ['severity', 'scope', 'category', 'vehicle', 'q', 'page', 'trip', 'checklist', 'issue', 'return']) !== []) {
             $errors[] = 'Unsupported filter. Use the available review filters.';
         }
         $rows = [];
@@ -76,7 +78,8 @@ final class OperationalReconciliationViewModel
                 if (($filters['severity'] !== '' && $issue['severity'] !== $filters['severity'])
                     || ($filters['scope'] !== '' && $issue['scope'] !== $filters['scope'])
                     || ($filters['category'] !== '' && explode('.', $issue['code'])[0] !== $filters['category'])
-                    || ($id !== '' && (int) $id !== (int) $vehicleId)) {
+                    || ($id !== '' && (int) $id !== (int) $vehicleId)
+                    || ! $context->matches($issue, $target)) {
                     continue;
                 }
                 $haystack = $vehicles[$vehicleId] . ' ' . $issue['summary'] . ' ' . implode(' ', array_map(static fn (int $trip): string => 'Trip ' . $trip, $issue['trip_ids']));
@@ -108,6 +111,7 @@ final class OperationalReconciliationViewModel
             $groups[$key]['issues'][] = $this->issue($row['issue'], $vehicle);
         }
         return ['summary' => $this->summary($projection), 'as_of' => $projection->asOf, 'filters' => $filters, 'errors' => $errors,
+            'return_link' => $errors === [] ? $target['return_link'] : null, 'context_label' => $errors === [] ? $target['label'] : null,
             'vehicles' => $vehicles, 'categories' => self::CATEGORIES, 'legend' => self::LEGEND, 'groups' => array_values($groups),
             'total' => $total, 'page' => $page, 'pages' => $pages, 'previous' => $page > 1 ? $this->url($filters + ['page' => $page - 1]) : null,
             'next' => $page < $pages ? $this->url($filters + ['page' => $page + 1]) : null];
@@ -144,6 +148,13 @@ final class OperationalReconciliationViewModel
             $add('Guest interval · Trip ' . $interval['trip_id'], $interval['start'] . ' · ' . ($interval['end'] ?? 'No recorded recovery') . ' · handoff event #' . $interval['handoff_id']);
         }
         $generations = $e['generations'] ?? (isset($e['generation']) ? [$e['generation']] : []);
+        if ($category === 'checklist') {
+            foreach ($vehicle['checklists'] as $generation) {
+                if (in_array($generation['trip_id'], $issue['trip_ids'], true) && ! in_array($generation['id'], array_column($generations, 'id'), true)) {
+                    $generations[] = $generation;
+                }
+            }
+        }
         $links = [['label' => 'Vehicle details', 'href' => '/fleet/vehicles/' . (int) $issue['vehicle_id']], ['label' => 'Movement / trip history', 'href' => '/operations/vehicles/' . (int) $issue['vehicle_id'] . '/trip-history']];
         foreach (array_slice($generations, 0, 10) as $g) {
             $add(($g['is_current'] ? 'Canonical' : 'Obsolete') . ' checklist #' . $g['id'], 'Trip ' . $g['trip_id'] . ' · ' . $this->human($g['direction']) . ' · snapshot ' . ($g['scheduled_at_snapshot'] ?? 'Not recorded') . ' · authoritative schedule ' . ($g['authoritative_scheduled_at'] ?? 'Not recorded') . ' · persisted state: ' . ($g['persisted_workflow_state'] ?? 'Not recorded') . ' · basis: ' . ($g['is_current'] ? 'Matches canonical schedule' : $this->human($g['obsolete_reason'] ?? 'Schedule mismatch')));
@@ -202,7 +213,15 @@ final class OperationalReconciliationViewModel
         if ($category === 'import') {
             $links[] = ['label' => 'Import Issues', 'href' => '/turo/import-issues'];
         }
-        return $issue + ['facts' => $facts, 'families' => $families, 'links' => $links, 'authority_label' => $this->human($issue['authority_basis']), 'trip_label' => implode(', ', array_map(static fn (int $id): string => 'Trip ' . $id, array_slice($issue['trip_ids'], 0, 10))) . (count($issue['trip_ids']) > 10 ? ' (additional trips in movement history)' : '') ?: 'Vehicle-level finding'];
+        $chronology = [
+            ['label' => 'Recorded movement basis', 'value' => $this->event($vehicle['custody_basis_event'])],
+            ['label' => 'Reconciliation finding', 'value' => $issue['summary']],
+            ['label' => 'Next confirmed trip', 'value' => $this->trip($vehicle['next_confirmed_trip'])],
+        ];
+        foreach (array_slice(array_filter($vehicle['guest_commitments'], static fn (array $row): bool => in_array($row['trip_id'], $issue['trip_ids'], true)), 0, 10) as $source) {
+            $add('Source freshness / Trip ' . $source['trip_id'], $this->human($source['verification_state']) . ' / refresh required: ' . ($source['refresh_required'] ? 'Yes' : 'No') . ' / snapshot ' . ($source['snapshot_id'] ?? 'Not supplied'));
+        }
+        return $issue + ['chronology' => $chronology, 'facts' => $facts, 'families' => $families, 'links' => $links, 'authority_label' => $this->human($issue['authority_basis']), 'trip_label' => implode(', ', array_map(static fn (int $id): string => 'Trip ' . $id, array_slice($issue['trip_ids'], 0, 10))) . (count($issue['trip_ids']) > 10 ? ' (additional trips in movement history)' : '') ?: 'Vehicle-level finding'];
     }
 
     private function identity(array $vehicle): string

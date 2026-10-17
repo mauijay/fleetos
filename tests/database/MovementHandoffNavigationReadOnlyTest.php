@@ -22,6 +22,7 @@ final class MovementHandoffNavigationReadOnlyTest extends CIUnitTestCase
     use FeatureTestTrait;
 
     private BaseConnection $connection;
+    private BaseConnection $reconciliationConnection;
     private OperationalFactsRepository&MockObject $repository;
     /** @var array<string, mixed> */
     private array $renderData = [];
@@ -30,6 +31,8 @@ final class MovementHandoffNavigationReadOnlyTest extends CIUnitTestCase
     {
         parent::setUp();
         $this->connection = Database::connect('tests');
+        $this->reconciliationConnection = \Tests\Support\GuestCommitmentProjectionFixture::sqlite();
+        Services::injectMock('fleetOperationalReconciliationService', new \App\Services\Fleet\FleetOperationalReconciliationService($this->reconciliationConnection));
         foreach ($this->protectedTables() as $table) {
             $prefixed = $this->connection->prefixTable($table);
             $this->connection->query('DROP TABLE IF EXISTS ' . $prefixed);
@@ -107,6 +110,7 @@ final class MovementHandoffNavigationReadOnlyTest extends CIUnitTestCase
     protected function tearDown(): void
     {
         Services::reset();
+        $this->reconciliationConnection->close();
         parent::tearDown();
     }
 

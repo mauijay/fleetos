@@ -135,6 +135,9 @@ class TripMovementChecklists extends BaseController
         return view('trip_movement_checklists/show', [
             'assets' => Services::assetManifestService()->appAssets(),
             'navigation' => $this->navigation(),
+            'reconciliationContext' => ($checklist['exists'] ?? false) && $companyId > 0
+                ? (new \App\Services\Fleet\ReconciliationContextService(Services::fleetOperationalReconciliationService()->forVehicles($companyId, [(int) $checklist['fleet_vehicle_id']], $asOf)))->badge((int) $checklist['fleet_vehicle_id'], (int) $checklist['turo_trip_normalized_id'], $id, 'checklist')
+                : null,
             'checklist' => $checklist,
             'readiness' => $readiness,
             'readinessPresentation' => $stagingPresenter->readinessForDisplay($readiness ?? [], $stagingPresentation),
@@ -216,7 +219,14 @@ class TripMovementChecklists extends BaseController
             ? $requestedTripId
             : null;
 
+        $reconciliation = $vehicle === null ? null : new \App\Services\Fleet\ReconciliationContextService(Services::fleetOperationalReconciliationService()->forVehicles($companyId, [$vehicleId]));
+        $tripReconciliation = [];
+        foreach ($trips as $trip) {
+            $tripReconciliation[(int) $trip['id']] = $reconciliation?->badge($vehicleId, (int) $trip['id'], return: 'history');
+        }
         return CoreServices::renderer()->setData([
+            'reconciliationContext' => $reconciliation?->badge($vehicleId, return: 'history'),
+            'tripReconciliation' => $tripReconciliation,
             'assets' => Services::assetManifestService()->appAssets(),
             'vehicle' => $vehicle,
             'trips' => $trips,

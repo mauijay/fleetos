@@ -6,7 +6,7 @@ import { resolve, sep } from 'node:path';
 import { createServer } from 'node:http';
 
 // Runs only the synthetic PHP router and a fresh local Chrome profile.
-const directory = resolve('build/reconciliation-slice2-validation/browser-' + Date.now());
+const directory = resolve('build/reconciliation-slice3-validation/browser-' + Date.now());
 await mkdir(directory, { recursive: true });
 const php = process.env.RECONCILIATION_BROWSER_PHP || 'C:/xampp/php/php.exe';
 const ini = resolve(process.env.RECONCILIATION_BROWSER_INI || 'build/php-validation.ini');
@@ -102,6 +102,7 @@ try {
     await call('Emulation.setDeviceMetricsOverride',{width,height:1100,deviceScaleFactor:1,mobile:width===390});
     for(const scenario of ['p0','p1','checklist','historical','healthy']) {
       await fixture(scenario); await navigate('/operations/reconciliation');
+      await evaluate(`[...document.querySelectorAll('.reconciliation-detail')].forEach(e=>e.open=true)`);
       const body=await evaluate('document.body.innerText');
       assert(body.includes('Operational Reconciliation'));
       if(scenario==='p0'){assert(body.includes('P0'));assert(body.includes('movement.old_guest_custody'));assert(body.includes('Movement authority'));assert(body.includes('Import context'));}
@@ -134,6 +135,62 @@ try {
     await navigate('/operations/reconciliation?vehicle=20');assert(await evaluate('!!document.querySelector("[role=alert]")'));assert.equal(await evaluate('document.querySelectorAll(".reconciliation-issue").length'),0);
     await fixture('p0');await navigate('/');assert(await evaluate(`document.body.textContent.includes('P0 authority review')`),await evaluate('document.body.innerText.slice(0,1600)'));
     results.push({width,filters:true,pagination:true,invalidFilterSafe:true,commandCenter:true});
+  }
+  // Existing workflows retain their own controls; the reconciliation context contains links only.
+  for(const width of [390,1280,1920]) {
+    await call('Emulation.setDeviceMetricsOverride',{width,height:1100,deviceScaleFactor:1,mobile:width===390});
+    for(const [scenario,path,expected,back] of [
+      ['p0','/fleet/vehicles/1000','P0 Reconciliation','/fleet/vehicles/1000'],
+      ['healthy','/fleet/vehicles/1000',null,null],
+      ['p0','/operations/trips/10000/commitments','P0 Reconciliation','/operations/trips/10000/commitments'],
+      ['p0','/operations/vehicles/1000/trip-history?trip=10000','P0 Reconciliation','/operations/vehicles/1000/trip-history'],
+      ['p1','/operations/checklists/20001','P1 Reconciliation','/operations/checklists/20001'],
+      ['checklist','/operations/checklists/20001','P2 Reconciliation','/operations/checklists/20001'],
+      ['historical','/operations/trips/10000/commitments','Historical review','/operations/trips/10000/commitments'],
+    ]) {
+      await fixture(scenario);await navigate(path);
+      assert(await evaluate('document.documentElement.scrollWidth')<=width,'Context overflow '+path+' / '+width);
+      const badges=await evaluate(`({text:[...document.querySelectorAll('.reconciliation-context-link')].map(e=>e.innerText).join(' '),count:document.querySelectorAll('.reconciliation-context-link').length,actions:[...document.querySelectorAll('.reconciliation-context-link a')].map(e=>({label:e.getAttribute('aria-label'),height:e.getBoundingClientRect().height,href:e.getAttribute('href')})),mutations:document.querySelectorAll('.reconciliation-context-link form,.reconciliation-context-link button').length})`);
+      assert.equal(badges.mutations,0);for(const action of badges.actions){assert(action.label);assert(action.height>=44);}
+      if(expected===null){assert.equal(badges.count,0);}else{
+        assert(badges.text.includes(expected),JSON.stringify(badges));
+        await call('Input.dispatchKeyEvent',{type:'keyDown',key:'Tab',code:'Tab',windowsVirtualKeyCode:9});
+        await call('Input.dispatchKeyEvent',{type:'keyUp',key:'Tab',code:'Tab',windowsVirtualKeyCode:9});
+        await evaluate(`document.querySelector('.reconciliation-context-link a').focus()`);
+        assert(await evaluate(`getComputedStyle(document.activeElement).outlineStyle!=='none'`));
+      }
+      const label=path.includes('checklists')?'checklist':path.includes('commitments')?'trip':path.includes('trip-history')?'history':'vehicle';
+      const shot=await call('Page.captureScreenshot',{format:'png',captureBeyondViewport:true});
+      await writeFile(resolve(directory,`${width}-${scenario}-${label}.png`),Buffer.from(shot.data,'base64'));
+      if(expected!==null){
+        const href=badges.actions[0].href;assert(href.includes('return='));await navigate(href);
+        const backHref=await evaluate(`document.querySelector('.reconciliation-return').getAttribute('href')`);
+        assert(backHref.startsWith(back));assert(!backHref.startsWith('//'));
+        assert(await evaluate('document.querySelectorAll(".reconciliation-issue").length')>0);
+        const summary='.reconciliation-detail > summary';
+        await evaluate(`document.querySelector('.reconciliation-detail').open=false;document.querySelector(${JSON.stringify(summary)}).focus()`);
+        await call('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,text:'\r'});
+        await call('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
+        assert(await evaluate(`document.querySelector('.reconciliation-detail').open`),'Native keyboard evidence disclosure');
+        assert(await evaluate(`getComputedStyle(document.querySelector(${JSON.stringify(summary)})).outlineStyle!=='none'`));
+        assert(await evaluate('document.documentElement.scrollWidth')<=width,'Evidence overflow');
+        const evidence=await evaluate(`document.querySelector('.reconciliation-detail').innerText`);
+        for(const text of ['Movement authority','Import context','Position basis','Source freshness','Recorded movement basis','Next confirmed trip'])assert(evidence.includes(text),text);
+        if(scenario==='checklist')for(const text of ['Canonical checklist #20000','Obsolete checklist #20001','persisted state: not_started','Derived readiness'])assert(evidence.includes(text),text);
+        if(scenario==='historical'){assert(evidence.includes('Historical review'));assert(!evidence.includes('Current blocker'));}
+        assert.equal(await evaluate(`document.querySelectorAll('.reconciliation-detail form,.reconciliation-detail button').length`),0);
+        const shot=await call('Page.captureScreenshot',{format:'png',captureBeyondViewport:true});
+        await writeFile(resolve(directory,`${width}-${scenario}-${label}-evidence.png`),Buffer.from(shot.data,'base64'));
+        await navigate(backHref);
+      }
+      const state=await evaluate(`fetch('/synthetic-state').then(r=>r.json())`);
+      assert.deepEqual(state,JSON.parse(await readFile(resolve(directory,scenario+'-before.json'),'utf8')),'Pure workflow round trip '+scenario+path);
+      results.push({width,scenario,path,badges,contextRoundTrip:true,keyboardDetail:expected!==null,zeroBusinessWrites:true});
+    }
+    await fixture('p0');await navigate('/');
+    const severityHref=await evaluate(`document.querySelector('.reconciliation-summary-counts a').getAttribute('href')`);
+    assert.equal(severityHref,'/operations/reconciliation?severity=P0');await navigate(severityHref);
+    results.push({width,severityDeepLink:true});
   }
   // Existing destinations must render successfully; navigation occurs after purity checks.
   await fixture('p0'); await navigate('/operations/reconciliation');

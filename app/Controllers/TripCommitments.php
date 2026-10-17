@@ -13,7 +13,8 @@ class TripCommitments extends BaseController
 {
     public function index(int $tripId): string
     {
-        $workspace = Services::tripCommitmentService()->workspace($this->activeCompanyId(), $tripId);
+        $companyId = $this->activeCompanyId();
+        $workspace = Services::tripCommitmentService()->workspace($companyId, $tripId);
         $movementHref = Services::operationalFactsRepository()->movementChecklistHref($tripId);
         $trip = $workspace['trip'];
         $projection = Services::guestCommitmentProjectionService()->forTrip($this->activeCompanyId(), $tripId);
@@ -37,6 +38,7 @@ class TripCommitments extends BaseController
             'navigation' => $this->navigation(),
             'workspace' => $workspace,
             'projection' => $projection,
+            'reconciliationContext' => (new \App\Services\Fleet\ReconciliationContextService(Services::fleetOperationalReconciliationService()->forVehicles($companyId, [(int) $trip['fleet_vehicle_id']])))->badge((int) $trip['fleet_vehicle_id'], $tripId, return: 'trip'),
             'backLink' => $backLink,
             'editing' => $editing,
             'formData' => CoreServices::session()->getFlashdata('trip_commitment_data') ?: [],

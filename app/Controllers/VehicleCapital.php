@@ -33,6 +33,7 @@ class VehicleCapital extends BaseController
             'currentStateError' => CoreServices::session()->getFlashdata('vehicle_current_state_error'),
             'currentPositionData' => CoreServices::session()->getFlashdata('current_position_data') ?? [],
             'currentReadinessData' => CoreServices::session()->getFlashdata('current_readiness_data') ?? [],
+            'reconciliationContext' => (new \App\Services\Fleet\ReconciliationContextService(Services::fleetOperationalReconciliationService()->forVehicles($companyId, [$vehicleId], $asOf)))->badge($vehicleId),
             'currentLocation' => Services::currentVehicleLocationService()->resolve($vehicleId, $asOf),
             'currentReadiness' => $this->currentReadiness($companyId, $vehicleId, $asOf),
             'currentMovementHref' => $this->currentMovementHref($vehicleId, $asOf),

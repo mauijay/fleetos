@@ -5687,3 +5687,19 @@ h3 {
 @media (max-width: 420px) { .reconciliation-filters { grid-template-columns: minmax(0, 1fr); } .reconciliation-filters label:has(input), .reconciliation-actions { grid-column: auto; } }
 
 .reconciliation-main .site-footer a { display: inline-flex; align-items: center; min-height: 44px; padding-inline: 4px; }
+
+/* Context links are compact; evidence stays in the read-only workspace. */
+.reconciliation-context-link { border-inline-start: 3px solid var(--line); padding: .25rem .75rem; margin: .5rem 0; max-width: 100%; overflow-wrap: anywhere; }
+.reconciliation-context-link.reconciliation-p0 { border-color: var(--danger); }
+.reconciliation-context-link.reconciliation-p1 { border-color: var(--warning); }
+.reconciliation-context-link a { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem .75rem; min-height: 44px; width: fit-content; max-width: 100%; }
+.reconciliation-context-link small { display: block; color: var(--muted); }
+.reconciliation-detail > summary, .reconciliation-support > summary { min-height: 44px; cursor: pointer; padding: .7rem .25rem; }
+.reconciliation-detail > summary .reconciliation-meta { margin-left: .5rem; }
+.reconciliation-return { display: inline-flex; align-items: center; min-height: 44px; }
+.reconciliation-chronology { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.25rem; padding-left: 1.25rem; margin: 1rem 0; }
+.reconciliation-chronology span { display: block; }
+.reconciliation-support { color: var(--muted); overflow-wrap: anywhere; }
+.reconciliation-summary-counts a { display: inline-flex; align-items: center; gap: .3rem; min-height: 44px; }
+.reconciliation-context-link a:focus-visible, .reconciliation-detail summary:focus-visible, .reconciliation-support summary:focus-visible, .reconciliation-return:focus-visible { outline: 3px solid #b7d1ff; outline-offset: 3px; }
+@media (max-width: 640px) { .reconciliation-chronology { grid-template-columns: 1fr; } .reconciliation-detail > summary .reconciliation-meta { display: block; margin-left: 0; } }

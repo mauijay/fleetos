@@ -48,6 +48,7 @@ $location = static fn (?string $class, ?string $source): string => trim((string)
             <div><p class="eyebrow">Trip-specific operator truth</p><h1>Guest Commitments</h1><p class="status-copy">Guest-specific instructions and promises for this trip. Turo reservation facts remain unchanged.</p></div>
             <a class="action-link" href="<?= esc($backLink['href'], 'attr') ?>"><?= esc($backLink['label']) ?></a>
         </header>
+<?= view('operational_reconciliation/context', ['context' => $reconciliationContext ?? null]) ?>
 
         <?php if ($success !== null): ?><section class="section import-message tone-success" role="status"><strong><?= esc($success) ?></strong></section><?php endif; ?>
         <?php if ($error !== null): ?><section class="section import-message tone-danger" role="alert"><strong>Guest commitment not saved</strong><p><?= esc($error) ?></p></section><?php endif; ?>

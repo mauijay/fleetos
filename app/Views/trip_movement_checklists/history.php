@@ -27,6 +27,7 @@ $locationLabel = static fn (?string $code): string => ucwords(str_replace('_', '
                 <a class="secondary-action button-link" href="/">Command Center</a>
             </div>
         </header>
+<?= view('operational_reconciliation/context', ['context' => $reconciliationContext ?? null]) ?>
         <section class="section">
             <?php if ($vehicle === null): ?>
                 <div class="empty-state">Vehicle not found.</div>
@@ -53,6 +54,7 @@ $locationLabel = static fn (?string $code): string => ucwords(str_replace('_', '
                                 <?php else: ?>
                                     <a class="action-link" href="<?= esc((string) $movementHref, 'attr') ?>" aria-label="Open movement for trip <?= esc((string) ($trip['turo_trip_id'] ?? $trip['id']), 'attr') ?>">Open movement</a>
                                 <?php endif; ?>
+                                <?= view('operational_reconciliation/context', ['context' => $tripReconciliation[(int) $trip['id']] ?? null]) ?>
                                 <a class="action-link" href="<?= esc($commitmentsHref, 'attr') ?>" aria-label="Guest commitments for trip <?= esc((string) ($trip['turo_trip_id'] ?? $trip['id']), 'attr') ?>">Guest commitments</a>
                             </div>
                         </article>
