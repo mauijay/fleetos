@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.35.5 — Historical Recovery Extra Preservation
+
+Release date: 2026-10-16
+
+### Historical Recovery Preservation
+
+- Tolerate only proven inactive historical purchased-Extra projection membership
+  retirement during a missing historical recovery.
+- Preserve purchased selections, fulfillments, historical review visibility and
+  all current and future commercial obligations.
+- Bind preservation evidence to preview fingerprints and locked stale-state
+  revalidation; current and future Extra obligations remain hard gates.
+
+### Sequence Safety
+
+- Validate the protected sequential correction workflow for multi-trip historical
+  custody restoration using existing workflows; no new orchestration service.
+- Require a fully suspended observation/write window and verification after each
+  fact, retaining suspension on failure.
+
+### Schema
+
+- No migration or schema change; latest App migration remains 000036.
+
 ## v0.35.4 — Historical Missing-Recovery Tooling
 
 Release date: 2026-10-15
