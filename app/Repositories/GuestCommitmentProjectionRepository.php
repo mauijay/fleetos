@@ -57,7 +57,7 @@ class GuestCommitmentProjectionRepository
             ->join('lookup_values statuses', 'statuses.id = trips.trip_status_lookup_value_id', 'left')
             ->join('scheduled_movement_locations returns', "returns.turo_trip_normalized_id = trips.id AND returns.movement_type = 'return'", 'left')
             ->where('vehicles.company_id', $companyId)->where('trips.deleted_at', null)
-            ->whereIn('trips.id', $tripIds)->limit($this->rowLimit + 1)->get()->getResultArray();
+            ->whereIn('trips.id', $tripIds)->orderBy('trips.id', 'ASC')->limit($this->rowLimit + 1)->get()->getResultArray();
         $this->assertWithinLimit('trips', $trips);
         $owned = array_map('intval', array_column($trips, 'id'));
         if ($owned === []) {

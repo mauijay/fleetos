@@ -136,6 +136,25 @@ final class HistoricalPairedMovementRepairMariaDbTest extends TestCase
         $this->assertSame($before, HistoricalMovementRepairFixture::snapshot($db));
     }
 
+    public function testPreservationSurvivesDifferentCommercialParentReadPlans(): void
+    {
+        $db = \Tests\Support\HistoricalPairPlanConnection::replaceFixtureConnection($this->fixture);
+        $commercial = new \App\Repositories\GuestCommitmentProjectionRepository($db);
+        $tripIds = [100, 102, 3001, 3002, 3003];
+        $before = $commercial->load(1, $tripIds, new \DateTimeImmutable())['trips'];
+        $service = new HistoricalPairedMovementRepairService($db);
+        $preview = $service->preview($this->request, 7);
+        $result = $service->apply($this->request, 7, $preview['confirmation']);
+        $after = $commercial->load(1, $tripIds, new \DateTimeImmutable())['trips'];
+
+        $this->assertSame('applied', $result['status']);
+        $this->assertSame($result['before'], $result['after']);
+        $this->assertSame($before, $after);
+        $this->assertSame($tripIds, array_map('intval', array_column($after, 'id')));
+        $this->assertSame(['PRIMARY', 'fleet_vehicle_id_starts_at_ends_at'], array_values(array_unique($db->readPlans)));
+        $this->assertSame('already_applied', $service->apply($this->request, 7, $preview['confirmation'])['status']);
+    }
+
     private function start(string $operation, string $confirmation = ''): array
     {
         $db = $this->fixture->db;
