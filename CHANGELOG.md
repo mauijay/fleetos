@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.36.0 — Operational Reconciliation Center
+
+Release date: 2026-10-18
+
+### Operational Reconciliation
+
+- Add company-scoped, read-only fleet-wide comparison of movement/custody,
+  current position, imported trip status, checklist/schedule authority, readiness,
+  and Extras / Guest Commitments.
+- Classify findings by P0/P1/P2/P3 operational severity and current, future or
+  historical scope, with deterministic issue fingerprints and deduplication.
+- Review position integrity and duplicate or obsolete checklist generations
+  against existing authoritative facts.
+
+### Operator Workspace
+
+- Add a dedicated reconciliation workspace with severity, scope, vehicle and
+  category filters, issue details and authority evidence.
+- Add a compact Command Center summary and contextual vehicle, trip and movement-
+  checklist indicators with deep links and safe return navigation.
+
+### Reliability
+
+- Make historical paired-movement preservation comparisons deterministic when
+  equivalent database query plans return trip rows in different orders.
+
+### Safety
+
+- Keep reconciliation derived and read-only, with company-scoped authorization
+  and zero-write GET behavior; existing business authorities remain unchanged.
+- Add no automatic fixes, issue persistence, dismissals or acknowledgements.
+
+### Schema
+
+- No migration or schema change; latest App migration remains 000036.
+
 ## v0.35.5 — Historical Recovery Extra Preservation
 
 Release date: 2026-10-16
